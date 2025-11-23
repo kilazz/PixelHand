@@ -1,11 +1,11 @@
 # app/core/worker.py
 """
 Contains worker functions for parallel computation (Preprocessing and Inference).
-Optimized for high throughput with Heuristic Loading and Bilinear Resampling.
 """
 
 import gc
 import logging
+import multiprocessing
 import os
 import threading
 import time
@@ -90,8 +90,28 @@ class InferenceEngine:
         if device == "DmlExecutionProvider" and self.is_fp16 and hasattr(opts, "enable_float16_for_dml"):
             opts.enable_float16_for_dml = True
 
+        # CPU Threading Strategy Optimization
         if device == "CPUExecutionProvider":
-            opts.intra_op_num_threads = threads_per_worker
+            total_cores = multiprocessing.cpu_count()
+
+            # If threads_per_worker is default (1) or invalid, try to calculate heuristics
+            if threads_per_worker <= 1:
+                # Heuristic: We usually run 4 parallel workers in Pipeline.
+                # To maximize CPU usage without thrashing, divide cores by workers.
+                estimated_workers = 4
+                threads_to_use = max(1, total_cores // estimated_workers)
+            else:
+                # Use the explicit configuration passed from PipelineManager
+                threads_to_use = threads_per_worker
+
+            opts.intra_op_num_threads = threads_to_use
+            opts.inter_op_num_threads = 1
+
+            # Parallel execution mode helps if we have enough threads per op
+            if threads_to_use > 1:
+                opts.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+            else:
+                opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
 
         onnx_file = model_dir / "visual.onnx"
         self.visual_session = ort.InferenceSession(str(onnx_file), opts, providers=providers)
@@ -101,7 +121,7 @@ class InferenceEngine:
             self.text_session = ort.InferenceSession(str(text_model_path), opts, providers=providers)
             self.text_input_names = {i.name for i in self.text_session.get_inputs()}
 
-        app_logger.info(f"ONNX Engine loaded. Model: {model_dir.name}, Device: {device}, FP16: {self.is_fp16}")
+        app_logger.info(f"ONNX Loaded. Device: {device}, FP16: {self.is_fp16}, Threads/Op: {opts.intra_op_num_threads}")
 
     def get_text_features(self, text: str) -> np.ndarray:
         if not self.text_session:
@@ -125,7 +145,7 @@ class ModelManager:
     """
     Singleton to manage the lifecycle of AI models and Preprocessors.
     Encapsulates state to prevent memory leaks and ensure clean switching.
-    Added RLock to prevent race conditions during model swapping.
+    Uses RLock to prevent race conditions during model swapping.
     """
 
     _instance = None
@@ -160,6 +180,8 @@ class ModelManager:
 
             # Clean up old resources first (protected by lock)
             self.release_resources()
+            # Force GC to clear VRAM/RAM from old model immediately
+            gc.collect()
 
             try:
                 # Load new Inference Engine
@@ -256,7 +278,7 @@ def _read_and_process_batch_for_ai(
         analysis_type = item.analysis_type
 
         try:
-            # 1. Heuristic Shrink (Optimization)
+            # 1. Heuristic Shrink (Optimization) to speed up loading
             try:
                 file_size = path.stat().st_size
                 shrink = 1
@@ -276,12 +298,18 @@ def _read_and_process_batch_for_ai(
                 skipped_tuples.append((str(path), "Image loading failed"))
                 continue
 
+            # Convert to RGBA immediately to normalize further processing
+            if pil_image.mode not in ("RGB", "RGBA", "L"):
+                pil_image = pil_image.convert("RGBA")
+
             processed_image = None
             channel_name: str | None = None
 
             # Handle Channels
             if analysis_type in ("R", "G", "B", "A"):
-                pil_image = pil_image.convert("RGBA")
+                if pil_image.mode != "RGBA":
+                    pil_image = pil_image.convert("RGBA")
+
                 channels = pil_image.split()
                 channel_map = {"R": 0, "G": 1, "B": 2, "A": 3}
                 idx = channel_map[analysis_type]
@@ -290,13 +318,16 @@ def _read_and_process_batch_for_ai(
                     channel_img = channels[idx]
                     if ignore_solid_channels:
                         min_val, max_val = channel_img.getextrema()
+                        # Fast bounds check
                         if max_val < 5 or min_val > 250:
                             continue
+                        # Robust average check
                         stat = ImageStat.Stat(channel_img)
                         mean_val = stat.mean[0]
                         if mean_val < 5 or mean_val > 250:
                             continue
 
+                    # Reconstruct as RGB for the model (R,R,R)
                     processed_image = Image.merge("RGB", (channel_img, channel_img, channel_img))
                     channel_name = analysis_type
 
@@ -306,19 +337,23 @@ def _read_and_process_batch_for_ai(
 
             else:  # Composite
                 if pil_image.mode == "RGBA":
+                    # Paste onto black background to handle transparency
                     processed_image = Image.new("RGB", pil_image.size, (0, 0, 0))
                     processed_image.paste(pil_image, mask=pil_image.split()[3])
                 else:
                     processed_image = pil_image.convert("RGB")
                 channel_name = None
 
-            # 3. Final Resize (Optimization: BILINEAR)
+            # 3. Final Resize (Optimization: BILINEAR is faster than LANCZOS)
             if processed_image:
                 if processed_image.size != input_size:
                     processed_image = processed_image.resize(input_size, Image.Resampling.BILINEAR)
 
                 images.append(processed_image)
                 successful_paths_with_channels.append((str(path), channel_name))
+
+            # Explicitly release original image memory
+            del pil_image
 
         except Exception as e:
             skipped_tuples.append((str(path), f"{type(e).__name__}: {e!s}"))
@@ -342,7 +377,7 @@ def worker_preprocess_threaded(
 
     if not preprocessor:
         # If preprocessor is missing (model unloaded), abort batch
-        output_queue.put((None, [], [(str(i.path), "Model not initialized (race condition fixed)") for i in items]))
+        output_queue.put((None, [], [(str(i.path), "Model not initialized") for i in items]))
         return
 
     images, successful_paths_with_channels, skipped_tuples = _read_and_process_batch_for_ai(
@@ -357,6 +392,11 @@ def worker_preprocess_threaded(
         # HuggingFace Processor runs here (CPU bound, mostly normalization)
         batch_dict = preprocessor(images=images, return_tensors="np")
         pixel_values = batch_dict.pixel_values.astype(dtype)
+
+        # Explicitly delete the image list to free RAM immediately
+        del images
+        gc.collect()
+
         output_queue.put((pixel_values, successful_paths_with_channels, skipped_tuples))
     except Exception as e:
         _log_worker_crash(e, "worker_preprocess_threaded")
@@ -383,6 +423,9 @@ def run_inference_direct(pixel_values: np.ndarray, paths_with_channels: list) ->
 
         engine.visual_session.run_with_iobinding(io_binding)
         embeddings = io_binding.get_outputs()[0].numpy()
+
+        # Free the heavy input tensor immediately
+        del pixel_values
 
         if embeddings is None or embeddings.size == 0:
             return {}, [(p, "Model returned empty") for p, _ in paths_with_channels]

@@ -175,7 +175,7 @@ class DirectXTexLoader(BaseLoader):
         if pil_image.mode != "RGBA":
             return pil_image
 
-        # OPTIMIZATION: Use PIL's C-based getextrema() first.
+        # Use PIL's C-based getextrema() first.
         # It's much faster than np.array(img) for 4K+ textures.
         try:
             extrema = pil_image.getextrema()
@@ -188,14 +188,25 @@ class DirectXTexLoader(BaseLoader):
                     return pil_image.convert("RGB")
 
                 # Case 2: Alpha is fully transparent (0).
-                # Return as is (don't waste CPU unpremultiplying nothing).
+                # Check if RGB channels have content before discarding
                 if alpha_max <= 0:
-                    return pil_image
+                    r_max = extrema[0][1]
+                    g_max = extrema[1][1]
+                    b_max = extrema[2][1]
+
+                    # If image is truly black AND transparent, return as is
+                    if r_max == 0 and g_max == 0 and b_max == 0:
+                        return pil_image
+
+                    # If we are here, it means Alpha=0 but Color>0.
+                    # We intentionally fall through to the NumPy logic below
+                    # which has a specific handler for "Emission/Additive" textures.
+                    pass
+
         except Exception:
-            # Fallback if getextrema fails
             pass
 
-        # Case 3: Mixed Alpha. Convert to NumPy and fix premultiplication.
+        # Case 3: Mixed Alpha or Additive Texture (Alpha=0, Color>0)
         arr = np.array(pil_image)
         rgb, alpha = arr[:, :, :3], arr[:, :, 3]
         alpha_max = np.max(alpha)
@@ -203,6 +214,7 @@ class DirectXTexLoader(BaseLoader):
 
         # Optimization: Pure emission (Alpha ~0 but Color > 0)
         # e.g. FX textures. Force Alpha to max of color.
+        # This makes the fire visible in the viewer (using brightness as opacity).
         if alpha_max < 5 and rgb_max > 0:
             arr[:, :, 3] = np.max(rgb, axis=2)
             return Image.fromarray(arr)
