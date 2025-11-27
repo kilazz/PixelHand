@@ -23,7 +23,7 @@ from app.constants import (
     QuantizationMode,
 )
 
-utils_logger = logging.getLogger("AssetPixelHand.utils")
+utils_logger = logging.getLogger("PixelHand.utils")
 
 
 class UnionFind:

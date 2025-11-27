@@ -29,7 +29,7 @@ from app.data_models import ScanState
 
 from .tasks import ModelConverter
 
-app_logger = logging.getLogger("AssetPixelHand.gui.dialogs")
+app_logger = logging.getLogger("PixelHand.gui.dialogs")
 
 
 class SkippedFilesDialog(QDialog):

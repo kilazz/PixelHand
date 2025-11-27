@@ -24,7 +24,7 @@ if OIIO_AVAILABLE:
     except Exception:
         pass
 
-app_logger = logging.getLogger("AssetPixelHand.oiio_loader")
+app_logger = logging.getLogger("PixelHand.oiio_loader")
 
 
 class OIIOLoader(BaseLoader):

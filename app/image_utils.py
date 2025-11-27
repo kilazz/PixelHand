@@ -9,7 +9,7 @@ import numpy as np
 
 from app.constants import OCIO_AVAILABLE
 
-app_logger = logging.getLogger("AssetPixelHand.image_utils")
+app_logger = logging.getLogger("PixelHand.image_utils")
 
 # --- OCIO Setup ---
 TONE_MAPPER = None

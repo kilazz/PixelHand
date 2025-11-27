@@ -242,7 +242,7 @@ def check_onnx_model_compatibility() -> bool:
 
 def main() -> int:
     """Runs all diagnostic checks and prints a final summary."""
-    print_header("AssetPixelHand Environment Diagnostic Tool", "*")
+    print_header("PixelHand Environment Diagnostic Tool", "*")
 
     check_results = {
         "Python Version": check_python_version(),

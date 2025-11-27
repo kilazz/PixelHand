@@ -38,7 +38,7 @@ if LANCEDB_AVAILABLE:
 if POLARS_AVAILABLE:
     import polars as pl
 
-app_logger = logging.getLogger("AssetPixelHand.pipeline")
+app_logger = logging.getLogger("PixelHand.pipeline")
 
 
 class PipelineManager(QObject):

@@ -22,7 +22,7 @@ try:
 except ImportError:
     NUMBA_AVAILABLE = False
 
-app_logger = logging.getLogger("AssetPixelHand.dds_loader")
+app_logger = logging.getLogger("PixelHand.dds_loader")
 
 
 # 1. Pure NumPy implementation (Fallback)

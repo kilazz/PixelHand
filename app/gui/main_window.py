@@ -43,12 +43,12 @@ from app.utils import (
 )
 
 from .dialogs import ModelConversionDialog, ScanStatisticsDialog, SkippedFilesDialog
-from .options_panel import OptionsPanel, PerformancePanel, ScanOptionsPanel
+from .options_panel import OptionsPanel, PerformancePanel, QCPanel, ScanOptionsPanel
 from .results_panel import ResultsPanel
 from .status_panel import LogPanel, SystemStatusPanel
 from .viewer_panel import ImageViewerPanel
 
-app_logger = logging.getLogger("AssetPixelHand.gui.main")
+app_logger = logging.getLogger("PixelHand.gui.main")
 
 
 class App(QMainWindow):
@@ -56,7 +56,7 @@ class App(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AssetPixelHand")
+        self.setWindowTitle("PixelHand")
         self.setGeometry(100, 100, 1600, 900)
 
         self.setStatusBar(QStatusBar(self))
@@ -78,82 +78,100 @@ class App(QMainWindow):
 
     def _setup_ui(self):
         SPACING = 6
-        main_widget = QWidget()
-        self.setCentralWidget(main_widget)
-        main_layout = QHBoxLayout(main_widget)
+
+        # 1. Main Widget
+        self.main_widget = QWidget()
+        self.setCentralWidget(self.main_widget)
+        main_layout = QHBoxLayout(self.main_widget)
         main_layout.setContentsMargins(SPACING, SPACING, SPACING, SPACING)
         main_layout.setSpacing(0)
-        left_v_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        top_left_container = QWidget()
-        top_left_layout = QVBoxLayout(top_left_container)
+        # 2. Left Splitter (Vertical: Options vs Log)
+        self.left_v_splitter = QSplitter(Qt.Orientation.Vertical)
+
+        # --- Top Left Container (Options) ---
+        self.top_left_container = QWidget()
+        top_left_layout = QVBoxLayout(self.top_left_container)
         top_left_layout.setSpacing(SPACING)
         top_left_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Instantiate Panels
         self.options_panel = OptionsPanel(self.settings_manager)
+        self.qc_panel = QCPanel(self.settings_manager)  # Quality Control Panel
         self.scan_options_panel = ScanOptionsPanel(self.settings_manager)
         self.performance_panel = PerformancePanel(self.settings_manager)
         self.system_status_panel = SystemStatusPanel()
 
+        # Add to Layout
         top_left_layout.addWidget(self.options_panel)
+        top_left_layout.addWidget(self.qc_panel)  # Insert QC Panel
         top_left_layout.addWidget(self.scan_options_panel)
         top_left_layout.addWidget(self.performance_panel)
         top_left_layout.addWidget(self.system_status_panel)
         top_left_layout.addStretch(1)
 
-        log_container = QWidget()
-        log_layout = QVBoxLayout(log_container)
+        # --- Bottom Left Container (Log) ---
+        self.log_container = QWidget()
+        log_layout = QVBoxLayout(self.log_container)
         log_layout.setContentsMargins(0, 0, 0, 0)
         self.log_panel = LogPanel()
         log_layout.addWidget(self.log_panel)
 
-        top_pane_wrapper = QWidget()
-        top_pane_layout = QVBoxLayout(top_pane_wrapper)
+        # --- Wrappers for Splitter (Prevents GC issues) ---
+        self.top_pane_wrapper = QWidget()
+        top_pane_layout = QVBoxLayout(self.top_pane_wrapper)
         top_pane_layout.setContentsMargins(0, 0, 0, SPACING)
-        top_pane_layout.addWidget(top_left_container)
+        top_pane_layout.addWidget(self.top_left_container)
 
-        bottom_pane_wrapper = QWidget()
-        bottom_pane_layout = QVBoxLayout(bottom_pane_wrapper)
+        self.bottom_pane_wrapper = QWidget()
+        bottom_pane_layout = QVBoxLayout(self.bottom_pane_wrapper)
         bottom_pane_layout.setContentsMargins(0, SPACING, 0, 0)
-        bottom_pane_layout.addWidget(log_container)
+        bottom_pane_layout.addWidget(self.log_container)
 
-        left_v_splitter.addWidget(top_pane_wrapper)
-        left_v_splitter.addWidget(bottom_pane_wrapper)
-        left_v_splitter.setStretchFactor(0, 0)
-        left_v_splitter.setStretchFactor(1, 1)
+        self.left_v_splitter.addWidget(self.top_pane_wrapper)
+        self.left_v_splitter.addWidget(self.bottom_pane_wrapper)
+        self.left_v_splitter.setStretchFactor(0, 0)
+        self.left_v_splitter.setStretchFactor(1, 1)
 
+        # 3. Right Splitter (Horizontal: Results vs Viewer)
         self.results_viewer_splitter = QSplitter(Qt.Orientation.Horizontal)
+
         self.results_panel = ResultsPanel(self.file_op_manager)
         self.viewer_panel = ImageViewerPanel(self.settings_manager, QThreadPool.globalInstance(), self.file_op_manager)
 
-        results_pane_wrapper = QWidget()
-        results_pane_layout = QHBoxLayout(results_pane_wrapper)
+        # --- Wrappers for Right Splitter ---
+        self.results_pane_wrapper = QWidget()
+        results_pane_layout = QHBoxLayout(self.results_pane_wrapper)
         results_pane_layout.setContentsMargins(0, 0, SPACING, 0)
         results_pane_layout.addWidget(self.results_panel)
 
-        viewer_pane_wrapper = QWidget()
-        viewer_pane_layout = QHBoxLayout(viewer_pane_wrapper)
+        self.viewer_pane_wrapper = QWidget()
+        viewer_pane_layout = QHBoxLayout(self.viewer_pane_wrapper)
         viewer_pane_layout.setContentsMargins(SPACING, 0, 0, 0)
         viewer_pane_layout.addWidget(self.viewer_panel)
 
-        self.results_viewer_splitter.addWidget(results_pane_wrapper)
-        self.results_viewer_splitter.addWidget(viewer_pane_wrapper)
+        self.results_viewer_splitter.addWidget(self.results_pane_wrapper)
+        self.results_viewer_splitter.addWidget(self.viewer_pane_wrapper)
 
+        # 4. Main Splitter (Left vs Right)
         self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
-        left_pane_wrapper = QWidget()
-        left_pane_layout = QHBoxLayout(left_pane_wrapper)
-        left_pane_layout.setContentsMargins(0, 0, SPACING, 0)
-        left_pane_layout.addWidget(left_v_splitter)
 
-        right_pane_wrapper = QWidget()
-        right_pane_layout = QHBoxLayout(right_pane_wrapper)
+        # --- Wrappers for Main Splitter ---
+        self.left_pane_wrapper = QWidget()
+        left_pane_layout = QHBoxLayout(self.left_pane_wrapper)
+        left_pane_layout.setContentsMargins(0, 0, SPACING, 0)
+        left_pane_layout.addWidget(self.left_v_splitter)
+
+        self.right_pane_wrapper = QWidget()
+        right_pane_layout = QHBoxLayout(self.right_pane_wrapper)
         right_pane_layout.setContentsMargins(SPACING, 0, 0, 0)
         right_pane_layout.addWidget(self.results_viewer_splitter)
 
-        self.main_splitter.addWidget(left_pane_wrapper)
-        self.main_splitter.addWidget(right_pane_wrapper)
+        self.main_splitter.addWidget(self.left_pane_wrapper)
+        self.main_splitter.addWidget(self.right_pane_wrapper)
         main_layout.addWidget(self.main_splitter)
 
+        # Initial Sizes
         self.main_splitter.setSizes([int(self.width() * 0.25), int(self.width() * 0.75)])
         self.results_viewer_splitter.setSizes([int(self.width() * 0.4), int(self.width() * 0.35)])
 
@@ -200,21 +218,23 @@ class App(QMainWindow):
         APP_SIGNAL_BUS.unlock_ui.connect(lambda: self.set_ui_scan_state(is_scanning=False))
         APP_SIGNAL_BUS.status_message_updated.connect(self.statusBar().showMessage)
 
+        # Options Panel Signals
         self.options_panel.scan_requested.connect(self._start_scan)
         self.options_panel.clear_scan_cache_requested.connect(self._clear_scan_cache)
         self.options_panel.clear_models_cache_requested.connect(self._clear_models_cache)
         self.options_panel.clear_all_data_requested.connect(self._clear_app_data)
         self.options_panel.scan_context_changed.connect(self.performance_panel.update_precision_presets)
 
+        # Connect QC Panel enable/disable logic based on mode
+        self.options_panel.qc_mode_toggled.connect(self.qc_panel.setEnabled)
+
+        # Results & Viewer Signals
         self.results_panel.results_view.selectionModel().selectionChanged.connect(self._on_results_selection_changed)
         self.results_panel.visible_results_changed.connect(self.viewer_panel.display_results)
-
         self.results_panel.results_model.fetch_completed.connect(self._on_group_fetch_finished)
 
         self.viewer_panel.group_became_empty.connect(self.results_panel.results_model.remove_group_by_id)
         self.viewer_panel.group_became_empty.connect(self.results_panel._update_summary)
-
-        # --- Connection for Auto-Removal of Missing Files ---
         self.viewer_panel.file_missing_detected.connect(self._on_external_file_missing)
 
     @Slot(Path)
@@ -321,7 +341,6 @@ class App(QMainWindow):
 
     def _get_config(self) -> ScanConfig | None:
         try:
-            # Handle empty/none sample path properly
             sample_path = self.options_panel._sample_path
 
             # Handle comparison folder path
@@ -358,6 +377,7 @@ class App(QMainWindow):
     def set_ui_scan_state(self, is_scanning: bool):
         for panel in [
             self.options_panel,
+            self.qc_panel,  # Include QC Panel in scan lock logic
             self.performance_panel,
             self.scan_options_panel,
             self.system_status_panel,
@@ -368,6 +388,9 @@ class App(QMainWindow):
 
         if not is_scanning:
             self.scan_options_panel._update_dependent_ui_state()
+            # Restore QC Panel state based on context (if Folder B is active)
+            # The signal will fire again if the user edits text, but we can explicitly re-check:
+            self.options_panel._update_scan_context()
 
         self.options_panel.set_scan_button_state(is_scanning)
         QApplication.processEvents()

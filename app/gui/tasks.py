@@ -35,7 +35,7 @@ from app.data_models import FileOperation
 from app.image_io import get_image_metadata, load_image
 from app.utils import get_model_folder_name
 
-app_logger = logging.getLogger("AssetPixelHand.gui.tasks")
+app_logger = logging.getLogger("PixelHand.gui.tasks")
 
 
 class ModelConverter(QRunnable):

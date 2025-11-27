@@ -36,7 +36,7 @@ from app.view_models import ImageComparerState
 if TYPE_CHECKING:
     from app.services.file_operation_manager import FileOperationManager
 
-app_logger = logging.getLogger("AssetPixelHand.gui.viewer")
+app_logger = logging.getLogger("PixelHand.gui.viewer")
 
 
 def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:

@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from app.data_models import AnalysisItem
 
 
-app_logger = logging.getLogger("AssetPixelHand.worker")
+app_logger = logging.getLogger("PixelHand.worker")
 
 
 def normalize_vectors_numpy(embeddings: np.ndarray) -> np.ndarray:

@@ -19,7 +19,7 @@ from app.loaders import (
     PillowLoader,
 )
 
-app_logger = logging.getLogger("AssetPixelHand.image_io")
+app_logger = logging.getLogger("PixelHand.image_io")
 
 # --- Loader Instantiation and Prioritization ---
 # DirectXTex is preferred for DDS as it handles modern BC compression and cubemaps best.

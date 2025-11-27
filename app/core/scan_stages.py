@@ -50,7 +50,7 @@ if LANCEDB_AVAILABLE:
     from .engines import LanceDBSimilarityEngine
 
 
-app_logger = logging.getLogger("AssetPixelHand.scan_stages")
+app_logger = logging.getLogger("PixelHand.scan_stages")
 
 NodeType = TypeVar("NodeType")
 

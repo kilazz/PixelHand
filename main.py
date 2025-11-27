@@ -39,7 +39,7 @@ def log_global_crash(exc_type, exc_value, exc_traceback):
 
     # Try logging via standard logger
     with contextlib.suppress(Exception):
-        logging.getLogger("AssetPixelHand.main").critical(error_message)
+        logging.getLogger("PixelHand.main").critical(error_message)
 
     # Save to crash file
     try:
@@ -80,8 +80,8 @@ def run_application():
     # Configure logging and pass the global signal bus
     setup_logging(APP_SIGNAL_BUS, force_debug=IS_DEBUG_MODE)
 
-    app_logger = logging.getLogger("AssetPixelHand.main")
-    app_logger.info("Starting AssetPixelHand application...")
+    app_logger = logging.getLogger("PixelHand.main")
+    app_logger.info("Starting PixelHand application...")
 
     main_window = App()
     main_window.show()

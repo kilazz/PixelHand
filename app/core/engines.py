@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     pass
 
 
-app_logger = logging.getLogger("AssetPixelHand.engines")
+app_logger = logging.getLogger("PixelHand.engines")
 
 if LANCEDB_AVAILABLE:
 

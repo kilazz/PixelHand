@@ -36,7 +36,7 @@ from app.gui.models import ResultsProxyModel, ResultsTreeModel
 if TYPE_CHECKING:
     from app.services.file_operation_manager import FileOperationManager
 
-app_logger = logging.getLogger("AssetPixelHand.gui.results")
+app_logger = logging.getLogger("PixelHand.gui.results")
 
 
 def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:

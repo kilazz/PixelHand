@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableDelayedExpansion
-title AssetPixelHand Launcher (DirectML)
+title PixelHand Launcher (DirectML)
 
 :: CHANGE DIRECTORY TO THE SCRIPT'S LOCATION
 cd /d "%~dp0"
@@ -22,7 +22,7 @@ for %%a in (%*) do (
 
 :: --- Header ---
 echo =======================================================
-echo         AssetPixelHand Launcher for [DirectML]
+echo         PixelHand Launcher for [DirectML]
 echo =======================================================
 echo.
 
@@ -84,7 +84,7 @@ echo.
 
 :: --- [5/5] Launching Application ---
 echo =======================================================
-echo [5/5] Starting AssetPixelHand with [%ONNX_BACKEND%]...
+echo [5/5] Starting PixelHand with [%ONNX_BACKEND%]...
 echo =======================================================
 echo.
 

@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "AssetPixelHand"
+name = "PixelHand"
 description = "An AI-powered tool for finding and managing duplicate and visually similar images."
 version = "1.0.0"
 readme = "README.md"

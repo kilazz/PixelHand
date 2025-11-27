@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from app.data_models import ScanConfig
 
 
-app_logger = logging.getLogger("AssetPixelHand.cache")
+app_logger = logging.getLogger("PixelHand.cache")
 
 
 class CacheManager:

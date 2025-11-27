@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.constants import APP_TEMP_DIR, QuantizationMode
 
-logger = logging.getLogger("AssetPixelHand.core.optimizer")
+logger = logging.getLogger("PixelHand.core.optimizer")
 
 
 def optimize_model_post_export(

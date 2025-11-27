@@ -1,4 +1,4 @@
-# AssetPixelHand
+# PixelHand
 **An AI-powered tool for finding and managing duplicate and visually similar images.**
 
 > **Note: This is a Prototype**

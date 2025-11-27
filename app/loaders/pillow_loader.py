@@ -9,7 +9,7 @@ from app.constants import PILLOW_AVAILABLE
 
 from .base_loader import BaseLoader
 
-app_logger = logging.getLogger("AssetPixelHand.pillow_loader")
+app_logger = logging.getLogger("PixelHand.pillow_loader")
 
 
 class PillowLoader(BaseLoader):

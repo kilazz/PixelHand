@@ -22,7 +22,7 @@ from app.services.signal_bus import SignalBus
 if LANCEDB_AVAILABLE:
     import lancedb
 
-app_logger = logging.getLogger("AssetPixelHand.scanner_helpers")
+app_logger = logging.getLogger("PixelHand.scanner_helpers")
 
 
 class FileFinder:

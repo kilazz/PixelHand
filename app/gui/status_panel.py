@@ -20,7 +20,7 @@ from app.constants import (
 )
 
 # Logger specifically for status/log panels
-app_logger = logging.getLogger("AssetPixelHand.gui.status")
+app_logger = logging.getLogger("PixelHand.gui.status")
 
 
 class SystemStatusPanel(QGroupBox):

@@ -39,6 +39,11 @@ class QtHandler(logging.Handler):
             # Check if the emitter has the specific signal before emitting
             if hasattr(self.signals_emitter, "log_message"):
                 self.signals_emitter.log_message.emit(message, log_level)
+        except RuntimeError:
+            # Catch "Internal C++ object already deleted" errors.
+            # This happens if a log message is emitted while the application
+            # is shutting down and the UI widgets have already been destroyed.
+            pass
         except Exception:
             self.handleError(record)
 

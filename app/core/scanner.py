@@ -24,7 +24,7 @@ from app.services.signal_bus import APP_SIGNAL_BUS
 if LANCEDB_AVAILABLE:
     import lancedb
 
-app_logger = logging.getLogger("AssetPixelHand.scanner")
+app_logger = logging.getLogger("PixelHand.scanner")
 
 
 class ScannerCore(QObject):

@@ -3,6 +3,7 @@
 Contains different strategies for the scanning process.
 """
 
+import contextlib
 import copy
 import logging
 import threading
@@ -31,7 +32,7 @@ from app.data_models import (
     ScanMode,
     ScanState,
 )
-from app.image_io import get_image_metadata
+from app.image_io import get_image_metadata, load_image
 from app.services.signal_bus import SignalBus
 
 from .helpers import FileFinder
@@ -52,7 +53,12 @@ if LANCEDB_AVAILABLE:
     pass
 
 
-app_logger = logging.getLogger("AssetPixelHand.strategies")
+app_logger = logging.getLogger("PixelHand.strategies")
+
+
+def is_power_of_two(n: int) -> bool:
+    """Checks if an integer is a power of two."""
+    return (n != 0) and ((n & (n - 1)) == 0)
 
 
 class ScanStrategy(ABC):
@@ -478,45 +484,56 @@ class FolderComparisonStrategy(ScanStrategy):
             self.scanner_core._finalize_scan(None, 0, None, 0, [])
             return
 
+        # Determine Key Function based on "Match by Stem" setting
+        # If enabled, key is stem (e.g., 'image' from 'image.jpg').
+        # If disabled, key is name (e.g., 'image.jpg').
+        # Using lowercase for case-insensitive matching on Windows/generic safe matching
+        def get_key(p: Path):
+            return p.stem.lower() if self.config.match_by_stem else p.name.lower()
+
         self.state.set_phase(f"Scanning Folder A: {folder_a.name}...", 0.1)
 
-        # Scan Folder A
         finder_a = FileFinder(
             self.state, folder_a, self.config.excluded_folders, self.config.selected_extensions, self.signals
         )
-        # Dictionary mapping Filename -> Full Path
-        # Note: If duplicate filenames exist within Folder A, the last one found wins.
-        files_a = {p.name: p for batch in finder_a.stream_files(stop_event) for p, _ in batch}
+        # Note: If multiple files map to same key (e.g. image.jpg and image.png when matching by stem),
+        # the last one wins. Ideally folders shouldn't have conflicts like this for direct comparison.
+        files_a = {get_key(p): p for batch in finder_a.stream_files(stop_event) for p, _ in batch}
 
         if stop_event.is_set():
             return
 
         self.state.set_phase(f"Scanning Folder B: {folder_b.name}...", 0.1)
 
-        # Scan Folder B
         finder_b = FileFinder(
             self.state, folder_b, self.config.excluded_folders, self.config.selected_extensions, self.signals
         )
-        files_b = {p.name: p for batch in finder_b.stream_files(stop_event) for p, _ in batch}
+        files_b = {get_key(p): p for batch in finder_b.stream_files(stop_event) for p, _ in batch}
 
         if stop_event.is_set():
             return
 
-        # Find intersections based on exact filename
-        common_names = set(files_a.keys()) & set(files_b.keys())
+        # Find intersections based on key
+        common_keys = set(files_a.keys()) & set(files_b.keys())
 
-        self.state.set_phase("Comparing metadata & resolutions...", 0.8)
+        self.state.set_phase("Comparing metadata & QC...", 0.8)
 
         final_groups: DuplicateResults = {}
-        total_common = len(common_names)
+        total_common = len(common_keys)
         processed = 0
 
-        for name in common_names:
+        # Import ImageStat for Solid Color Check only if needed
+        ImageStat = None
+        if self.config.qc_check_solid_color:
+            with contextlib.suppress(ImportError):
+                from PIL import ImageStat
+
+        for key in common_keys:
             if stop_event.is_set():
                 break
 
-            path_a = files_a[name]
-            path_b = files_b[name]
+            path_a = files_a[key]
+            path_b = files_b[key]
 
             # Read metadata headers (fast)
             meta_a = get_image_metadata(path_a)
@@ -525,7 +542,7 @@ class FolderComparisonStrategy(ScanStrategy):
             if not meta_a or not meta_b:
                 continue
 
-            # Create Fingerprints (hashes empty, purely metadata containers)
+            # Create Fingerprints
             fp_a = ImageFingerprint(path=path_a, hashes=np.array([]), **meta_a)
             fp_b = ImageFingerprint(path=path_b, hashes=np.array([]), **meta_b)
 
@@ -533,20 +550,124 @@ class FolderComparisonStrategy(ScanStrategy):
             area_a = fp_a.resolution[0] * fp_a.resolution[1]
             area_b = fp_b.resolution[0] * fp_b.resolution[1]
 
-            # Determine Best vs Duplicate
+            issues = []
+
+            # 1. Resolution Check
+            if area_b < area_a:
+                issues.append("Resolution Downgrade")
+
+            # 2. Alpha Channel Check (QC)
+            if self.config.qc_check_alpha:
+                if fp_a.has_alpha and not fp_b.has_alpha:
+                    issues.append("Lost Alpha Channel")
+                elif not fp_a.has_alpha and fp_b.has_alpha:
+                    issues.append("Added Empty Alpha")
+
+            # 3. NPOT Check (QC) - Only check destination (Folder B)
+            if self.config.qc_check_npot:
+                w, h = fp_b.resolution
+                if not is_power_of_two(w) or not is_power_of_two(h):
+                    issues.append("NPOT (Bad Size)")
+
+            # 4. Mip-Map Check (QC)
+            if self.config.qc_check_mipmaps:
+                # Check target file (B). Ignore very small textures (<64px)
+                min_dim = min(fp_b.resolution)
+                if min_dim > 64 and fp_b.mipmap_count <= 1:
+                    issues.append("Missing Mipmaps")
+
+            # 5. File Size Bloat Check (QC)
+            if self.config.qc_check_size_bloat and fp_b.file_size > (fp_a.file_size * 1.5):
+                issues.append("Size Bloat (>1.5x)")
+
+            # 6. Aspect Ratio Check (Implicit QC)
+            ratio_a = round(fp_a.resolution[0] / fp_a.resolution[1], 3) if fp_a.resolution[1] else 0
+            ratio_b = round(fp_b.resolution[0] / fp_b.resolution[1], 3) if fp_b.resolution[1] else 0
+            if ratio_a != ratio_b:
+                issues.append("Aspect Ratio Change")
+
+            # 7. Color Space Mismatch (QC)
+            if self.config.qc_check_color_space:
+                # Simple string comparison from metadata
+                cs_a = fp_a.color_space or "Unknown"
+                cs_b = fp_b.color_space or "Unknown"
+                if cs_a != cs_b and cs_a != "Unknown" and cs_b != "Unknown":
+                    issues.append(f"Color Space Diff ({cs_a}->{cs_b})")
+
+            # 8. Bit Depth Check (QC)
+            if self.config.qc_check_bit_depth and fp_a.bit_depth != fp_b.bit_depth:
+                issues.append(f"Bit Depth Change ({fp_a.bit_depth}->{fp_b.bit_depth})")
+
+            # 9. Solid Color Check (QC - Expensive!)
+            if self.config.qc_check_solid_color and ImageStat:
+                # Only check destination (B) to save time
+                try:
+                    # Load highly downscaled version (e.g., 32px) to detect flatness
+                    img = load_image(path_b, shrink=max(1, min(fp_b.resolution) // 32))
+                    if img:
+                        stat = ImageStat.Stat(img)
+                        # Check variance. If variance is near 0, it's a solid color.
+                        # Sum variance across channels
+                        total_variance = sum(stat.var)
+                        if total_variance < 10.0:  # Threshold for "Solid enough"
+                            issues.append("Solid Color Detected")
+                except Exception:
+                    pass
+
+            # 10. Compression Format Mismatch (QC)
+            if self.config.qc_check_compression:
+                fmt_a = str(fp_a.compression_format).upper()
+                fmt_b = str(fp_b.compression_format).upper()
+
+                lossless_formats = ["PNG", "TGA", "BMP", "PSD", "TIFF", "TIF"]
+
+                # Case A: Source Lossless -> Dest Lossy (BC/DXT) - Often normal, but note it
+                # if any(f in fmt_a for f in lossless_formats) and ("BC" in fmt_b or "DXT" in fmt_b):
+                #     pass
+
+                # Case B: Format changed between compressed formats (e.g. BC7 -> BC1)
+                if fmt_a != fmt_b and "BC" in fmt_a and "BC" in fmt_b:
+                    issues.append(f"Format Change ({fmt_a}->{fmt_b})")
+
+                # Case C: Source Compressed -> Dest Lossless (Decompressed?)
+                elif ("BC" in fmt_a or "DXT" in fmt_a) and any(f in fmt_b for f in lossless_formats):
+                    issues.append(f"Decompressed ({fmt_a}->{fmt_b})")
+
+            # 11. Block Compression Alignment Check (QC)
+            if self.config.qc_check_block_align:
+                # Check only target folder (B)
+                w, h = fp_b.resolution
+                # DXT/BC textures require dimensions divisible by 4 to avoid artifacts
+                if w > 0 and h > 0 and (w % 4 != 0 or h % 4 != 0):
+                    issues.append(f"Bad Alignment ({w}x{h})")
+
+            # Filtering Logic: Hide same resolution groups IF they have no issues
+            if self.config.hide_same_resolution_groups and area_a == area_b and not issues:
+                processed += 1
+                if processed % 50 == 0:
+                    self.state.update_progress(processed, total_common)
+                continue
+
+            # Construct Diff Method String
+            if issues:
+                diff_method = " | ".join(issues)
+            elif area_a == area_b:
+                diff_method = "Same Size"
+            else:
+                # Case where B > A, not technically a downgrade but a difference
+                diff_method = "Higher Resolution"
+
+            # Determine Best vs Duplicate based on Resolution
             if area_a >= area_b:
                 best = fp_a
                 duplicate = fp_b
-                diff_method = "Same Size" if area_a == area_b else "Smaller Resolution"
             else:
                 best = fp_b
                 duplicate = fp_a
-                diff_method = "Smaller Resolution"
 
-            # 100% score indicates they are matched by name
             score = 100
 
-            # Add to groups: key=Best, value=Set of duplicates
+            # Add to groups
             final_groups[best] = {(duplicate, score, diff_method)}
 
             processed += 1
@@ -554,8 +675,6 @@ class FolderComparisonStrategy(ScanStrategy):
                 self.state.update_progress(processed, total_common)
 
         # Report results
-        # We use ScanMode.DUPLICATES for the finalize step because the UI presentation
-        # for folder comparison is identical to duplicate visualization (Groups of 2).
         self.scanner_core._finalize_scan(
             {"db_path": None, "groups_data": final_groups, "lazy_summary": None},
             len(final_groups),

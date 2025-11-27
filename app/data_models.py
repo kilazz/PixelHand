@@ -285,7 +285,24 @@ class ScanConfig:
     model_info: dict = field(default_factory=dict)
     sample_path: Path | None = None
     search_query: str | None = None
+
+    # Folder Compare / QC specific
     comparison_folder_path: Path | None = None
+
+    # QC Flags
+    hide_same_resolution_groups: bool = False
+    qc_check_alpha: bool = False
+    qc_check_npot: bool = False
+    qc_check_mipmaps: bool = False
+    qc_check_size_bloat: bool = False
+    qc_check_solid_color: bool = False
+    qc_check_color_space: bool = False
+    qc_check_bit_depth: bool = False
+    match_by_stem: bool = False
+
+    # New QC Flags
+    qc_check_compression: bool = False
+    qc_check_block_align: bool = False
 
 
 @dataclass
@@ -308,6 +325,21 @@ class HashingSettings:
     channel_g: bool = True
     channel_b: bool = True
     channel_a: bool = True
+
+    # QC / Compare settings
+    hide_same_resolution_groups: bool = False
+    qc_check_alpha: bool = False
+    qc_check_npot: bool = False
+    qc_check_mipmaps: bool = False
+    qc_check_size_bloat: bool = False
+    qc_check_solid_color: bool = False
+    qc_check_color_space: bool = False
+    qc_check_bit_depth: bool = False
+    match_by_stem: bool = False
+
+    # New QC Flags
+    qc_check_compression: bool = False
+    qc_check_block_align: bool = False
 
     # Auto-Cleanup logic
     last_model_name: str = ""

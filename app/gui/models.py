@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from app.view_models import ImageComparerState
 
 
-app_logger = logging.getLogger("AssetPixelHand.gui.models")
+app_logger = logging.getLogger("PixelHand.gui.models")
 
 # Custom role for sorting
 SortRole = Qt.ItemDataRole.UserRole + 1

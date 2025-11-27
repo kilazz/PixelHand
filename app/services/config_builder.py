@@ -116,6 +116,19 @@ class ScanConfigBuilder:
             sample_path=self.sample_path,
             search_query=self.search_query if self.scan_mode == ScanMode.TEXT_SEARCH else None,
             comparison_folder_path=self.comparison_folder_path,
+            # QC Flags
+            hide_same_resolution_groups=self.settings.hashing.hide_same_resolution_groups,
+            qc_check_alpha=self.settings.hashing.qc_check_alpha,
+            qc_check_npot=self.settings.hashing.qc_check_npot,
+            qc_check_mipmaps=self.settings.hashing.qc_check_mipmaps,
+            qc_check_size_bloat=self.settings.hashing.qc_check_size_bloat,
+            qc_check_solid_color=self.settings.hashing.qc_check_solid_color,
+            qc_check_color_space=self.settings.hashing.qc_check_color_space,
+            qc_check_bit_depth=self.settings.hashing.qc_check_bit_depth,
+            match_by_stem=self.settings.hashing.match_by_stem,
+            # New QC Flags
+            qc_check_compression=self.settings.hashing.qc_check_compression,
+            qc_check_block_align=self.settings.hashing.qc_check_block_align,
         )
 
     def _validate_folder_path(self) -> Path:

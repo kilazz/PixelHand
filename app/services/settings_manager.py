@@ -131,7 +131,7 @@ class SettingsManager(QObject):
             self._settings.hashing.compare_by_channel = checked
             self._request_save()
 
-    # --- New Slots for Channel Selection ---
+    # --- Slots for Channel Selection ---
     @Slot(bool)
     def set_channel_r(self, checked: bool):
         if self._settings.hashing.channel_r != checked:
@@ -166,6 +166,73 @@ class SettingsManager(QObject):
     def set_ignore_solid_channels(self, checked: bool):
         if self._settings.hashing.ignore_solid_channels != checked:
             self._settings.hashing.ignore_solid_channels = checked
+            self._request_save()
+
+    # --- Slots for QC / Folder Compare Settings ---
+    @Slot(bool)
+    def set_hide_same_resolution_groups(self, checked: bool):
+        if self._settings.hashing.hide_same_resolution_groups != checked:
+            self._settings.hashing.hide_same_resolution_groups = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_alpha(self, checked: bool):
+        if self._settings.hashing.qc_check_alpha != checked:
+            self._settings.hashing.qc_check_alpha = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_npot(self, checked: bool):
+        if self._settings.hashing.qc_check_npot != checked:
+            self._settings.hashing.qc_check_npot = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_mipmaps(self, checked: bool):
+        if self._settings.hashing.qc_check_mipmaps != checked:
+            self._settings.hashing.qc_check_mipmaps = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_size_bloat(self, checked: bool):
+        if self._settings.hashing.qc_check_size_bloat != checked:
+            self._settings.hashing.qc_check_size_bloat = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_solid_color(self, checked: bool):
+        if self._settings.hashing.qc_check_solid_color != checked:
+            self._settings.hashing.qc_check_solid_color = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_color_space(self, checked: bool):
+        if self._settings.hashing.qc_check_color_space != checked:
+            self._settings.hashing.qc_check_color_space = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_bit_depth(self, checked: bool):
+        if self._settings.hashing.qc_check_bit_depth != checked:
+            self._settings.hashing.qc_check_bit_depth = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_match_by_stem(self, checked: bool):
+        if self._settings.hashing.match_by_stem != checked:
+            self._settings.hashing.match_by_stem = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_compression(self, checked: bool):
+        if self._settings.hashing.qc_check_compression != checked:
+            self._settings.hashing.qc_check_compression = checked
+            self._request_save()
+
+    @Slot(bool)
+    def set_qc_check_block_align(self, checked: bool):
+        if self._settings.hashing.qc_check_block_align != checked:
+            self._settings.hashing.qc_check_block_align = checked
             self._request_save()
 
     @Slot(bool)

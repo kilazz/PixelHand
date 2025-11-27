@@ -41,7 +41,105 @@ from app.data_models import AppSettings, ScanMode
 from app.gui.dialogs import FileTypesDialog
 from app.services.settings_manager import SettingsManager
 
-app_logger = logging.getLogger("AssetPixelHand.gui.options")
+app_logger = logging.getLogger("PixelHand.gui.options")
+
+
+class QCPanel(QGroupBox):
+    """
+    Separate panel for Quality Control options.
+    Always visible, but enabled only when Folder Compare mode is active.
+    """
+
+    def __init__(self, settings_manager: SettingsManager):
+        super().__init__("Quality Control (QC) Options")
+        self.settings_manager = settings_manager
+        self.setEnabled(False)  # Disabled by default
+        self._init_ui()
+        self.load_settings(settings_manager.settings)
+        self._connect_signals()
+
+    def _init_ui(self):
+        # Use Grid Layout for 2 columns to save space
+        qc_grid = QGridLayout(self)
+        qc_grid.setColumnStretch(0, 1)
+        qc_grid.setColumnStretch(1, 1)
+
+        # --- Column 1: General Logic & Basic Checks ---
+        self.hide_same_res_check = QCheckBox("Hide matches (Show diffs only)")
+        self.hide_same_res_check.setToolTip("Ignore files where name and resolution match exactly.")
+        self.hide_same_res_check.setStyleSheet("color: #FF9800; font-weight: bold;")
+
+        self.match_stem_check = QCheckBox("Match by stem (Ignore ext)")
+        self.match_stem_check.setToolTip("Matches 'file.tga' with 'file.dds'.")
+
+        self.check_alpha_check = QCheckBox("Check Alpha Mismatch")
+        self.check_alpha_check.setToolTip("Flags if Alpha channel presence differs.")
+
+        self.check_npot_check = QCheckBox("Check NPOT (Power of 2)")
+        self.check_npot_check.setToolTip("Flags non-power-of-two dimensions in Folder B.")
+
+        # New: Compression Check
+        self.check_compression_check = QCheckBox("Check Compression Change")
+        self.check_compression_check.setToolTip("Flags if format changed from Lossless to Lossy or between BC formats.")
+
+        qc_grid.addWidget(self.hide_same_res_check, 0, 0)
+        qc_grid.addWidget(self.match_stem_check, 1, 0)
+        qc_grid.addWidget(self.check_alpha_check, 2, 0)
+        qc_grid.addWidget(self.check_npot_check, 3, 0)
+        qc_grid.addWidget(self.check_compression_check, 4, 0)
+
+        # --- Column 2: Advanced Checks ---
+        self.check_mipmaps_check = QCheckBox("Check Mip-Maps")
+        self.check_mipmaps_check.setToolTip("Flags missing mipmaps in Folder B.")
+
+        self.check_bloat_check = QCheckBox("Check Size Bloat")
+        self.check_bloat_check.setToolTip("Flags if file B is significantly larger (>1.5x) than A.")
+
+        self.check_colorspace_check = QCheckBox("Check Color Space")
+        self.check_colorspace_check.setToolTip("Flags metadata color space mismatch.")
+
+        self.check_bitdepth_check = QCheckBox("Check Bit Depth")
+        self.check_bitdepth_check.setToolTip("Flags bit depth differences (e.g. 16 vs 8 bit).")
+
+        self.check_solid_check = QCheckBox("Check Solid Color (Slow)")
+        self.check_solid_check.setToolTip("Reads pixels to find solid-color textures.\nWarning: Slower scan.")
+
+        # New: Alignment Check
+        self.check_align_check = QCheckBox("Check Block Alignment (4px)")
+        self.check_align_check.setToolTip("Flags dimensions not divisible by 4 (required for DXT/BC compression).")
+
+        qc_grid.addWidget(self.check_mipmaps_check, 0, 1)
+        qc_grid.addWidget(self.check_bloat_check, 1, 1)
+        qc_grid.addWidget(self.check_colorspace_check, 2, 1)
+        qc_grid.addWidget(self.check_bitdepth_check, 3, 1)
+        qc_grid.addWidget(self.check_solid_check, 4, 1)
+        qc_grid.addWidget(self.check_align_check, 5, 1)
+
+    def _connect_signals(self):
+        self.hide_same_res_check.toggled.connect(self.settings_manager.set_hide_same_resolution_groups)
+        self.match_stem_check.toggled.connect(self.settings_manager.set_match_by_stem)
+        self.check_alpha_check.toggled.connect(self.settings_manager.set_qc_check_alpha)
+        self.check_npot_check.toggled.connect(self.settings_manager.set_qc_check_npot)
+        self.check_mipmaps_check.toggled.connect(self.settings_manager.set_qc_check_mipmaps)
+        self.check_bloat_check.toggled.connect(self.settings_manager.set_qc_check_size_bloat)
+        self.check_solid_check.toggled.connect(self.settings_manager.set_qc_check_solid_color)
+        self.check_colorspace_check.toggled.connect(self.settings_manager.set_qc_check_color_space)
+        self.check_bitdepth_check.toggled.connect(self.settings_manager.set_qc_check_bit_depth)
+        self.check_compression_check.toggled.connect(self.settings_manager.set_qc_check_compression)
+        self.check_align_check.toggled.connect(self.settings_manager.set_qc_check_block_align)
+
+    def load_settings(self, s: AppSettings):
+        self.hide_same_res_check.setChecked(s.hashing.hide_same_resolution_groups)
+        self.match_stem_check.setChecked(s.hashing.match_by_stem)
+        self.check_alpha_check.setChecked(s.hashing.qc_check_alpha)
+        self.check_npot_check.setChecked(s.hashing.qc_check_npot)
+        self.check_mipmaps_check.setChecked(s.hashing.qc_check_mipmaps)
+        self.check_bloat_check.setChecked(s.hashing.qc_check_size_bloat)
+        self.check_solid_check.setChecked(s.hashing.qc_check_solid_color)
+        self.check_colorspace_check.setChecked(s.hashing.qc_check_color_space)
+        self.check_bitdepth_check.setChecked(s.hashing.qc_check_bit_depth)
+        self.check_compression_check.setChecked(s.hashing.qc_check_compression)
+        self.check_align_check.setChecked(s.hashing.qc_check_block_align)
 
 
 class OptionsPanel(QGroupBox):
@@ -53,6 +151,7 @@ class OptionsPanel(QGroupBox):
     clear_all_data_requested = Signal()
     log_message = Signal(str, str)
     scan_context_changed = Signal(str)
+    qc_mode_toggled = Signal(bool)
 
     def __init__(self, settings_manager: SettingsManager):
         super().__init__("Scan Configuration")
@@ -69,14 +168,20 @@ class OptionsPanel(QGroupBox):
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
+
+        # 1. Main Form Layout (Inputs)
         self.form_layout = QFormLayout()
         self.form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         self.form_layout.setSpacing(8)
+
         self._create_path_widgets()
         self._create_search_widgets()
         self._create_core_scan_widgets()
-        self.theme_menu = self._create_theme_menu()
+
         main_layout.addLayout(self.form_layout)
+
+        # 2. Theme Menu & Action Buttons
+        self.theme_menu = self._create_theme_menu()
         self._create_action_buttons(main_layout)
 
     def _create_path_widgets(self):
@@ -101,7 +206,10 @@ class OptionsPanel(QGroupBox):
         folder_b_layout.addWidget(self.folder_b_entry)
         folder_b_layout.addWidget(self.browse_folder_b_button)
 
-        self.form_layout.addRow("Folder B:", folder_b_layout)
+        self.folder_b_label = QLabel("Folder B:")
+        self.folder_b_container = QWidget()
+        self.folder_b_container.setLayout(folder_b_layout)
+        self.form_layout.addRow(self.folder_b_label, self.folder_b_container)
 
     def _create_search_widgets(self):
         self.search_entry = QLineEdit()
@@ -225,7 +333,7 @@ class OptionsPanel(QGroupBox):
         # Determine Scan Mode
         if has_folder_b:
             self.current_scan_mode = ScanMode.FOLDER_COMPARE
-            self.scan_button_text = "Compare Resolutions"
+            self.scan_button_text = "Compare Folders"
 
             # Disable Search inputs in compare mode to avoid confusion
             self.search_entry.setEnabled(False)
@@ -234,6 +342,9 @@ class OptionsPanel(QGroupBox):
 
             # Disable similarity threshold (not used in metadata compare)
             self.threshold_spinbox.setEnabled(False)
+
+            # Enable QC Panel
+            self.qc_mode_toggled.emit(True)
 
         elif is_ai_on and has_sample and supports_image:
             self.current_scan_mode = ScanMode.SAMPLE_SEARCH
@@ -244,6 +355,7 @@ class OptionsPanel(QGroupBox):
             self.browse_sample_button.setEnabled(True)
             self.clear_sample_button.setVisible(True)
             self.threshold_spinbox.setEnabled(True)
+            self.qc_mode_toggled.emit(False)
 
         elif is_ai_on and has_text_query and supports_text:
             self.current_scan_mode = ScanMode.TEXT_SEARCH
@@ -254,6 +366,7 @@ class OptionsPanel(QGroupBox):
             self.browse_sample_button.setEnabled(True)
             self.clear_sample_button.setVisible(False)
             self.threshold_spinbox.setEnabled(True)
+            self.qc_mode_toggled.emit(False)
 
         else:
             self.current_scan_mode = ScanMode.DUPLICATES
@@ -264,6 +377,7 @@ class OptionsPanel(QGroupBox):
             self.browse_sample_button.setEnabled(is_ai_on and supports_image)
             self.clear_sample_button.setVisible(False)
             self.threshold_spinbox.setEnabled(is_ai_on)
+            self.qc_mode_toggled.emit(False)
 
         # UI Visual Updates
         if not is_ai_on:
