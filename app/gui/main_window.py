@@ -321,15 +321,24 @@ class App(QMainWindow):
 
     def _get_config(self) -> ScanConfig | None:
         try:
+            # Handle empty/none sample path properly
+            sample_path = self.options_panel._sample_path
+
+            # Handle comparison folder path
+            comp_path_str = self.options_panel.folder_b_entry.text().strip()
+            comp_path = Path(comp_path_str) if comp_path_str else None
+
             builder = ScanConfigBuilder(
                 settings=self.settings_manager.settings,
                 scan_mode=self.options_panel.current_scan_mode,
                 search_query=self.options_panel.search_entry.text(),
-                sample_path=self.options_panel._sample_path,
+                sample_path=sample_path,
+                comparison_folder_path=comp_path,
             )
             return builder.build()
         except ValueError as e:
             APP_SIGNAL_BUS.log_message.emit(f"Configuration Error: {e}", "error")
+            self.on_scan_end()  # Ensure UI resets if config fails
             return None
 
     def _run_model_conversion(self, config: ScanConfig) -> bool:

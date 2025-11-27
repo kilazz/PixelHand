@@ -80,6 +80,7 @@ class OptionsPanel(QGroupBox):
         self._create_action_buttons(main_layout)
 
     def _create_path_widgets(self):
+        # Folder A (Source)
         self.folder_path_entry = QLineEdit()
         self.browse_folder_button = QPushButton("...")
         self.browse_folder_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
@@ -87,7 +88,20 @@ class OptionsPanel(QGroupBox):
         folder_layout.setContentsMargins(0, 0, 0, 0)
         folder_layout.addWidget(self.folder_path_entry)
         folder_layout.addWidget(self.browse_folder_button)
-        self.form_layout.addRow("Folder:", folder_layout)
+        self.form_layout.addRow("Folder A:", folder_layout)
+
+        # Folder B (Comparison)
+        self.folder_b_entry = QLineEdit()
+        self.folder_b_entry.setPlaceholderText("Optional: Select second folder to compare resolutions...")
+        self.browse_folder_b_button = QPushButton("...")
+        self.browse_folder_b_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
+
+        folder_b_layout = QHBoxLayout()
+        folder_b_layout.setContentsMargins(0, 0, 0, 0)
+        folder_b_layout.addWidget(self.folder_b_entry)
+        folder_b_layout.addWidget(self.browse_folder_b_button)
+
+        self.form_layout.addRow("Folder B:", folder_b_layout)
 
     def _create_search_widgets(self):
         self.search_entry = QLineEdit()
@@ -152,13 +166,17 @@ class OptionsPanel(QGroupBox):
         self.threshold_spinbox.valueChanged.connect(self.settings_manager.set_threshold)
         self.exclude_entry.textChanged.connect(self.settings_manager.set_exclude_folders)
         self.model_combo.currentTextChanged.connect(self.settings_manager.set_model_key)
+
         self.browse_folder_button.clicked.connect(self._browse_for_folder)
+        self.browse_folder_b_button.clicked.connect(self._browse_for_folder_b)
         self.browse_sample_button.clicked.connect(self._browse_for_sample)
 
         self.clear_sample_button.clicked.connect(self._clear_sample)
         self.clear_sample_button.clicked.connect(self._update_scan_context)
 
         self.search_entry.textChanged.connect(self._update_scan_context)
+        self.folder_b_entry.textChanged.connect(self._update_scan_context)
+
         self.scan_button.clicked.connect(self.on_scan_button_clicked)
         self.clear_scan_cache_button.clicked.connect(self.clear_scan_cache_requested.emit)
         self.clear_models_cache_button.clicked.connect(self.clear_models_cache_requested.emit)
@@ -194,50 +212,84 @@ class OptionsPanel(QGroupBox):
 
     @Slot()
     def _update_scan_context(self):
+        """Determines the current scan mode based on input fields."""
         is_ai_on = self.settings_manager.settings.hashing.use_ai
-
         model_info = self.get_selected_model_info()
         supports_text = model_info.get("supports_text_search", True)
         supports_image = model_info.get("supports_image_search", True)
 
-        self.search_entry.setDisabled(not is_ai_on or not supports_text or bool(self._sample_path))
-        if not is_ai_on:
-            self.search_entry.setPlaceholderText("AI is disabled")
-        elif not supports_text:
-            self.search_entry.setPlaceholderText("Text search not supported by this model")
-        else:
-            self.search_entry.setPlaceholderText("Enter text to search...")
+        has_folder_b = bool(self.folder_b_entry.text().strip())
+        has_sample = bool(self._sample_path)
+        has_text_query = bool(self.search_entry.text().strip())
 
-        self.browse_sample_button.setEnabled(is_ai_on and supports_image)
+        # Determine Scan Mode
+        if has_folder_b:
+            self.current_scan_mode = ScanMode.FOLDER_COMPARE
+            self.scan_button_text = "Compare Resolutions"
 
-        if not (is_ai_on and supports_image):
-            self._clear_sample()
+            # Disable Search inputs in compare mode to avoid confusion
+            self.search_entry.setEnabled(False)
+            self.browse_sample_button.setEnabled(False)
+            self.clear_sample_button.setEnabled(False)
 
-        if is_ai_on and self._sample_path and supports_image:
+            # Disable similarity threshold (not used in metadata compare)
+            self.threshold_spinbox.setEnabled(False)
+
+        elif is_ai_on and has_sample and supports_image:
             self.current_scan_mode = ScanMode.SAMPLE_SEARCH
             self.scan_button_text = "Search by Sample"
-        elif is_ai_on and self.search_entry.text().strip() and supports_text:
+
+            # Re-enable inputs
+            self.search_entry.setEnabled(True)
+            self.browse_sample_button.setEnabled(True)
+            self.clear_sample_button.setVisible(True)
+            self.threshold_spinbox.setEnabled(True)
+
+        elif is_ai_on and has_text_query and supports_text:
             self.current_scan_mode = ScanMode.TEXT_SEARCH
             self.scan_button_text = "Search by Text"
+
+            # Re-enable inputs
+            self.search_entry.setEnabled(True)
+            self.browse_sample_button.setEnabled(True)
+            self.clear_sample_button.setVisible(False)
+            self.threshold_spinbox.setEnabled(True)
+
         else:
             self.current_scan_mode = ScanMode.DUPLICATES
             self.scan_button_text = "Scan for Duplicates"
 
-        is_ai_search = self.current_scan_mode in (
-            ScanMode.TEXT_SEARCH,
-            ScanMode.SAMPLE_SEARCH,
-        )
-        self.threshold_spinbox.setEnabled(not is_ai_search and is_ai_on)
+            # Re-enable inputs
+            self.search_entry.setEnabled(True)
+            self.browse_sample_button.setEnabled(is_ai_on and supports_image)
+            self.clear_sample_button.setVisible(False)
+            self.threshold_spinbox.setEnabled(is_ai_on)
+
+        # UI Visual Updates
+        if not is_ai_on:
+            self.search_entry.setPlaceholderText("AI is disabled")
+            self.search_entry.setEnabled(False)
+        elif not supports_text and not has_folder_b:
+            self.search_entry.setPlaceholderText("Text search not supported by this model")
+        elif not has_folder_b:
+            self.search_entry.setPlaceholderText("Enter text to search...")
+        else:
+            self.search_entry.setPlaceholderText("Search disabled in Compare mode")
+
+        if not (is_ai_on and supports_image) and not has_folder_b:
+            self._clear_sample()
+
+        is_ai_search = self.current_scan_mode in (ScanMode.TEXT_SEARCH, ScanMode.SAMPLE_SEARCH)
 
         label = self.form_layout.labelForField(self.threshold_spinbox)
         if label:
             label.setText("Similarity:" if not is_ai_search else "Similarity (N/A):")
 
+        # In search mode, threshold isn't strictly used for filtering in the same way (ranking is used)
         if is_ai_search or not is_ai_on:
             self.threshold_spinbox.setValue(0)
 
         self.scan_button.setText(self.scan_button_text)
-        self.clear_sample_button.setVisible(self._sample_path is not None)
         self.scan_context_changed.emit(self.current_scan_mode.name)
 
     @Slot()
@@ -245,19 +297,27 @@ class OptionsPanel(QGroupBox):
         self._update_scan_context()
 
     def _browse_for_folder(self):
-        path = ""
+        path = self._browse_generic(self.folder_path_entry.text())
+        if path:
+            self.folder_path_entry.setText(path)
+
+    def _browse_for_folder_b(self):
+        path = self._browse_generic(self.folder_b_entry.text())
+        if path:
+            self.folder_b_entry.setText(path)
+
+    def _browse_generic(self, start_path: str) -> str:
         try:
-            path = QFileDialog.getExistingDirectory(self, "Select Folder", self.folder_path_entry.text())
+            path = QFileDialog.getExistingDirectory(self, "Select Folder", start_path)
         except Exception as e:
             app_logger.warning(f"Native folder dialog failed: {e}. Falling back to non-native dialog.")
             path = QFileDialog.getExistingDirectory(
                 self,
                 "Select Folder",
-                self.folder_path_entry.text(),
+                start_path,
                 options=QFileDialog.Option.DontUseNativeDialog,
             )
-        if path:
-            self.folder_path_entry.setText(path)
+        return path
 
     def _browse_for_sample(self):
         path_str, _ = "", ""
@@ -280,6 +340,7 @@ class OptionsPanel(QGroupBox):
         if path_str:
             self._sample_path = Path(path_str)
             self.search_entry.clear()
+            self.folder_b_entry.clear()  # Clear compare folder if sampling
             self.sample_path_label.setText(f"Sample: {self._sample_path.name}")
             self._update_scan_context()
 

@@ -17,7 +17,7 @@ from PySide6.QtCore import QObject, QThread, Slot
 
 from app.cache import setup_caches, teardown_caches
 from app.constants import CACHE_DIR, DB_TABLE_NAME, LANCEDB_AVAILABLE
-from app.core.strategies import FindDuplicatesStrategy, SearchStrategy
+from app.core.strategies import FindDuplicatesStrategy, FolderComparisonStrategy, SearchStrategy
 from app.data_models import ScanConfig, ScanMode, ScanState
 from app.services.signal_bus import APP_SIGNAL_BUS
 
@@ -62,6 +62,7 @@ class ScannerCore(QObject):
                 ScanMode.DUPLICATES: FindDuplicatesStrategy,
                 ScanMode.TEXT_SEARCH: SearchStrategy,
                 ScanMode.SAMPLE_SEARCH: SearchStrategy,
+                ScanMode.FOLDER_COMPARE: FolderComparisonStrategy,
             }
             strategy_class = strategy_map.get(self.config.scan_mode)
 

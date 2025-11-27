@@ -75,6 +75,7 @@ class ScanMode(Enum):
     DUPLICATES = auto()
     TEXT_SEARCH = auto()
     SAMPLE_SEARCH = auto()
+    FOLDER_COMPARE = auto()
 
 
 class FileOperation(Enum):
@@ -284,6 +285,7 @@ class ScanConfig:
     model_info: dict = field(default_factory=dict)
     sample_path: Path | None = None
     search_query: str | None = None
+    comparison_folder_path: Path | None = None
 
 
 @dataclass

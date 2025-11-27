@@ -21,7 +21,7 @@ except ImportError:
     pl = None
     POLARS_AVAILABLE = False
 
-from app.constants import LANCEDB_AVAILABLE, SIMILARITY_SEARCH_K_NEIGHBORS
+from app.constants import BEST_FILE_METHOD_NAME, LANCEDB_AVAILABLE, SIMILARITY_SEARCH_K_NEIGHBORS
 from app.data_models import (
     AnalysisItem,
     DuplicateResults,
@@ -234,7 +234,7 @@ class FindDuplicatesStrategy(ScanStrategy):
             row["group_id"] = group_id
             row["is_best"] = True
             row["distance"] = 0
-            row["found_by"] = "Best"
+            row["found_by"] = BEST_FILE_METHOD_NAME
             # Optimize storage: Remove vector and id from result table
             if "vector" in row:
                 del row["vector"]
@@ -460,3 +460,106 @@ class SearchStrategy(ScanStrategy):
             return worker_get_single_vector(str(self.config.sample_path))
 
         return None
+
+
+class FolderComparisonStrategy(ScanStrategy):
+    """
+    Compares images between two folders based on filename matches.
+    Determines the 'best' file based on higher resolution.
+    Does NOT use AI or complex hashing, making it very fast.
+    """
+
+    def execute(self, stop_event: threading.Event, start_time: float):
+        folder_a = self.config.folder_path
+        folder_b = self.config.comparison_folder_path
+
+        if not folder_b:
+            self.signals.scan_error.emit("Secondary folder not specified for comparison.")
+            self.scanner_core._finalize_scan(None, 0, None, 0, [])
+            return
+
+        self.state.set_phase(f"Scanning Folder A: {folder_a.name}...", 0.1)
+
+        # Scan Folder A
+        finder_a = FileFinder(
+            self.state, folder_a, self.config.excluded_folders, self.config.selected_extensions, self.signals
+        )
+        # Dictionary mapping Filename -> Full Path
+        # Note: If duplicate filenames exist within Folder A, the last one found wins.
+        files_a = {p.name: p for batch in finder_a.stream_files(stop_event) for p, _ in batch}
+
+        if stop_event.is_set():
+            return
+
+        self.state.set_phase(f"Scanning Folder B: {folder_b.name}...", 0.1)
+
+        # Scan Folder B
+        finder_b = FileFinder(
+            self.state, folder_b, self.config.excluded_folders, self.config.selected_extensions, self.signals
+        )
+        files_b = {p.name: p for batch in finder_b.stream_files(stop_event) for p, _ in batch}
+
+        if stop_event.is_set():
+            return
+
+        # Find intersections based on exact filename
+        common_names = set(files_a.keys()) & set(files_b.keys())
+
+        self.state.set_phase("Comparing metadata & resolutions...", 0.8)
+
+        final_groups: DuplicateResults = {}
+        total_common = len(common_names)
+        processed = 0
+
+        for name in common_names:
+            if stop_event.is_set():
+                break
+
+            path_a = files_a[name]
+            path_b = files_b[name]
+
+            # Read metadata headers (fast)
+            meta_a = get_image_metadata(path_a)
+            meta_b = get_image_metadata(path_b)
+
+            if not meta_a or not meta_b:
+                continue
+
+            # Create Fingerprints (hashes empty, purely metadata containers)
+            fp_a = ImageFingerprint(path=path_a, hashes=np.array([]), **meta_a)
+            fp_b = ImageFingerprint(path=path_b, hashes=np.array([]), **meta_b)
+
+            # Logic: Higher Resolution (Pixel Area) wins
+            area_a = fp_a.resolution[0] * fp_a.resolution[1]
+            area_b = fp_b.resolution[0] * fp_b.resolution[1]
+
+            # Determine Best vs Duplicate
+            if area_a >= area_b:
+                best = fp_a
+                duplicate = fp_b
+                diff_method = "Same Size" if area_a == area_b else "Smaller Resolution"
+            else:
+                best = fp_b
+                duplicate = fp_a
+                diff_method = "Smaller Resolution"
+
+            # 100% score indicates they are matched by name
+            score = 100
+
+            # Add to groups: key=Best, value=Set of duplicates
+            final_groups[best] = {(duplicate, score, diff_method)}
+
+            processed += 1
+            if processed % 50 == 0:
+                self.state.update_progress(processed, total_common)
+
+        # Report results
+        # We use ScanMode.DUPLICATES for the finalize step because the UI presentation
+        # for folder comparison is identical to duplicate visualization (Groups of 2).
+        self.scanner_core._finalize_scan(
+            {"db_path": None, "groups_data": final_groups, "lazy_summary": None},
+            len(final_groups),
+            ScanMode.DUPLICATES,
+            time.time() - start_time,
+            self.all_skipped_files,
+        )

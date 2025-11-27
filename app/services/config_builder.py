@@ -26,25 +26,39 @@ class ScanConfigBuilder:
         scan_mode: ScanMode,
         search_query: str | None,
         sample_path: Path | None,
+        comparison_folder_path: Path | None = None,
     ):
         """
         Initializes the builder with a snapshot of the application state.
 
         Args:
             settings: The fully updated AppSettings object.
-            scan_mode: The current ScanMode (DUPLICATES, TEXT_SEARCH, etc.).
+            scan_mode: The current ScanMode (DUPLICATES, TEXT_SEARCH, FOLDER_COMPARE, etc.).
             search_query: The current text in the search box.
             sample_path: The currently selected sample image path, if any.
+            comparison_folder_path: The path to the second folder for comparison mode.
         """
         self.settings = settings
         self.scan_mode = scan_mode
         self.search_query = search_query
         self.sample_path = sample_path
+        self.comparison_folder_path = comparison_folder_path
 
     def build(self) -> ScanConfig:
         """Constructs and validates a ScanConfig object."""
         folder_path = self._validate_folder_path()
         self._validate_search_inputs()
+
+        # --- Validation for Folder Compare Mode ---
+        if self.scan_mode == ScanMode.FOLDER_COMPARE:
+            if not self.comparison_folder_path:
+                raise ValueError("Please select a second folder for comparison.")
+            if not self.comparison_folder_path.exists() or not self.comparison_folder_path.is_dir():
+                raise ValueError("The comparison folder path is invalid or does not exist.")
+
+            # Check if source and comparison folders are the same
+            if self.comparison_folder_path.resolve() == folder_path.resolve():
+                raise ValueError("Source and Comparison folders must be different.")
 
         model_info, onnx_name = self._get_model_details()
         performance_config = self._build_performance_config()
@@ -101,6 +115,7 @@ class ScanConfigBuilder:
             model_info=model_info,
             sample_path=self.sample_path,
             search_query=self.search_query if self.scan_mode == ScanMode.TEXT_SEARCH else None,
+            comparison_folder_path=self.comparison_folder_path,
         )
 
     def _validate_folder_path(self) -> Path:
