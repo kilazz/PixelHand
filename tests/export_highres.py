@@ -2,10 +2,6 @@ import shutil
 import sys
 from pathlib import Path
 
-# ==========================================
-#              CONFIGURATION
-# ==========================================
-
 # Folder A: Original / Low Resolution (The baseline)
 FOLDER_A = r"E:\A"
 
@@ -21,8 +17,6 @@ MATCH_BY_STEM = True
 
 # Copy files that exist in B but NOT in A?
 COPY_NEW_FILES = False
-
-# ==========================================
 
 # Setup path to import PixelHand modules
 sys.path.insert(0, str(Path(__file__).parent))

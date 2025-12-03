@@ -5,10 +5,11 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QModelIndex, QPoint, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QItemSelectionModel, QModelIndex, QPoint, Qt, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QComboBox,
     QGridLayout,
     QGroupBox,
@@ -16,10 +17,12 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListView,
     QMenu,
     QMessageBox,
     QPushButton,
     QSlider,
+    QStackedWidget,
     QTreeView,
     QVBoxLayout,
     QWidget,
@@ -30,7 +33,8 @@ from app.constants import (
     LANCEDB_AVAILABLE,
     UIConfig,
 )
-from app.data_models import FileOperation, ResultNode, ScanMode
+from app.data_models import FileOperation, GroupNode, ResultNode, ScanMode
+from app.gui.delegates import GroupGridDelegate
 from app.gui.models import ResultsProxyModel, ResultsTreeModel
 
 if TYPE_CHECKING:
@@ -55,7 +59,10 @@ def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
 
 
 class ResultsPanel(QGroupBox):
-    """Displays scan results in a tree view and provides actions for them."""
+    """
+    Displays scan results in a Tree View (Details) or Grid View (Folders).
+    Provides filtering, sorting, and file operations.
+    """
 
     visible_results_changed = Signal(list)
 
@@ -79,22 +86,44 @@ class ResultsPanel(QGroupBox):
     def _init_ui(self):
         layout = QVBoxLayout(self)
         self._create_header_controls(layout)
+
+        # --- Main View Stack (Tree vs Grid) ---
+        self.view_stack = QStackedWidget()
+
+        # 1. Tree View (Table/Details)
         self.results_view = QTreeView()
         self.results_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.results_view.setAlternatingRowColors(True)
         self.results_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.results_view.setSortingEnabled(True)
-        layout.addWidget(self.results_view)
+
+        # 2. Grid View (Icons/Folders)
+        self.results_grid = QListView()
+        self.results_grid.setViewMode(QListView.ViewMode.IconMode)
+        self.results_grid.setResizeMode(QListView.ResizeMode.Adjust)
+        self.results_grid.setSpacing(12)
+        self.results_grid.setUniformItemSizes(True)
+        self.results_grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+
+        self.view_stack.addWidget(self.results_view)
+        self.view_stack.addWidget(self.results_grid)
+
+        layout.addWidget(self.view_stack)
+
         self._create_action_buttons(layout)
+
+        # Footer buttons
         bottom_buttons_layout = QHBoxLayout()
         self.hardlink_button = QPushButton("Replace with Hardlink")
         self.reflink_button = QPushButton("Replace with Reflink")
         self.delete_button = QPushButton("Move to Trash")
+
         self.hardlink_button.setObjectName("hardlink_button")
         self.hardlink_button.setToolTip("Replaces duplicates with a pointer to the best file's data.")
         self.reflink_button.setObjectName("reflink_button")
         self.reflink_button.setToolTip("Creates a space-saving, independent copy (Copy-on-Write).")
         self.delete_button.setObjectName("delete_button")
+
         bottom_buttons_layout.addStretch()
         bottom_buttons_layout.addWidget(self.hardlink_button)
         bottom_buttons_layout.addWidget(self.reflink_button)
@@ -105,7 +134,16 @@ class ResultsPanel(QGroupBox):
         self.results_model = ResultsTreeModel(self)
         self.proxy_model = ResultsProxyModel(self)
         self.proxy_model.setSourceModel(self.results_model)
+
+        # Apply model to Tree
         self.results_view.setModel(self.proxy_model)
+
+        # Apply model to Grid
+        self.results_grid.setModel(self.proxy_model)
+
+        # Setup Grid Delegate (Custom Painting)
+        self.grid_delegate = GroupGridDelegate(QThreadPool.globalInstance(), self)
+        self.results_grid.setItemDelegate(self.grid_delegate)
 
     def _init_context_menu(self):
         self.context_menu_path: Path | None = None
@@ -115,22 +153,59 @@ class ResultsPanel(QGroupBox):
             self.show_action,
             self.delete_action,
         ) = create_file_context_menu(self)
+
+        # Enable context menus on both views
         self.results_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.results_grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def _create_header_controls(self, layout):
         top_controls_layout = QHBoxLayout()
         self.search_entry = QLineEdit()
         self.search_entry.setPlaceholderText("Filter results by name...")
         top_controls_layout.addWidget(self.search_entry)
+
+        # --- View Mode Switcher ---
+        self.view_mode_group = QButtonGroup(self)
+
+        # List Button
+        self.btn_list_view = QPushButton("☰")
+        self.btn_list_view.setCheckable(True)
+        self.btn_list_view.setChecked(True)
+        self.btn_list_view.setFixedWidth(30)
+        self.btn_list_view.setToolTip("List View (Details)")
+
+        # Grid Button
+        self.btn_grid_view = QPushButton("⊞")
+        self.btn_grid_view.setCheckable(True)
+        self.btn_grid_view.setFixedWidth(30)
+        self.btn_grid_view.setToolTip("Grid View (Folders)")
+
+        self.view_mode_group.addButton(self.btn_list_view)
+        self.view_mode_group.addButton(self.btn_grid_view)
+
+        # Layout for buttons to stick together
+        mode_btn_layout = QHBoxLayout()
+        mode_btn_layout.setSpacing(4)
+        mode_btn_layout.setContentsMargins(0, 0, 0, 0)
+        mode_btn_layout.addWidget(self.btn_list_view)
+        mode_btn_layout.addWidget(self.btn_grid_view)
+
+        mode_widget = QWidget()
+        mode_widget.setLayout(mode_btn_layout)
+        top_controls_layout.addWidget(mode_widget)
+
         self.expand_button = QPushButton("Expand All")
         self.collapse_button = QPushButton("Collapse All")
         self.sort_combo = QComboBox()
         self.sort_combo.addItems(UIConfig.ResultsView.SORT_OPTIONS)
+
         top_controls_layout.addWidget(self.expand_button)
         top_controls_layout.addWidget(self.collapse_button)
         top_controls_layout.addWidget(self.sort_combo)
+
         layout.addLayout(top_controls_layout)
 
+        # Filter Controls
         filter_controls_layout = QHBoxLayout()
         self.similarity_filter_label = QLabel("Min Similarity:")
         self.similarity_filter_slider = QSlider(Qt.Orientation.Horizontal)
@@ -138,46 +213,110 @@ class ResultsPanel(QGroupBox):
         self.similarity_filter_slider.setValue(0)
         self.similarity_filter_value_label = QLabel("0%")
         self.similarity_filter_value_label.setFixedWidth(UIConfig.Sizes.SIMILARITY_LABEL_WIDTH)
+
         filter_controls_layout.addWidget(self.similarity_filter_label)
         filter_controls_layout.addWidget(self.similarity_filter_slider)
         filter_controls_layout.addWidget(self.similarity_filter_value_label)
+
         self.filter_widget = QWidget()
         self.filter_widget.setLayout(filter_controls_layout)
         self.filter_widget.setVisible(False)
         layout.addWidget(self.filter_widget)
 
     def _create_action_buttons(self, layout):
-        actions_layout = QGridLayout()
+        self.selection_group_box = QGroupBox("Selection")
+        actions_layout = QGridLayout(self.selection_group_box)
+        # Reduce margins inside group box
+        actions_layout.setContentsMargins(4, 4, 4, 4)
+
         self.select_all_button = QPushButton("Select All")
         self.deselect_all_button = QPushButton("Deselect All")
         self.select_except_best_button = QPushButton("Select All Except Best")
         self.invert_selection_button = QPushButton("Invert Selection")
+
         actions_layout.addWidget(self.select_all_button, 0, 0)
         actions_layout.addWidget(self.deselect_all_button, 0, 1)
         actions_layout.addWidget(self.select_except_best_button, 1, 0)
         actions_layout.addWidget(self.invert_selection_button, 1, 1)
-        layout.addLayout(actions_layout)
+
+        layout.addWidget(self.selection_group_box)
 
     def _connect_signals(self):
+        # View Switching
+        self.btn_list_view.clicked.connect(lambda: self._set_results_view_mode(is_grid=False))
+        self.btn_grid_view.clicked.connect(lambda: self._set_results_view_mode(is_grid=True))
+
+        # View Sync: Clicking in Grid selects row in Tree (which triggers MainWindow preview)
+        self.results_grid.selectionModel().selectionChanged.connect(self._sync_grid_selection_to_tree)
+
         self.sort_combo.currentTextChanged.connect(self._on_sort_changed)
+
+        # Selection Actions
         self.select_all_button.clicked.connect(lambda: self.results_model.set_all_checks(Qt.CheckState.Checked))
         self.deselect_all_button.clicked.connect(lambda: self.results_model.set_all_checks(Qt.CheckState.Unchecked))
         self.select_except_best_button.clicked.connect(self.results_model.select_all_except_best)
         self.invert_selection_button.clicked.connect(self.results_model.invert_selection)
+
+        # Operations
         self.delete_button.clicked.connect(self._request_deletion)
         self.hardlink_button.clicked.connect(self._request_hardlink)
         self.reflink_button.clicked.connect(self._request_reflink)
+
+        # Tree Controls
         self.expand_button.clicked.connect(self.results_view.expandAll)
         self.collapse_button.clicked.connect(self.results_view.collapseAll)
+
+        # Filters
         self.search_entry.textChanged.connect(self.search_timer.start)
         self.search_timer.timeout.connect(self._on_search_triggered)
         self.similarity_filter_slider.valueChanged.connect(self._on_similarity_filter_changed)
         self.similarity_filter_slider.sliderReleased.connect(self._emit_visible_results)
+
+        # Model Signals
         self.results_model.fetch_completed.connect(self._on_fetch_completed)
-        self.results_view.customContextMenuRequested.connect(self._show_context_menu)
+
+        # Context Menus
+        self.results_view.customContextMenuRequested.connect(self._show_context_menu_tree)
+        self.results_grid.customContextMenuRequested.connect(self._show_context_menu_grid)
+
+        # File Context Actions
         self.open_action.triggered.connect(self._context_open_file)
         self.show_action.triggered.connect(self._context_show_in_explorer)
         self.delete_action.triggered.connect(self._context_delete_file)
+
+    def _set_results_view_mode(self, is_grid: bool):
+        """Switches the view stack and toggles enabled state of buttons."""
+        if is_grid:
+            self.view_stack.setCurrentWidget(self.results_grid)
+            # Disable Tree-only operations
+            self.expand_button.setEnabled(False)
+            self.collapse_button.setEnabled(False)
+            # Disable File Selection buttons (Grid works on groups, check-boxes are in tree)
+            self.selection_group_box.setEnabled(False)
+        else:
+            self.view_stack.setCurrentWidget(self.results_view)
+            self.expand_button.setEnabled(True)
+            self.collapse_button.setEnabled(True)
+            self.selection_group_box.setEnabled(True)
+
+    @Slot(object, object)
+    def _sync_grid_selection_to_tree(self, selected, deselected):
+        """
+        When items are selected in the grid (which are Groups),
+        mirror that selection to the Tree View (select the Group row).
+        This allows the existing logic in MainWindow to work without modification.
+        """
+        if not selected.indexes():
+            return
+
+        # Map Proxy index (Grid) -> Proxy index (Tree) is 1:1 for the Group Nodes
+        index = selected.indexes()[0]
+
+        self.results_view.selectionModel().select(
+            index, QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows
+        )
+        # Ensure the selected item is visible in the tree
+        self.results_view.scrollTo(index)
 
     @Slot()
     def _update_summary(self):
@@ -191,8 +330,18 @@ class ResultsPanel(QGroupBox):
                 app_logger.error(f"Could not open path '{path}': {e}")
 
     @Slot(QPoint)
-    def _show_context_menu(self, pos):
-        proxy_idx = self.results_view.indexAt(pos)
+    def _show_context_menu_tree(self, pos):
+        self._handle_context_menu(self.results_view, pos)
+
+    @Slot(QPoint)
+    def _show_context_menu_grid(self, pos):
+        self._handle_context_menu(self.results_grid, pos)
+
+    def _handle_context_menu(self, view, pos):
+        """
+        Determines which context menu to show based on the item under the cursor.
+        """
+        proxy_idx = view.indexAt(pos)
         if not proxy_idx.isValid():
             return
 
@@ -201,9 +350,49 @@ class ResultsPanel(QGroupBox):
             return
 
         node = source_idx.internalPointer()
-        if isinstance(node, ResultNode):
+
+        # --- CASE 1: ResultNode (Individual File - Only in Tree View) ---
+        if isinstance(node, ResultNode) and node.path != "loading_dummy":
             self.context_menu_path = Path(node.path)
             self.context_menu.exec(QCursor.pos())
+
+        # --- CASE 2: GroupNode (Folder - Grid View or Tree Parent) ---
+        elif isinstance(node, GroupNode):
+            group_menu = QMenu(self)
+
+            # Action: Delete entire group
+            del_action = QAction(f"Move Group to Trash ({node.count} files)", self)
+            del_action.triggered.connect(lambda: self._context_delete_group(node))
+
+            # Stylize the destructive action
+            font = del_action.font()
+            font.setBold(True)
+            del_action.setFont(font)
+
+            group_menu.addAction(del_action)
+            group_menu.exec(QCursor.pos())
+
+    def _context_delete_group(self, node: GroupNode):
+        """
+        Handles the deletion of an entire group.
+        Uses the model to fetch all paths (synchronously from DB if needed).
+        """
+        msg = (
+            f"Are you sure you want to move the ENTIRE group '{node.name}' to trash?\n\n"
+            f"This will delete {node.count} files.\n"
+            "This action cannot be undone via this app."
+        )
+        if QMessageBox.question(self, "Delete Group", msg) != QMessageBox.StandardButton.Yes:
+            return
+
+        # Fetch paths from model (handles lazy loaded data transparently)
+        paths = self.results_model.get_paths_for_group_sync(node.group_id)
+
+        if not paths:
+            QMessageBox.warning(self, "Error", "Could not find files for this group.")
+            return
+
+        self.file_op_manager.request_deletion(paths)
 
     @Slot()
     def _context_open_file(self):
@@ -282,13 +471,14 @@ class ResultsPanel(QGroupBox):
         is_duplicate_mode = self.results_model.mode == ScanMode.DUPLICATES
 
         enable_general = is_enabled and has_results
-        for w in [
-            self.results_view,
-            self.search_entry,
-            self.expand_button,
-            self.collapse_button,
-        ]:
+
+        # General controls
+        for w in [self.search_entry, self.expand_button, self.collapse_button, self.btn_list_view, self.btn_grid_view]:
             w.setEnabled(enable_general)
+
+        # Views
+        self.results_view.setEnabled(enable_general)
+        self.results_grid.setEnabled(enable_general)
 
         self.sort_combo.setEnabled(enable_general and is_duplicate_mode)
         self.filter_widget.setEnabled(enable_general and not is_duplicate_mode)
@@ -321,6 +511,7 @@ class ResultsPanel(QGroupBox):
         self.filter_widget.setVisible(is_search_mode)
         self.similarity_filter_slider.setValue(0)
         self._update_summary()
+
         is_duplicate_mode = self.results_model.mode == ScanMode.DUPLICATES
         for widget in [
             self.sort_combo,
@@ -333,6 +524,7 @@ class ResultsPanel(QGroupBox):
             self.delete_button,
         ]:
             widget.setVisible(is_duplicate_mode)
+
         if num_found > 0:
             if is_duplicate_mode:
                 self.results_model.sort_results(self.sort_combo.currentText())
@@ -422,7 +614,6 @@ class ResultsPanel(QGroupBox):
     def remove_items_from_results_db(self, paths_to_delete: list[Path]):
         """
         Removes deleted items from the vector database to keep it in sync.
-        Uses LanceDB logic instead of the legacy DuckDB logic.
         """
         if not self.results_model.db_path or not paths_to_delete:
             return

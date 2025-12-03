@@ -11,14 +11,17 @@ from PySide6.QtCore import QModelIndex, QPoint, Qt, QThreadPool, QTimer, Signal,
 from PySide6.QtGui import QAction, QCursor, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QListView,
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QStackedWidget,
     QVBoxLayout,
@@ -27,7 +30,8 @@ from PySide6.QtWidgets import (
 
 from app.constants import CompareMode, TonemapMode, UIConfig
 from app.data_models import AppSettings
-from app.gui.models import ImageItemDelegate, ImagePreviewModel
+from app.gui.delegates import ImageItemDelegate
+from app.gui.models import ImagePreviewModel
 from app.gui.widgets import AlphaBackgroundWidget, ImageCompareWidget, ResizedListView
 from app.image_utils import TONE_MAPPER, set_active_tonemap_view
 from app.services.settings_manager import SettingsManager
@@ -55,7 +59,10 @@ def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
 
 
 class ImageViewerPanel(QGroupBox):
-    """Displays previews of selected image groups and allows for comparison."""
+    """
+    Displays previews of selected image groups and allows for comparison.
+    Supports switching between List and Grid layouts.
+    """
 
     log_message = Signal(str, str)
     group_became_empty = Signal(int)
@@ -100,32 +107,96 @@ class ImageViewerPanel(QGroupBox):
         main_layout.addWidget(self.compare_container)
 
     def _create_list_view_controls(self, parent_layout):
-        slider_controls = QHBoxLayout()
-        slider_controls.addWidget(QLabel("Size:"))
+        # Top Bar Container
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 0, 0)
+        # Increase spacing between control groups (Mode, Size, HDR, BG)
+        top_bar.setSpacing(15)
+
+        # 1. View Mode Switcher (List / Grid)
+        self.viewer_mode_group = QButtonGroup(self)
+
+        self.btn_view_list = QPushButton("☰")  # List Symbol
+        self.btn_view_list.setCheckable(True)
+        self.btn_view_list.setChecked(True)
+        self.btn_view_list.setFixedWidth(30)
+        self.btn_view_list.setToolTip("List View (Details)")
+
+        self.btn_view_grid = QPushButton("⊞")  # Grid Symbol
+        self.btn_view_grid.setCheckable(True)
+        self.btn_view_grid.setFixedWidth(30)
+        self.btn_view_grid.setToolTip("Grid View (Thumbnails)")
+
+        self.viewer_mode_group.addButton(self.btn_view_list)
+        self.viewer_mode_group.addButton(self.btn_view_grid)
+
+        mode_btn_layout = QHBoxLayout()
+        # Add spacing between the two buttons themselves
+        mode_btn_layout.setSpacing(4)
+        mode_btn_layout.setContentsMargins(0, 0, 0, 0)
+        mode_btn_layout.addWidget(self.btn_view_list)
+        mode_btn_layout.addWidget(self.btn_view_grid)
+
+        mode_widget = QWidget()
+        mode_widget.setLayout(mode_btn_layout)
+        top_bar.addWidget(mode_widget)
+
+        # 2. Size Slider
+        top_bar.addWidget(QLabel("Size:"))
         self.preview_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.preview_size_slider.setRange(UIConfig.Sizes.PREVIEW_MIN_SIZE, UIConfig.Sizes.PREVIEW_MAX_SIZE)
-        slider_controls.addWidget(self.preview_size_slider)
-        self.thumbnail_tonemap_check = QCheckBox("HDR Thumbnails")
-        self.thumbnail_tonemap_check.setToolTip("Apply tonemapping for HDR thumbnails in this list.")
-        slider_controls.addWidget(self.thumbnail_tonemap_check)
-        self.bg_alpha_check = QCheckBox("BG Alpha:")
-        slider_controls.addWidget(self.bg_alpha_check)
+        # Allow slider to expand to fill available width
+        self.preview_size_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.preview_size_slider.setMinimumWidth(80)
+        top_bar.addWidget(self.preview_size_slider)
+
+        # 3. HDR Controls
+        self.thumbnail_tonemap_check = QCheckBox("HDR")
+        self.thumbnail_tonemap_check.setToolTip("Enable HDR Tonemapping")
+        top_bar.addWidget(self.thumbnail_tonemap_check)
+
+        self.thumbnail_tonemap_combo = QComboBox()
+        self.thumbnail_tonemap_combo.setToolTip("Tone Mapping Operator")
+        self.thumbnail_tonemap_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self.thumbnail_tonemap_combo.setMinimumWidth(80)
+
+        if TONE_MAPPER and TONE_MAPPER.available_views:
+            self.thumbnail_tonemap_combo.addItems(TONE_MAPPER.available_views)
+        else:
+            self.thumbnail_tonemap_combo.setEnabled(False)
+
+        top_bar.addWidget(self.thumbnail_tonemap_combo)
+
+        # 4. BG Alpha Controls
+        self.bg_alpha_check = QCheckBox("BG:")
+        self.bg_alpha_check.setToolTip("Toggle Transparency Grid")
+        top_bar.addWidget(self.bg_alpha_check)
+
         self.alpha_slider = QSlider(Qt.Orientation.Horizontal)
         self.alpha_slider.setRange(0, 255)
         self.alpha_slider.setValue(255)
-        slider_controls.addWidget(self.alpha_slider)
+        # Allow slider to expand
+        self.alpha_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.alpha_slider.setMinimumWidth(60)
+        top_bar.addWidget(self.alpha_slider)
+
         self.alpha_label = QLabel("255")
-        self.alpha_label.setFixedWidth(UIConfig.Sizes.ALPHA_LABEL_WIDTH)
-        slider_controls.addWidget(self.alpha_label)
-        parent_layout.addLayout(slider_controls)
+        self.alpha_label.setFixedWidth(30)
+        self.alpha_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top_bar.addWidget(self.alpha_label)
+
+        # Add layout to parent
+        parent_layout.addLayout(top_bar)
+
         self.compare_button = QPushButton("Compare (0)")
         parent_layout.addWidget(self.compare_button)
-        self.model = ImagePreviewModel(self.thread_pool, self)
 
-        # --- Connect missing file signal ---
+        self.model = ImagePreviewModel(self.thread_pool, self)
+        # Forward missing file signal
         self.model.file_missing.connect(self.file_missing_detected.emit)
 
         self.delegate = ImageItemDelegate(self.settings_manager.settings.viewer.preview_size, self.state, self)
+
         self.list_view = ResizedListView(self)
         self.list_view.set_preview_size(self.settings_manager.settings.viewer.preview_size)
         self.list_view.setModel(self.model)
@@ -135,7 +206,8 @@ class ImageViewerPanel(QGroupBox):
         self.list_view.channel_hovered.connect(self.delegate.set_hover_channel)
 
         self.list_view.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.list_view.setUniformItemSizes(True)
+        # Set to False to allow variable heights in Grid mode (for wrapped text)
+        self.list_view.setUniformItemSizes(False)
         self.list_view.setSpacing(5)
         parent_layout.addWidget(self.list_view)
 
@@ -231,6 +303,10 @@ class ImageViewerPanel(QGroupBox):
         self.list_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def _connect_signals(self):
+        # View Switching
+        self.btn_view_list.clicked.connect(lambda: self._set_viewer_mode(is_grid=False))
+        self.btn_view_grid.clicked.connect(lambda: self._set_viewer_mode(is_grid=True))
+
         self.alpha_slider.valueChanged.connect(self._on_alpha_change)
         self.compare_button.clicked.connect(self._show_comparison_view)
         self.back_button.clicked.connect(self._back_to_list_view)
@@ -249,9 +325,13 @@ class ImageViewerPanel(QGroupBox):
         self.preview_size_slider.sliderReleased.connect(self._update_preview_sizes)
         self.bg_alpha_check.toggled.connect(self._on_transparency_toggled)
         self.compare_bg_alpha_check.toggled.connect(self._on_transparency_toggled)
+
+        # HDR Signals
         self.thumbnail_tonemap_check.toggled.connect(self.settings_manager.set_thumbnail_tonemap_enabled)
-        self.compare_tonemap_check.toggled.connect(self.settings_manager.set_compare_tonemap_enabled)
         self.thumbnail_tonemap_check.toggled.connect(self._on_thumbnail_tonemap_toggled)
+        self.thumbnail_tonemap_combo.currentTextChanged.connect(self._on_thumbnail_view_changed)
+
+        self.compare_tonemap_check.toggled.connect(self.settings_manager.set_compare_tonemap_enabled)
         self.compare_tonemap_check.toggled.connect(self._on_compare_tonemap_changed)
         self.tonemap_view_combo.currentTextChanged.connect(self.settings_manager.set_tonemap_view)
         self.tonemap_view_combo.currentTextChanged.connect(self._on_tonemap_view_changed)
@@ -268,6 +348,26 @@ class ImageViewerPanel(QGroupBox):
         self.compare_view_2.set_tiling_enabled(checked)
         self.compare_widget.set_tiling_enabled(checked)
         self.diff_view.set_tiling_enabled(checked)
+
+    def _set_viewer_mode(self, is_grid: bool):
+        """Switches the view mode between List and Grid (Icon) layouts."""
+        # Block updates to prevent visual glitching during reconfiguration
+        self.list_view.setUpdatesEnabled(False)
+
+        if is_grid:
+            self.list_view.setViewMode(QListView.ViewMode.IconMode)
+            self.list_view.setResizeMode(QListView.ResizeMode.Adjust)
+            self.list_view.setSpacing(10)
+            self.delegate.set_grid_mode(True)
+        else:
+            self.list_view.setViewMode(QListView.ViewMode.ListMode)
+            self.list_view.setResizeMode(QListView.ResizeMode.Fixed)
+            self.list_view.setSpacing(5)
+            self.delegate.set_grid_mode(False)
+
+        # Refresh layout geometry and trigger sizeHint recalculation
+        self.list_view.updateGeometries()
+        self.list_view.setUpdatesEnabled(True)
 
     def _open_path(self, path: Path | None):
         if path and path.exists():
@@ -307,8 +407,18 @@ class ImageViewerPanel(QGroupBox):
 
     @Slot(bool)
     def _on_thumbnail_tonemap_toggled(self, checked: bool):
+        self.thumbnail_tonemap_combo.setEnabled(checked)
         mode = TonemapMode.ENABLED.value if checked else TonemapMode.NONE.value
         self.model.set_tonemap_mode(mode)
+
+    @Slot(str)
+    def _on_thumbnail_view_changed(self, view_name: str):
+        # Update global tone mapper
+        if set_active_tonemap_view(view_name):
+            self.settings_manager.set_tonemap_view(view_name)
+            # Clear cache to force regenerate thumbnails with new tone map
+            self.model.clear_cache()
+            self.list_view.viewport().update()
 
     @Slot(bool)
     def _on_compare_tonemap_changed(self, checked: bool):
@@ -327,10 +437,25 @@ class ImageViewerPanel(QGroupBox):
     def load_settings(self, settings: AppSettings):
         self.preview_size_slider.setValue(settings.viewer.preview_size)
         self.bg_alpha_check.setChecked(settings.viewer.show_transparency)
+
+        # Load HDR Settings
         self.thumbnail_tonemap_check.setChecked(settings.viewer.thumbnail_tonemap_enabled)
+        self.thumbnail_tonemap_combo.setEnabled(settings.viewer.thumbnail_tonemap_enabled)
+
         self.compare_tonemap_check.setChecked(settings.viewer.compare_tonemap_enabled)
-        if self.tonemap_view_combo.isEnabled():
-            self.tonemap_view_combo.setCurrentText(settings.viewer.tonemap_view)
+
+        # Sync combos
+        current_view = settings.viewer.tonemap_view
+        if self.tonemap_view_combo.isEnabled() or current_view:
+            idx = self.tonemap_view_combo.findText(current_view)
+            if idx >= 0:
+                self.tonemap_view_combo.setCurrentIndex(idx)
+
+        if self.thumbnail_tonemap_combo.isEnabled() or current_view:
+            idx = self.thumbnail_tonemap_combo.findText(current_view)
+            if idx >= 0:
+                self.thumbnail_tonemap_combo.setCurrentIndex(idx)
+
         self._on_transparency_toggled(settings.viewer.show_transparency)
 
     def clear_viewer(self):

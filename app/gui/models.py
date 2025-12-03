@@ -1,6 +1,7 @@
 # app/gui/models.py
 """
-Contains Qt Item Models and Delegates for displaying data.
+Contains Qt Item Models for managing and providing data to views.
+Handles the hierarchical structure of duplicate groups and the flat list for image previews.
 """
 
 import logging
@@ -8,37 +9,31 @@ import os
 from collections import OrderedDict
 from dataclasses import fields
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-from PIL import Image, ImageQt
 from PySide6.QtCore import (
     QAbstractItemModel,
     QAbstractListModel,
     QModelIndex,
     QPersistentModelIndex,
-    QRect,
-    QSize,
     QSortFilterProxyModel,
     Qt,
     QThreadPool,
     Signal,
     Slot,
 )
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetrics, QImage, QPen, QPixmap
-from PySide6.QtWidgets import QStyle, QStyledItemDelegate
+from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPixmap
 
 from app.constants import (
     BEST_FILE_METHOD_NAME,
+    LANCEDB_AVAILABLE,
     METHOD_DISPLAY_NAMES,
     UIConfig,
 )
 from app.data_models import GroupNode, ResultNode, ScanMode
 from app.gui.tasks import ImageLoader, LanceDBGroupFetcherTask
-from app.gui.widgets import PaintUtilsMixin
 
-if TYPE_CHECKING:
-    from app.view_models import ImageComparerState
-
+if LANCEDB_AVAILABLE:
+    import lancedb
 
 app_logger = logging.getLogger("PixelHand.gui.models")
 
@@ -75,8 +70,8 @@ def _format_metadata_string(node: ResultNode) -> str:
 
 class ResultsTreeModel(QAbstractItemModel):
     """
-    Data model for the results tree view.
-    Implements Async Lazy Loading using 'Transform & Append' strategy to prevent view collapse.
+    Data model for the results tree view (and Grid view via UserRole).
+    Implements Async Lazy Loading using 'Transform & Append' strategy.
     """
 
     fetch_completed = Signal(QModelIndex)
@@ -90,6 +85,7 @@ class ResultsTreeModel(QAbstractItemModel):
         self.check_states: dict[str, Qt.CheckState] = {}
         self.filter_text = ""
 
+        # Quick lookups
         self.path_to_group_id: dict[str, int] = {}
         self.group_id_to_best_path: dict[int, str] = {}
 
@@ -146,6 +142,7 @@ class ResultsTreeModel(QAbstractItemModel):
         full_groups = payload.get("groups_data")
 
         if lazy_summary:
+            # Mode: Lazy Loading (Database backed)
             for item in lazy_summary:
                 gid = item["group_id"]
                 gn = GroupNode(
@@ -161,6 +158,7 @@ class ResultsTreeModel(QAbstractItemModel):
             self.sorted_group_ids = sorted(self.groups_data.keys())
 
         elif full_groups:
+            # Mode: In-Memory (Search results, small scans)
             self._process_full_groups(full_groups)
 
         self.endResetModel()
@@ -185,7 +183,6 @@ class ResultsTreeModel(QAbstractItemModel):
             )
 
             children = []
-            # Safely access tuple elements and fallback to 0/Empty strings
             res_w = best_fp.resolution[0] if best_fp.resolution else 0
             res_h = best_fp.resolution[1] if best_fp.resolution else 0
 
@@ -211,6 +208,8 @@ class ResultsTreeModel(QAbstractItemModel):
                 distance=0,
             )
             children.append(best_node)
+
+            # Map paths/IDs
             self.path_to_group_id[str(best_fp.path)] = group_id_counter
             self.group_id_to_best_path[group_id_counter] = str(best_fp.path)
 
@@ -329,11 +328,6 @@ class ResultsTreeModel(QAbstractItemModel):
 
     @Slot(list, int)
     def _on_fetch_finished(self, children_dicts: list[dict], group_id: int):
-        """
-        Handles completion of data fetching.
-        STRATEGY: Transform the dummy node into the first real node, then append rest.
-        This keeps rowCount >= 1 at all times, preventing collapse.
-        """
         if group_id not in self.pending_fetches:
             return
 
@@ -369,23 +363,19 @@ class ResultsTreeModel(QAbstractItemModel):
                 self.group_id_to_best_path[group_id] = child.path
 
         if not children:
-            # Error or empty group: Just remove dummy
             self.beginRemoveRows(parent_index, 0, 0)
             node.children = []
             node.count = 0
             node.fetched = True
             self.endRemoveRows()
-            # Force UI refresh to remove expander
-            self.dataChanged.emit(parent_index, parent_index)
             self.fetch_completed.emit(parent_index)
             return
 
-        # 1. Update the Dummy Node (Index 0) to be Real Node #1
+        # 1. Update the Dummy Node (Index 0) -> Real Node #1
         node.children[0] = children[0]
-        # Notify View that Row 0 changed (Loading... -> Real File Name)
         self.dataChanged.emit(self.index(0, 0, parent_index), self.index(0, self.columnCount() - 1, parent_index))
 
-        # 2. Insert remaining nodes (Index 1 to N)
+        # 2. Insert remaining nodes
         if len(children) > 1:
             rest_children = children[1:]
             self.beginInsertRows(parent_index, 1, len(rest_children))
@@ -405,6 +395,10 @@ class ResultsTreeModel(QAbstractItemModel):
         if not index.isValid():
             return None
         node = index.internalPointer()
+
+        # IMPORTANT: Return the raw node object for the custom Delegate
+        if role == Qt.ItemDataRole.UserRole:
+            return node
 
         if role == SortRole:
             if isinstance(node, GroupNode):
@@ -595,7 +589,6 @@ class ResultsTreeModel(QAbstractItemModel):
     def _set_check_state_for_all(self, state_logic_func):
         if not self.groups_data:
             return
-        # Only apply to currently fetched groups to avoid mass-loading everything
         for gid in self.sorted_group_ids:
             node = self.groups_data[gid]
             if node.fetched:
@@ -621,7 +614,6 @@ class ResultsTreeModel(QAbstractItemModel):
 
     def get_summary_text(self) -> str:
         num_groups = len(self.sorted_group_ids)
-        # Calculate total duplicates from summary data in GroupNodes (node.count - 1 usually)
         total_items = sum(max(0, d.count - 1) for d in self.groups_data.values())
 
         return (
@@ -631,7 +623,6 @@ class ResultsTreeModel(QAbstractItemModel):
         )
 
     def remove_deleted_paths(self, deleted_paths: list[Path]):
-        # Use normcase to handle Windows case-insensitivity correctly
         deleted_set = {os.path.normcase(str(p)) for p in deleted_paths}
         groups_to_remove = []
 
@@ -639,7 +630,6 @@ class ResultsTreeModel(QAbstractItemModel):
             if not data.fetched:
                 continue
 
-            # Filter children using normalized paths
             original_count = len(data.children)
             data.children = [f for f in data.children if os.path.normcase(str(f.path)) not in deleted_set]
             data.count = len(data.children)
@@ -649,15 +639,12 @@ class ResultsTreeModel(QAbstractItemModel):
                 if data.count < min_items:
                     groups_to_remove.append(gid)
                 elif self.mode == ScanMode.DUPLICATES and not any(f.is_best for f in data.children) and data.children:
-                    # Promote new best if best was deleted
-                    # ResultNode is frozen/slots, so we must replace it
                     old_best = data.children[0]
                     new_best = ResultNode(
                         **{f.name: getattr(old_best, f.name) for f in fields(ResultNode) if f.name != "is_best"},
                         is_best=True,
                     )
                     data.children[0] = new_best
-                    # Update lookup
                     self.group_id_to_best_path[gid] = new_best.path
 
         for gid in groups_to_remove:
@@ -666,25 +653,78 @@ class ResultsTreeModel(QAbstractItemModel):
 
         self.sorted_group_ids = [gid for gid in self.sorted_group_ids if gid not in groups_to_remove]
 
-        # Clear check states for deleted paths
         paths_to_clear = list(self.check_states.keys())
         for path_str in paths_to_clear:
             if os.path.normcase(path_str) in deleted_set:
                 del self.check_states[path_str]
 
+    def get_paths_for_group_sync(self, group_id: int) -> list[Path]:
+        """
+        Synchronously retrieves all file paths for a group.
+        Used for 'Delete Group' action to ensure we get all files even if not fetched in UI.
+        """
+        if group_id not in self.groups_data:
+            return []
+
+        node = self.groups_data[group_id]
+
+        # Case 1: Already fetched in RAM
+        if node.fetched:
+            return [Path(c.path) for c in node.children]
+
+        # Case 2: Lazy Load - Query DB directly
+        if not self.db_path or not LANCEDB_AVAILABLE:
+            return []
+
+        try:
+            db = lancedb.connect(self.db_path)
+            table = db.open_table("scan_results")
+            # Query just the paths for this group
+            rows = table.search().where(f"group_id = {group_id}").limit(10000).to_list()
+            return [Path(r["path"]) for r in rows]
+        except Exception as e:
+            app_logger.error(f"Failed to fetch paths for group {group_id} from DB: {e}")
+            return []
+
+    def get_best_path_for_group_lazy(self, group_id: int) -> str | None:
+        """
+        Retrieves the path of the 'Best' file in a group directly from DB.
+        This allows the Grid View delegate to show a thumbnail without fetching the whole group.
+        """
+        # 1. Check in-memory cache first
+        if group_id in self.group_id_to_best_path:
+            return self.group_id_to_best_path[group_id]
+
+        # 2. Query DB
+        if not self.db_path or not LANCEDB_AVAILABLE:
+            return None
+
+        try:
+            db = lancedb.connect(self.db_path)
+            table = db.open_table("scan_results")
+            # Query for the item marked is_best within the group
+            res = table.search().where(f"group_id = {group_id} AND is_best = true").limit(1).to_list()
+
+            if res:
+                path = str(res[0]["path"])
+                # Cache it for next repaint
+                self.group_id_to_best_path[group_id] = path
+                return path
+        except Exception:
+            pass
+        return None
+
 
 class ImagePreviewModel(QAbstractListModel):
     """
-    Data model for the image preview list.
-    Implements ACTIVE TASK CANCELLATION to prevent scroll lag.
-    Receives data directly from the UI panel (which gets it from ResultsTreeModel).
+    Data model for the image preview list (Right Panel).
+    Handles loading images for the selected group.
     """
 
     file_missing = Signal(Path)
 
     def __init__(self, thread_pool: QThreadPool, parent=None):
         super().__init__(parent)
-        # Note: No db_path needed anymore, data comes pre-loaded in `items`
         self.group_id: int = -1
         self.items: list[ResultNode] = []
         self.pixmap_cache: OrderedDict[str, QPixmap] = OrderedDict()
@@ -692,7 +732,7 @@ class ImagePreviewModel(QAbstractListModel):
         self.thread_pool = thread_pool
 
         self.loading_paths = set()
-        self.active_tasks = {}  # key: cache_key -> ImageLoader
+        self.active_tasks = {}
 
         self.tonemap_mode = "none"
         self.target_size = 250
@@ -718,7 +758,6 @@ class ImagePreviewModel(QAbstractListModel):
         self.endResetModel()
 
     def cancel_all_tasks(self):
-        """Cancels all currently running image loaders."""
         for task in self.active_tasks.values():
             task.cancel()
         self.active_tasks.clear()
@@ -745,8 +784,6 @@ class ImagePreviewModel(QAbstractListModel):
         item = self.items[index.row()]
         path_str = item.path
         channel_to_load = item.channel
-
-        # Unique key for this specific UI item (path + channel)
         cache_key = f"{path_str}_{channel_to_load or 'full'}"
 
         if role == Qt.ItemDataRole.UserRole:
@@ -771,10 +808,9 @@ class ImagePreviewModel(QAbstractListModel):
                     on_finish_slot="_on_image_loaded",
                     on_error_slot="_on_image_error",
                     channel_to_load=channel_to_load,
-                    ui_key=cache_key,  # Pass the unique key to the loader
+                    ui_key=cache_key,
                 )
 
-                # Track the task for cancellation
                 self.active_tasks[cache_key] = loader
                 self.thread_pool.start(loader)
             return None
@@ -782,10 +818,6 @@ class ImagePreviewModel(QAbstractListModel):
 
     @Slot(str, QImage)
     def _on_image_loaded(self, ui_key: str, q_img: QImage):
-        """
-        Slot called when an image finishes loading.
-        ui_key is the unique cache key (path_channel) passed to the loader.
-        """
         if ui_key in self.loading_paths:
             self.loading_paths.remove(ui_key)
             if ui_key in self.active_tasks:
@@ -797,7 +829,6 @@ class ImagePreviewModel(QAbstractListModel):
                 if len(self.pixmap_cache) > self.CACHE_SIZE_LIMIT:
                     self.pixmap_cache.popitem(last=False)
 
-            # Refresh only the specific row associated with this key
             self._emit_data_changed_for_key(ui_key)
 
     @Slot(str, str)
@@ -817,7 +848,6 @@ class ImagePreviewModel(QAbstractListModel):
             self._emit_data_changed_for_key(ui_key)
 
     def _emit_data_changed_for_key(self, ui_key: str):
-        # Reconstruct row from key. Key format: "{path}_{channel or 'full'}"
         for i, item in enumerate(self.items):
             item_key = f"{item.path}_{item.channel or 'full'}"
             if item_key == ui_key:
@@ -831,261 +861,6 @@ class ImagePreviewModel(QAbstractListModel):
             if item.path == path_str:
                 return i
         return None
-
-
-class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
-    """Custom delegate for rendering items in the ImagePreviewModel with Channel Hover Preview."""
-
-    def __init__(self, preview_size: int, state: "ImageComparerState", parent=None):
-        super().__init__(parent)
-        self.preview_size = preview_size
-        self.state = state
-        self.bg_alpha, self.is_transparency_enabled = 255, True
-        self.bold_font = QFont()
-        self.bold_font.setBold(True)
-        self.bold_font_metrics = QFontMetrics(self.bold_font)
-        self.regular_font_metrics = QFontMetrics(QFont())
-
-        # --- Channel Preview State ---
-        self._hover_index_key = None  # Store id(item_data) to identify index uniquely
-        self._hover_channel = None
-
-        # Small cache for generated channel thumbnails to ensure 60 FPS hover
-        # Key: (path_str, channel_char) -> QPixmap
-        self._channel_cache = OrderedDict()
-        self._CACHE_SIZE = 100
-
-    def set_bg_alpha(self, alpha: int):
-        self.bg_alpha = alpha
-
-    def set_transparency_enabled(self, state: bool):
-        self.is_transparency_enabled = state
-
-    def set_preview_size(self, size: int):
-        self.preview_size = size
-        # Clear channel cache when resizing.
-        # This ensures that if the user viewed a channel at low res,
-        # increasing the size will force a regeneration of the channel preview
-        # using the new, higher-resolution source image.
-        self._channel_cache.clear()
-
-    def sizeHint(self, option, index):
-        return QSize(self.preview_size + 250, self.preview_size + 10)
-
-    @Slot(QModelIndex, object)
-    def set_hover_channel(self, index: QModelIndex, channel: str | None):
-        """Called by the view when mouse moves over specific zones."""
-        # Identify the item uniquely (pointer to ResultNode)
-        item_key = None
-        if index.isValid():
-            item_data = index.data(Qt.ItemDataRole.UserRole)
-            if item_data:
-                item_key = id(item_data)  # Fast unique ID for the current python object
-
-        if item_key != self._hover_index_key or channel != self._hover_channel:
-            self._hover_index_key = item_key
-            self._hover_channel = channel
-
-            # Trigger repaint of the view (can be optimized to update specific rect)
-            # Correctly reference the list_view's viewport via the parent Panel
-            if self.parent():
-                # If parent is the Panel (which has .list_view)
-                if hasattr(self.parent(), "list_view"):
-                    self.parent().list_view.viewport().update()
-                # Fallback: if parent is the View itself
-                elif hasattr(self.parent(), "viewport"):
-                    self.parent().viewport().update()
-
-    def paint(self, painter, option, index):
-        painter.save()
-        try:
-            painter.setClipRect(option.rect)
-            item_data: ResultNode = index.data(Qt.ItemDataRole.UserRole)
-            if not item_data:
-                return
-            self._draw_background(painter, option, item_data)
-            self._draw_thumbnail(painter, option, index, item_data)
-            self._draw_text_info(painter, option, item_data)
-        finally:
-            painter.restore()
-
-    def _draw_background(self, painter, option, item_data: ResultNode):
-        painter.fillRect(option.rect, option.palette.base())
-        if option.state & QStyle.State_Selected:
-            highlight_color = option.palette.highlight().color()
-            highlight_color.setAlpha(80)
-            painter.fillRect(option.rect, highlight_color)
-
-        if self.state.is_candidate(item_data):
-            painter.setPen(QPen(QColor(UIConfig.Colors.HIGHLIGHT), 2))
-            painter.drawRect(option.rect.adjusted(1, 1, -1, -1))
-
-    def _draw_thumbnail(self, painter, option, index, item_data):
-        thumb_rect = option.rect.adjusted(5, 5, -(option.rect.width() - self.preview_size - 5), -5)
-
-        if self.is_transparency_enabled:
-            painter.drawPixmap(
-                thumb_rect.topLeft(),
-                self.get_checkered_pixmap(thumb_rect.size(), self.bg_alpha),
-            )
-
-        # Get original pixmap
-        original_pixmap = index.data(Qt.ItemDataRole.DecorationRole)
-
-        # --- CHANNEL PREVIEW LOGIC ---
-        pixmap_to_draw = original_pixmap
-
-        # Check if this is the currently hovered item and a channel is selected
-        is_hovered = id(item_data) == self._hover_index_key
-
-        if is_hovered and self._hover_channel and original_pixmap and not original_pixmap.isNull():
-            cache_key = (item_data.path, self._hover_channel)
-
-            if cache_key in self._channel_cache:
-                # Hit cache
-                pixmap_to_draw = self._channel_cache[cache_key]
-                self._channel_cache.move_to_end(cache_key)
-            else:
-                # Generate and cache
-                pixmap_to_draw = self._generate_channel_pixmap(original_pixmap, self._hover_channel)
-                self._channel_cache[cache_key] = pixmap_to_draw
-                if len(self._channel_cache) > self._CACHE_SIZE:
-                    self._channel_cache.popitem(last=False)
-
-        # Key must match how model generates it
-        cache_key = f"{item_data.path}_{item_data.channel or 'full'}"
-        error_msg = None
-        if self.parent() and hasattr(self.parent(), "model"):
-            error_msg = self.parent().model.error_paths.get(cache_key)
-
-        if pixmap_to_draw and not pixmap_to_draw.isNull():
-            scaled = pixmap_to_draw.scaled(
-                thumb_rect.size(),
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-
-            # Determine positioning to center image
-            x_pos = thumb_rect.x() + (thumb_rect.width() - scaled.width()) // 2
-            y_pos = thumb_rect.y() + (thumb_rect.height() - scaled.height()) // 2
-
-            painter.drawPixmap(x_pos, y_pos, scaled)
-
-            if is_hovered and self._hover_channel:
-                self._draw_channel_label(painter, thumb_rect.x(), thumb_rect.y(), self._hover_channel)
-
-        elif error_msg:
-            painter.save()
-            painter.setPen(QColor(UIConfig.Colors.ERROR))
-            painter.drawText(thumb_rect, Qt.AlignmentFlag.AlignCenter, "Error")
-            painter.restore()
-        else:
-            painter.drawText(thumb_rect, Qt.AlignmentFlag.AlignCenter, "Loading...")
-
-    def _generate_channel_pixmap(self, qpixmap: QPixmap, channel: str) -> QPixmap:
-        """
-        Extracts a channel from QPixmap and returns it as a Grayscale QPixmap.
-        Uses PIL for robust format handling.
-        """
-        try:
-            # QPixmap -> QImage
-            qimg = qpixmap.toImage()
-            # Ensure RGBA format for PIL conversion consistency
-            if qimg.format() != QImage.Format.Format_RGBA8888:
-                qimg = qimg.convertToFormat(QImage.Format.Format_RGBA8888)
-
-            # QImage -> PIL
-            pil_img = ImageQt.fromqimage(qimg)
-
-            # Split channels
-            bands = pil_img.split()
-            channel_idx = {"R": 0, "G": 1, "B": 2, "A": 3}.get(channel)
-
-            if channel_idx is not None and channel_idx < len(bands):
-                band_img = bands[channel_idx]
-                # Convert single channel (L) back to RGB so it displays as grayscale
-                gray_img = Image.merge("RGB", (band_img, band_img, band_img))
-
-                # Convert back to QPixmap
-                return QPixmap.fromImage(ImageQt.ImageQt(gray_img))
-
-            return qpixmap  # Fallback
-        except Exception as e:
-            print(f"Error generating channel preview: {e}")
-            return qpixmap
-
-    def _draw_channel_label(self, painter, x, y, channel):
-        """Draws a small colored badge indicating which channel is being shown."""
-        colors = {"R": "#FF5555", "G": "#55FF55", "B": "#55AAFF", "A": "#FFFFFF"}
-        rect = QRect(x + 5, y + 5, 20, 20)
-
-        painter.save()
-        painter.setBrush(QColor(colors.get(channel, "#CCCCCC")))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(rect, 5, 5)
-
-        painter.setPen(QColor("black"))
-        painter.setFont(self.bold_font)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, channel)
-        painter.restore()
-
-    def _draw_text_info(self, painter, option, item_data: ResultNode):
-        text_rect = option.rect.adjusted(self.preview_size + 15, 5, -5, -5)
-        if not text_rect.isValid():
-            return
-        main_color = (
-            option.palette.highlightedText().color()
-            if option.state & QStyle.State_Selected
-            else option.palette.text().color()
-        )
-        secondary_color = QColor(main_color)
-        secondary_color.setAlpha(150)
-        path = Path(item_data.path)
-        line_height = self.regular_font_metrics.height()
-        x, y = text_rect.left(), text_rect.top() + self.bold_font_metrics.ascent()
-
-        painter.setFont(self.bold_font)
-        painter.setPen(main_color)
-        filename = path.name
-        if item_data.channel:
-            filename += f" ({item_data.channel})"
-
-        painter.drawText(
-            x,
-            y,
-            self.bold_font_metrics.elidedText(filename, Qt.ElideRight, text_rect.width()),
-        )
-
-        y += line_height
-        painter.setFont(QFont())
-        painter.setPen(secondary_color)
-
-        dist_text = ""
-        if item_data.is_best:
-            dist_text = f"[{BEST_FILE_METHOD_NAME}] | "
-        else:
-            method = item_data.found_by
-            dist = item_data.distance
-            if method_display := METHOD_DISPLAY_NAMES.get(method):
-                dist_text = f"{method_display} | "
-            elif dist >= 0:
-                dist_text = f"Score: {dist}% | "
-
-        meta_text = _format_metadata_string(item_data)
-        full_text = f"{dist_text}{meta_text}"
-
-        painter.drawText(
-            x,
-            y,
-            self.regular_font_metrics.elidedText(full_text, Qt.ElideRight, text_rect.width()),
-        )
-
-        y += line_height
-        painter.drawText(
-            x,
-            y,
-            self.regular_font_metrics.elidedText(str(path.parent), Qt.ElideRight, text_rect.width()),
-        )
 
 
 class ResultsProxyModel(QSortFilterProxyModel):
@@ -1115,7 +890,6 @@ class ResultsProxyModel(QSortFilterProxyModel):
         if not node or isinstance(node, GroupNode):
             return True
 
-        # Always allow the dummy node to prevent filtering out the loading state
         if node.path == "loading_dummy":
             return True
 
