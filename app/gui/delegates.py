@@ -71,14 +71,19 @@ class GroupGridDelegate(QStyledItemDelegate):
         self.thread_pool = thread_pool
 
         # Layout settings
-        self.card_width = 150
-        self.card_height = 190
-        self.thumb_size = 130
         self.padding = 10
+        self.text_height = 60  # Space reserved for text below image
+        self.set_base_size(130)  # Default size
 
         # Caching
         self.cache: dict[str, QPixmap] = {}
         self.loading_paths: set[str] = set()
+
+    def set_base_size(self, size: int):
+        """Updates dimensions based on the target thumbnail size."""
+        self.thumb_size = size
+        self.card_width = self.thumb_size + (self.padding * 2)
+        self.card_height = self.thumb_size + (self.padding * 2) + self.text_height
 
     def sizeHint(self, option, index):
         return QSize(self.card_width, self.card_height)
@@ -110,9 +115,13 @@ class GroupGridDelegate(QStyledItemDelegate):
         # 3. Determine Image Path
         best_file_path = self._get_best_file_path(index, node)
 
+        # Calculate Image Rectangle (Centered horizontally)
+        img_x = rect.x() + (rect.width() - self.thumb_size) // 2
+        img_y = rect.y() + self.padding
+
         img_rect = QRect(
-            rect.x() + self.padding,
-            rect.y() + self.padding,
+            img_x,
+            img_y,
             self.thumb_size,
             self.thumb_size,
         )
@@ -145,9 +154,10 @@ class GroupGridDelegate(QStyledItemDelegate):
             painter.drawText(img_rect, Qt.AlignmentFlag.AlignCenter, status_text)
 
         # 5. Draw Text: Group Name
+        text_y_start = img_rect.bottom() + 10
         text_rect = QRect(
             rect.x() + 5,
-            rect.y() + self.thumb_size + 15,
+            text_y_start,
             rect.width() - 10,
             20,
         )
@@ -438,7 +448,7 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         meta_text = _format_metadata_string(item_data)
 
         if self.is_grid_mode:
-            # --- GRID MODE ---
+            # GRID MODE
             y = option.rect.y() + self.preview_size + 8
             w = option.rect.width() - 4
             x = option.rect.x() + 2
@@ -487,7 +497,7 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             )
 
         else:
-            # --- LIST MODE ---
+            # LIST MODE
             r = option.rect.adjusted(self.preview_size + 15, 5, -5, -5)
             x, y = r.left(), r.top() + self.bold_font_metrics.ascent()
 

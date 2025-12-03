@@ -87,7 +87,7 @@ class ResultsPanel(QGroupBox):
         layout = QVBoxLayout(self)
         self._create_header_controls(layout)
 
-        # --- Main View Stack (Tree vs Grid) ---
+        # Main View Stack (Tree vs Grid)
         self.view_stack = QStackedWidget()
 
         # 1. Tree View (Table/Details)
@@ -102,7 +102,7 @@ class ResultsPanel(QGroupBox):
         self.results_grid.setViewMode(QListView.ViewMode.IconMode)
         self.results_grid.setResizeMode(QListView.ResizeMode.Adjust)
         self.results_grid.setSpacing(12)
-        self.results_grid.setUniformItemSizes(True)
+        self.results_grid.setUniformItemSizes(False)  # False allows variable height for text wrapping
         self.results_grid.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
 
         self.view_stack.addWidget(self.results_view)
@@ -164,7 +164,7 @@ class ResultsPanel(QGroupBox):
         self.search_entry.setPlaceholderText("Filter results by name...")
         top_controls_layout.addWidget(self.search_entry)
 
-        # --- View Mode Switcher ---
+        # View Mode Switcher
         self.view_mode_group = QButtonGroup(self)
 
         # List Button
@@ -193,6 +193,19 @@ class ResultsPanel(QGroupBox):
         mode_widget = QWidget()
         mode_widget.setLayout(mode_btn_layout)
         top_controls_layout.addWidget(mode_widget)
+
+        # Grid Size Slider
+        self.grid_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.grid_size_slider.setRange(100, 350)  # From 100px to 350px
+        self.grid_size_slider.setValue(130)  # Default size
+        self.grid_size_slider.setFixedWidth(80)
+        self.grid_size_slider.setToolTip("Grid Card Size")
+        self.grid_size_slider.setVisible(False)  # Hidden by default (List mode)
+
+        # Connect signal
+        self.grid_size_slider.valueChanged.connect(self._on_grid_size_changed)
+
+        top_controls_layout.addWidget(self.grid_size_slider)
 
         self.expand_button = QPushButton("Expand All")
         self.collapse_button = QPushButton("Collapse All")
@@ -293,11 +306,25 @@ class ResultsPanel(QGroupBox):
             self.collapse_button.setEnabled(False)
             # Disable File Selection buttons (Grid works on groups, check-boxes are in tree)
             self.selection_group_box.setEnabled(False)
+
+            # Show Size Slider
+            self.grid_size_slider.setVisible(True)
         else:
             self.view_stack.setCurrentWidget(self.results_view)
             self.expand_button.setEnabled(True)
             self.collapse_button.setEnabled(True)
             self.selection_group_box.setEnabled(True)
+
+            # Hide Size Slider
+            self.grid_size_slider.setVisible(False)
+
+    @Slot(int)
+    def _on_grid_size_changed(self, value: int):
+        """Updates the size of cards in the Grid View."""
+        if hasattr(self, "grid_delegate"):
+            self.grid_delegate.set_base_size(value)
+            # Force re-layout because sizes changed
+            self.results_grid.doItemsLayout()
 
     @Slot(object, object)
     def _sync_grid_selection_to_tree(self, selected, deselected):
@@ -351,12 +378,12 @@ class ResultsPanel(QGroupBox):
 
         node = source_idx.internalPointer()
 
-        # --- CASE 1: ResultNode (Individual File - Only in Tree View) ---
+        # CASE 1: ResultNode (Individual File - Only in Tree View)
         if isinstance(node, ResultNode) and node.path != "loading_dummy":
             self.context_menu_path = Path(node.path)
             self.context_menu.exec(QCursor.pos())
 
-        # --- CASE 2: GroupNode (Folder - Grid View or Tree Parent) ---
+        # CASE 2: GroupNode (Folder - Grid View or Tree Parent)
         elif isinstance(node, GroupNode):
             group_menu = QMenu(self)
 
@@ -473,7 +500,14 @@ class ResultsPanel(QGroupBox):
         enable_general = is_enabled and has_results
 
         # General controls
-        for w in [self.search_entry, self.expand_button, self.collapse_button, self.btn_list_view, self.btn_grid_view]:
+        for w in [
+            self.search_entry,
+            self.expand_button,
+            self.collapse_button,
+            self.btn_list_view,
+            self.btn_grid_view,
+            self.grid_size_slider,
+        ]:
             w.setEnabled(enable_general)
 
         # Views
