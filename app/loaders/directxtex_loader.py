@@ -14,82 +14,7 @@ from .base_loader import BaseLoader
 if DIRECTXTEX_AVAILABLE:
     import directxtex_decoder
 
-# --- OPTIONAL NUMBA SUPPORT ---
-try:
-    import numba
-
-    NUMBA_AVAILABLE = True
-except ImportError:
-    NUMBA_AVAILABLE = False
-
 app_logger = logging.getLogger("PixelHand.dds_loader")
-
-
-# 1. Pure NumPy implementation (Fallback)
-def _unpremultiply_alpha_numpy(arr: np.ndarray) -> np.ndarray:
-    """
-    Optimized Vectorized NumPy implementation.
-    Uses inverse alpha multiplication to avoid 3 separate divisions.
-    Formula: C_new = C_old * (255.0 / Alpha)
-    """
-    # Extract alpha as float to prevent overflow
-    alpha = arr[..., 3].astype(np.float32)
-
-    # Mask for non-zero, non-full alpha
-    mask = (alpha > 0) & (alpha < 255)
-
-    # If no semi-transparent pixels, return early
-    if not np.any(mask):
-        return arr
-
-    # We process RGB channels in-place where possible
-    for i in range(3):
-        channel = arr[..., i].astype(np.float32)
-
-        # Apply formula: channel * 255 / alpha
-        # Using where=mask to only compute necessary pixels
-        np.divide(channel * 255.0, alpha, out=channel, where=mask)
-
-        # Clip and assign back
-        arr[..., i] = np.clip(channel, 0, 255).astype(np.uint8)
-
-    return arr
-
-
-# 2. Numba implementation (High Performance)
-if NUMBA_AVAILABLE:
-
-    @numba.njit(parallel=True, fastmath=True, cache=True)
-    def _unpremultiply_alpha_numba(arr: np.ndarray) -> np.ndarray:
-        """
-        JIT-compiled parallel implementation.
-        Iterates pixels directly, utilizing CPU L1/L2 cache effectively.
-        """
-        rows = arr.shape[0]
-        cols = arr.shape[1]
-
-        for y in numba.prange(rows):
-            for x in range(cols):
-                alpha = arr[y, x, 3]
-                # Only process semi-transparent pixels
-                if alpha > 0 and alpha < 255:
-                    # Integer math is faster here in C-level code
-                    r = np.uint32(arr[y, x, 0])
-                    g = np.uint32(arr[y, x, 1])
-                    b = np.uint32(arr[y, x, 2])
-
-                    # Multiplication before division for precision
-                    # (color * 255) // alpha
-                    arr[y, x, 0] = min((r * 255) // alpha, 255)
-                    arr[y, x, 1] = min((g * 255) // alpha, 255)
-                    arr[y, x, 2] = min((b * 255) // alpha, 255)
-        return arr
-
-    # Select Numba version
-    _unpremultiply_alpha = _unpremultiply_alpha_numba
-else:
-    # Select NumPy version
-    _unpremultiply_alpha = _unpremultiply_alpha_numpy
 
 
 class DirectXTexLoader(BaseLoader):
@@ -126,11 +51,12 @@ class DirectXTexLoader(BaseLoader):
                 raise TypeError(f"Unhandled NumPy dtype from DirectXTex decoder: {dtype}")
 
             if shrink > 1:
-                # Ensure dimensions never collapse to 0 (causes PIL errors / div by zero)
+                # Ensure dimensions never collapse to 0
                 target_w = max(1, pil_image.width // shrink)
                 target_h = max(1, pil_image.height // shrink)
 
-                pil_image.thumbnail((target_w, target_h), Image.Resampling.NEAREST)
+                # Use LANCZOS for high quality downscaling
+                pil_image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
 
             return self._handle_alpha_logic(pil_image)
 
@@ -169,17 +95,19 @@ class DirectXTexLoader(BaseLoader):
 
     def _handle_alpha_logic(self, pil_image: Image.Image) -> Image.Image:
         """
-        Checks alpha channel properties and unpremultiplies if necessary.
-        Optimized to avoid NumPy conversion if alpha is simple (solid white/black).
+        Smart Alpha Handling (Simplified/Fast):
+        1. If Alpha is fully opaque (255), discard it to save memory.
+        2. If Alpha is fully transparent (0), but RGB has data (Emission/VFX),
+           discard Alpha to make the content visible.
         """
         if pil_image.mode != "RGBA":
             return pil_image
 
-        # Use PIL's C-based getextrema() first.
-        # It's much faster than np.array(img) for 4K+ textures.
+        # Use PIL's C-based getextrema() for speed.
+        # This is much faster than converting to numpy for large images.
         try:
             extrema = pil_image.getextrema()
-            # RGBA extrema: [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
+            # RGBA extrema format: [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
             if len(extrema) >= 4:
                 alpha_min, alpha_max = extrema[3]
 
@@ -188,44 +116,17 @@ class DirectXTexLoader(BaseLoader):
                     return pil_image.convert("RGB")
 
                 # Case 2: Alpha is fully transparent (0).
-                # Check if RGB channels have content before discarding
                 if alpha_max <= 0:
                     r_max = extrema[0][1]
                     g_max = extrema[1][1]
                     b_max = extrema[2][1]
 
-                    # If image is truly black AND transparent, return as is
-                    if r_max == 0 and g_max == 0 and b_max == 0:
-                        return pil_image
-
-                    # If we are here, it means Alpha=0 but Color>0.
-                    # We intentionally fall through to the NumPy logic below
-                    # which has a specific handler for "Emission/Additive" textures.
-                    pass
+                    # If RGB contains data, dropping Alpha makes it visible (Opaque).
+                    # This fixes "Black Preview" for additive/emission textures.
+                    if r_max > 0 or g_max > 0 or b_max > 0:
+                        return pil_image.convert("RGB")
 
         except Exception:
             pass
 
-        # Case 3: Mixed Alpha or Additive Texture (Alpha=0, Color>0)
-        arr = np.array(pil_image)
-        rgb, alpha = arr[:, :, :3], arr[:, :, 3]
-        alpha_max = np.max(alpha)
-        rgb_max = np.max(rgb)
-
-        # Optimization: Pure emission (Alpha ~0 but Color > 0)
-        # e.g. FX textures. Force Alpha to max of color.
-        # This makes the fire visible in the viewer (using brightness as opacity).
-        if alpha_max < 5 and rgb_max > 0:
-            arr[:, :, 3] = np.max(rgb, axis=2)
-            return Image.fromarray(arr)
-
-        # Optimization: Pure alpha mask (Color ~0)
-        if rgb_max == 0 and alpha_max > 0:
-            if np.max(alpha) != np.min(alpha):
-                # Move alpha to RGB for visibility
-                arr[:, :, :3] = alpha[:, :, np.newaxis]
-                arr[:, :, 3] = 255
-            return Image.fromarray(arr)
-
-        # Standard unpremultiply
-        return Image.fromarray(_unpremultiply_alpha(arr))
+        return pil_image
