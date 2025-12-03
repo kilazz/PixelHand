@@ -863,6 +863,11 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
 
     def set_preview_size(self, size: int):
         self.preview_size = size
+        # Clear channel cache when resizing.
+        # This ensures that if the user viewed a channel at low res,
+        # increasing the size will force a regeneration of the channel preview
+        # using the new, higher-resolution source image.
+        self._channel_cache.clear()
 
     def sizeHint(self, option, index):
         return QSize(self.preview_size + 250, self.preview_size + 10)
