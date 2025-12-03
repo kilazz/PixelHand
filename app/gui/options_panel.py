@@ -47,7 +47,7 @@ app_logger = logging.getLogger("PixelHand.gui.options")
 class QCPanel(QGroupBox):
     """
     Separate panel for Quality Control options.
-    Always visible, but enabled only when Folder Compare mode is active.
+    Dynamically enables/disables checks based on Single Folder vs Folder Compare mode.
     """
 
     def __init__(self, settings_manager: SettingsManager):
@@ -64,7 +64,7 @@ class QCPanel(QGroupBox):
         qc_grid.setColumnStretch(0, 1)
         qc_grid.setColumnStretch(1, 1)
 
-        # --- Column 1: General Logic & Basic Checks ---
+        # --- Column 1: General & Relative Checks ---
         self.hide_same_res_check = QCheckBox("Hide matches (Show diffs only)")
         self.hide_same_res_check.setToolTip("Ignore files where name and resolution match exactly.")
         self.hide_same_res_check.setStyleSheet("color: #FF9800; font-weight: bold;")
@@ -73,24 +73,10 @@ class QCPanel(QGroupBox):
         self.match_stem_check.setToolTip("Matches 'file.tga' with 'file.dds'.")
 
         self.check_alpha_check = QCheckBox("Check Alpha Mismatch")
-        self.check_alpha_check.setToolTip("Flags if Alpha channel presence differs.")
+        self.check_alpha_check.setToolTip("Flags if Alpha channel presence differs between Source and Target.")
 
-        self.check_npot_check = QCheckBox("Check NPOT (Power of 2)")
-        self.check_npot_check.setToolTip("Flags non-power-of-two dimensions in Folder B.")
-
-        # New: Compression Check
         self.check_compression_check = QCheckBox("Check Compression Change")
         self.check_compression_check.setToolTip("Flags if format changed from Lossless to Lossy or between BC formats.")
-
-        qc_grid.addWidget(self.hide_same_res_check, 0, 0)
-        qc_grid.addWidget(self.match_stem_check, 1, 0)
-        qc_grid.addWidget(self.check_alpha_check, 2, 0)
-        qc_grid.addWidget(self.check_npot_check, 3, 0)
-        qc_grid.addWidget(self.check_compression_check, 4, 0)
-
-        # --- Column 2: Advanced Checks ---
-        self.check_mipmaps_check = QCheckBox("Check Mip-Maps")
-        self.check_mipmaps_check.setToolTip("Flags missing mipmaps in Folder B.")
 
         self.check_bloat_check = QCheckBox("Check Size Bloat")
         self.check_bloat_check.setToolTip("Flags if file B is significantly larger (>1.5x) than A.")
@@ -98,22 +84,82 @@ class QCPanel(QGroupBox):
         self.check_colorspace_check = QCheckBox("Check Color Space")
         self.check_colorspace_check.setToolTip("Flags metadata color space mismatch.")
 
+        qc_grid.addWidget(self.hide_same_res_check, 0, 0)
+        qc_grid.addWidget(self.match_stem_check, 1, 0)
+        qc_grid.addWidget(self.check_alpha_check, 2, 0)
+        qc_grid.addWidget(self.check_compression_check, 3, 0)
+        qc_grid.addWidget(self.check_bloat_check, 4, 0)
+        qc_grid.addWidget(self.check_colorspace_check, 5, 0)
+
+        # --- Column 2: Absolute Checks ---
+        self.check_npot_check = QCheckBox("Check NPOT (Power of 2)")
+        self.check_npot_check.setToolTip("Flags non-power-of-two dimensions.")
+
+        self.check_mipmaps_check = QCheckBox("Check Mip-Maps")
+        self.check_mipmaps_check.setToolTip("Flags missing mipmaps in textures > 64px.")
+
+        self.check_align_check = QCheckBox("Check Block Alignment (4px)")
+        self.check_align_check.setToolTip("Flags dimensions not divisible by 4 (required for DXT/BC compression).")
+
         self.check_bitdepth_check = QCheckBox("Check Bit Depth")
         self.check_bitdepth_check.setToolTip("Flags bit depth differences (e.g. 16 vs 8 bit).")
 
         self.check_solid_check = QCheckBox("Check Solid Color (Slow)")
         self.check_solid_check.setToolTip("Reads pixels to find solid-color textures.\nWarning: Slower scan.")
 
-        # New: Alignment Check
-        self.check_align_check = QCheckBox("Check Block Alignment (4px)")
-        self.check_align_check.setToolTip("Flags dimensions not divisible by 4 (required for DXT/BC compression).")
-
-        qc_grid.addWidget(self.check_mipmaps_check, 0, 1)
-        qc_grid.addWidget(self.check_bloat_check, 1, 1)
-        qc_grid.addWidget(self.check_colorspace_check, 2, 1)
+        qc_grid.addWidget(self.check_npot_check, 0, 1)
+        qc_grid.addWidget(self.check_mipmaps_check, 1, 1)
+        qc_grid.addWidget(self.check_align_check, 2, 1)
         qc_grid.addWidget(self.check_bitdepth_check, 3, 1)
         qc_grid.addWidget(self.check_solid_check, 4, 1)
-        qc_grid.addWidget(self.check_align_check, 5, 1)
+
+        # --- Categorize Widgets for Logic ---
+        # Relative: Only make sense when comparing A vs B
+        self.relative_widgets = [
+            self.hide_same_res_check,
+            self.match_stem_check,
+            self.check_alpha_check,
+            self.check_compression_check,
+            self.check_bloat_check,
+            self.check_colorspace_check,
+        ]
+
+        # Absolute: Make sense for a single file
+        self.absolute_widgets = [
+            self.check_npot_check,
+            self.check_mipmaps_check,
+            self.check_align_check,
+            self.check_bitdepth_check,
+            self.check_solid_check,
+        ]
+
+    def set_mode_context(self, mode_name: str):
+        """
+        Updates the enabled state of checkboxes based on the current Scan Mode.
+        """
+        is_single_qc = mode_name == ScanMode.SINGLE_FOLDER_QC.name
+        is_compare = mode_name == ScanMode.FOLDER_COMPARE.name
+
+        # If not in a QC mode, disable everything
+        if not (is_single_qc or is_compare):
+            self.setEnabled(False)
+            return
+
+        self.setEnabled(True)
+
+        # Absolute checks are always available in both QC modes
+        for w in self.absolute_widgets:
+            w.setEnabled(True)
+            w.setStyleSheet("")  # Reset style
+
+        # Relative checks are ONLY available in Comparison mode
+        for w in self.relative_widgets:
+            w.setEnabled(is_compare)
+            if not is_compare:
+                # Visually grey out text to indicate they are ignored
+                w.setStyleSheet("color: gray;")
+            else:
+                w.setStyleSheet("color: #FF9800; font-weight: bold;" if w == self.hide_same_res_check else "")
 
     def _connect_signals(self):
         self.hide_same_res_check.toggled.connect(self.settings_manager.set_hide_same_resolution_groups)
@@ -195,9 +241,9 @@ class OptionsPanel(QGroupBox):
         folder_layout.addWidget(self.browse_folder_button)
         self.form_layout.addRow("Folder A:", folder_layout)
 
-        # Folder B (Comparison)
+        # Folder B (Comparison) - Initially Hidden
         self.folder_b_entry = QLineEdit()
-        self.folder_b_entry.setPlaceholderText("Optional: Select second folder to compare resolutions...")
+        self.folder_b_entry.setPlaceholderText("Select second folder to compare resolutions...")
         self.browse_folder_b_button = QPushButton("...")
         self.browse_folder_b_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
 
@@ -209,6 +255,11 @@ class OptionsPanel(QGroupBox):
         self.folder_b_label = QLabel("Folder B:")
         self.folder_b_container = QWidget()
         self.folder_b_container.setLayout(folder_b_layout)
+
+        # Hide by default, shown only when QC Mode is enabled
+        self.folder_b_label.setVisible(False)
+        self.folder_b_container.setVisible(False)
+
         self.form_layout.addRow(self.folder_b_label, self.folder_b_container)
 
     def _create_search_widgets(self):
@@ -330,27 +381,39 @@ class OptionsPanel(QGroupBox):
         has_sample = bool(self._sample_path)
         has_text_query = bool(self.search_entry.text().strip())
 
-        # Determine Scan Mode
-        if has_folder_b:
-            self.current_scan_mode = ScanMode.FOLDER_COMPARE
-            self.scan_button_text = "Compare Folders"
+        # Check QC checkbox state from the sibling panel (ScanOptionsPanel)
+        is_qc_mode_checked = False
+        if self.window() and hasattr(self.window(), "scan_options_panel"):
+            is_qc_mode_checked = self.window().scan_options_panel.qc_mode_check.isChecked()
 
-            # Disable Search inputs in compare mode to avoid confusion
+        # LOGIC CHANGE: Toggle Folder B visibility based on QC Mode checkbox
+        self.folder_b_label.setVisible(is_qc_mode_checked)
+        self.folder_b_container.setVisible(is_qc_mode_checked)
+
+        # Determine Scan Mode
+        if is_qc_mode_checked:
+            if has_folder_b:
+                # 2 Folders + QC Check = Compare Mode (Relative Checks)
+                self.current_scan_mode = ScanMode.FOLDER_COMPARE
+                self.scan_button_text = "Run QC Compare"
+            else:
+                # 1 Folder + QC Check = Single QC Mode (Absolute Checks)
+                self.current_scan_mode = ScanMode.SINGLE_FOLDER_QC
+                self.scan_button_text = "Run QC Scan"
+
+            # Disable Search/AI inputs in QC modes
             self.search_entry.setEnabled(False)
             self.browse_sample_button.setEnabled(False)
             self.clear_sample_button.setEnabled(False)
-
-            # Disable similarity threshold (not used in metadata compare)
             self.threshold_spinbox.setEnabled(False)
 
             # Enable QC Panel
             self.qc_mode_toggled.emit(True)
 
+        # Non-QC Modes (AI / Duplicates)
         elif is_ai_on and has_sample and supports_image:
             self.current_scan_mode = ScanMode.SAMPLE_SEARCH
             self.scan_button_text = "Search by Sample"
-
-            # Re-enable inputs
             self.search_entry.setEnabled(True)
             self.browse_sample_button.setEnabled(True)
             self.clear_sample_button.setVisible(True)
@@ -360,8 +423,6 @@ class OptionsPanel(QGroupBox):
         elif is_ai_on and has_text_query and supports_text:
             self.current_scan_mode = ScanMode.TEXT_SEARCH
             self.scan_button_text = "Search by Text"
-
-            # Re-enable inputs
             self.search_entry.setEnabled(True)
             self.browse_sample_button.setEnabled(True)
             self.clear_sample_button.setVisible(False)
@@ -371,40 +432,40 @@ class OptionsPanel(QGroupBox):
         else:
             self.current_scan_mode = ScanMode.DUPLICATES
             self.scan_button_text = "Scan for Duplicates"
-
-            # Re-enable inputs
             self.search_entry.setEnabled(True)
             self.browse_sample_button.setEnabled(is_ai_on and supports_image)
             self.clear_sample_button.setVisible(False)
             self.threshold_spinbox.setEnabled(is_ai_on)
             self.qc_mode_toggled.emit(False)
 
-        # UI Visual Updates
+        # UI Visual Updates (Placeholder texts, etc.)
         if not is_ai_on:
             self.search_entry.setPlaceholderText("AI is disabled")
             self.search_entry.setEnabled(False)
-        elif not supports_text and not has_folder_b:
+        elif not supports_text and not is_qc_mode_checked:
             self.search_entry.setPlaceholderText("Text search not supported by this model")
-        elif not has_folder_b:
+        elif not is_qc_mode_checked:
             self.search_entry.setPlaceholderText("Enter text to search...")
         else:
-            self.search_entry.setPlaceholderText("Search disabled in Compare mode")
+            self.search_entry.setPlaceholderText("Search disabled in QC mode")
 
-        if not (is_ai_on and supports_image) and not has_folder_b:
+        if not (is_ai_on and supports_image) and not is_qc_mode_checked:
             self._clear_sample()
 
         is_ai_search = self.current_scan_mode in (ScanMode.TEXT_SEARCH, ScanMode.SAMPLE_SEARCH)
-
         label = self.form_layout.labelForField(self.threshold_spinbox)
         if label:
             label.setText("Similarity:" if not is_ai_search else "Similarity (N/A):")
 
-        # In search mode, threshold isn't strictly used for filtering in the same way (ranking is used)
         if is_ai_search or not is_ai_on:
             self.threshold_spinbox.setValue(0)
 
         self.scan_button.setText(self.scan_button_text)
         self.scan_context_changed.emit(self.current_scan_mode.name)
+
+        # === UPDATE QC PANEL CONTEXT ===
+        if self.window() and hasattr(self.window(), "qc_panel"):
+            self.window().qc_panel.set_mode_context(self.current_scan_mode.name)
 
     @Slot()
     def _on_model_changed(self):
@@ -510,6 +571,14 @@ class ScanOptionsPanel(QGroupBox):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        # QC Mode Checkbox
+        self.qc_mode_check = QCheckBox("Enable Quality Control (QC) Mode")
+        self.qc_mode_check.setToolTip(
+            "Enables advanced file inspection.\nChecking this will reveal Folder B for comparison."
+        )
+        self.qc_mode_check.setStyleSheet("color: #FF9800; font-weight: bold;")
+        layout.addWidget(self.qc_mode_check)
 
         self.use_ai_check = QCheckBox("Use AI for similarity search")
         self.use_ai_check.setToolTip(
@@ -623,6 +692,8 @@ class ScanOptionsPanel(QGroupBox):
         layout.addLayout(visuals_layout)
 
     def _connect_signals(self):
+        # NOTE: The signal connection for qc_mode_check.toggled is handled in MainWindow!
+
         self.use_ai_check.toggled.connect(self.settings_manager.set_use_ai)
         self.exact_duplicates_check.toggled.connect(self.settings_manager.set_find_exact)
         self.simple_duplicates_check.toggled.connect(self.settings_manager.set_find_simple)

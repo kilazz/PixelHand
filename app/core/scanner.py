@@ -17,7 +17,12 @@ from PySide6.QtCore import QObject, QThread, Slot
 
 from app.cache import setup_caches, teardown_caches
 from app.constants import CACHE_DIR, DB_TABLE_NAME, LANCEDB_AVAILABLE
-from app.core.strategies import FindDuplicatesStrategy, FolderComparisonStrategy, SearchStrategy
+from app.core.strategies import (
+    FindDuplicatesStrategy,
+    FolderComparisonStrategy,
+    SearchStrategy,
+    SingleFolderQCStrategy,  # Added: New Strategy
+)
 from app.data_models import ScanConfig, ScanMode, ScanState
 from app.services.signal_bus import APP_SIGNAL_BUS
 
@@ -58,11 +63,13 @@ class ScannerCore(QObject):
             if not self._setup_lancedb():
                 return
 
+            # Map Enums to concrete Strategy classes
             strategy_map = {
                 ScanMode.DUPLICATES: FindDuplicatesStrategy,
                 ScanMode.TEXT_SEARCH: SearchStrategy,
                 ScanMode.SAMPLE_SEARCH: SearchStrategy,
                 ScanMode.FOLDER_COMPARE: FolderComparisonStrategy,
+                ScanMode.SINGLE_FOLDER_QC: SingleFolderQCStrategy,  # Added mapping
             }
             strategy_class = strategy_map.get(self.config.scan_mode)
 

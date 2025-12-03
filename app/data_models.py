@@ -1,6 +1,6 @@
 # app/data_models.py
 """
-Contains all primary data structures (dataclasses) and Qt signal containers used
+Contains all primary data structures (dataclasses) and enumerations used
 throughout the application. Centralizing these helps to ensure type
 consistency and avoids circular import dependencies.
 """
@@ -76,6 +76,7 @@ class ScanMode(Enum):
     TEXT_SEARCH = auto()
     SAMPLE_SEARCH = auto()
     FOLDER_COMPARE = auto()
+    SINGLE_FOLDER_QC = auto()
 
 
 class FileOperation(Enum):

@@ -50,6 +50,8 @@ class ScanConfigBuilder:
         self._validate_search_inputs()
 
         # --- Validation for Folder Compare Mode ---
+        # SINGLE_FOLDER_QC mode does not require a comparison folder,
+        # so we strictly check for FOLDER_COMPARE enum here.
         if self.scan_mode == ScanMode.FOLDER_COMPARE:
             if not self.comparison_folder_path:
                 raise ValueError("Please select a second folder for comparison.")

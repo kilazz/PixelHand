@@ -238,6 +238,11 @@ class App(QMainWindow):
         # Connect QC Panel enable/disable logic based on mode
         self.options_panel.qc_mode_toggled.connect(self.qc_panel.setEnabled)
 
+        # Connect QC Mode Checkbox to Options Panel
+        # This ensures the scan button text and mode update immediately when the checkbox is toggled.
+        self.scan_options_panel.qc_mode_check.toggled.connect(self.options_panel._update_scan_context)
+        self.scan_options_panel.use_ai_check.toggled.connect(self.options_panel._update_scan_context)
+
         # Results & Viewer Signals
         self.results_panel.results_view.selectionModel().selectionChanged.connect(self._on_results_selection_changed)
         self.results_panel.visible_results_changed.connect(self.viewer_panel.display_results)

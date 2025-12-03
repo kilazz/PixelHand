@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -37,6 +38,7 @@ from app.services.signal_bus import SignalBus
 
 from .helpers import FileFinder
 from .pipeline import PipelineManager
+from .qc_rules import QCRules
 from .scan_stages import (
     AILinkingStage,
     DatabaseIndexStage,
@@ -54,11 +56,6 @@ if LANCEDB_AVAILABLE:
 
 
 app_logger = logging.getLogger("PixelHand.strategies")
-
-
-def is_power_of_two(n: int) -> bool:
-    """Checks if an integer is a power of two."""
-    return (n != 0) and ((n & (n - 1)) == 0)
 
 
 class ScanStrategy(ABC):
@@ -473,6 +470,7 @@ class FolderComparisonStrategy(ScanStrategy):
     Compares images between two folders based on filename matches.
     Determines the 'best' file based on higher resolution.
     Does NOT use AI or complex hashing, making it very fast.
+    Uses QCRules for validation.
     """
 
     def execute(self, stop_event: threading.Event, start_time: float):
@@ -484,10 +482,6 @@ class FolderComparisonStrategy(ScanStrategy):
             self.scanner_core._finalize_scan(None, 0, None, 0, [])
             return
 
-        # Determine Key Function based on "Match by Stem" setting
-        # If enabled, key is stem (e.g., 'image' from 'image.jpg').
-        # If disabled, key is name (e.g., 'image.jpg').
-        # Using lowercase for case-insensitive matching on Windows/generic safe matching
         def get_key(p: Path):
             return p.stem.lower() if self.config.match_by_stem else p.name.lower()
 
@@ -496,8 +490,6 @@ class FolderComparisonStrategy(ScanStrategy):
         finder_a = FileFinder(
             self.state, folder_a, self.config.excluded_folders, self.config.selected_extensions, self.signals
         )
-        # Note: If multiple files map to same key (e.g. image.jpg and image.png when matching by stem),
-        # the last one wins. Ideally folders shouldn't have conflicts like this for direct comparison.
         files_a = {get_key(p): p for batch in finder_a.stream_files(stop_event) for p, _ in batch}
 
         if stop_event.is_set():
@@ -513,7 +505,6 @@ class FolderComparisonStrategy(ScanStrategy):
         if stop_event.is_set():
             return
 
-        # Find intersections based on key
         common_keys = set(files_a.keys()) & set(files_b.keys())
 
         self.state.set_phase("Comparing metadata & QC...", 0.8)
@@ -522,7 +513,6 @@ class FolderComparisonStrategy(ScanStrategy):
         total_common = len(common_keys)
         processed = 0
 
-        # Import ImageStat for Solid Color Check only if needed
         ImageStat = None
         if self.config.qc_check_solid_color:
             with contextlib.suppress(ImportError):
@@ -535,126 +525,52 @@ class FolderComparisonStrategy(ScanStrategy):
             path_a = files_a[key]
             path_b = files_b[key]
 
-            # Read metadata headers (fast)
             meta_a = get_image_metadata(path_a)
             meta_b = get_image_metadata(path_b)
 
             if not meta_a or not meta_b:
                 continue
 
-            # Create Fingerprints
             fp_a = ImageFingerprint(path=path_a, hashes=np.array([]), **meta_a)
             fp_b = ImageFingerprint(path=path_b, hashes=np.array([]), **meta_b)
 
-            # Logic: Higher Resolution (Pixel Area) wins
-            area_a = fp_a.resolution[0] * fp_a.resolution[1]
-            area_b = fp_b.resolution[0] * fp_b.resolution[1]
+            # --- Check using Centralized Rules ---
+            # 1. Absolute checks on target (B)
+            abs_issues = QCRules.check_absolute(fp_b, self.config)
 
-            issues = []
+            # 2. Relative checks (A vs B)
+            rel_issues = QCRules.check_relative(fp_a, fp_b, self.config)
 
-            # 1. Resolution Check
-            if area_b < area_a:
-                issues.append("Resolution Downgrade")
+            issues = abs_issues + rel_issues
 
-            # 2. Alpha Channel Check (QC)
-            if self.config.qc_check_alpha:
-                if fp_a.has_alpha and not fp_b.has_alpha:
-                    issues.append("Lost Alpha Channel")
-                elif not fp_a.has_alpha and fp_b.has_alpha:
-                    issues.append("Added Empty Alpha")
-
-            # 3. NPOT Check (QC) - Only check destination (Folder B)
-            if self.config.qc_check_npot:
-                w, h = fp_b.resolution
-                if not is_power_of_two(w) or not is_power_of_two(h):
-                    issues.append("NPOT (Bad Size)")
-
-            # 4. Mip-Map Check (QC)
-            if self.config.qc_check_mipmaps:
-                # Check target file (B). Ignore very small textures (<64px)
-                min_dim = min(fp_b.resolution)
-                if min_dim > 64 and fp_b.mipmap_count <= 1:
-                    issues.append("Missing Mipmaps")
-
-            # 5. File Size Bloat Check (QC)
-            if self.config.qc_check_size_bloat and fp_b.file_size > (fp_a.file_size * 1.5):
-                issues.append("Size Bloat (>1.5x)")
-
-            # 6. Aspect Ratio Check (Implicit QC)
-            ratio_a = round(fp_a.resolution[0] / fp_a.resolution[1], 3) if fp_a.resolution[1] else 0
-            ratio_b = round(fp_b.resolution[0] / fp_b.resolution[1], 3) if fp_b.resolution[1] else 0
-            if ratio_a != ratio_b:
-                issues.append("Aspect Ratio Change")
-
-            # 7. Color Space Mismatch (QC)
-            if self.config.qc_check_color_space:
-                # Simple string comparison from metadata
-                cs_a = fp_a.color_space or "Unknown"
-                cs_b = fp_b.color_space or "Unknown"
-                if cs_a != cs_b and cs_a != "Unknown" and cs_b != "Unknown":
-                    issues.append(f"Color Space Diff ({cs_a}->{cs_b})")
-
-            # 8. Bit Depth Check (QC)
-            if self.config.qc_check_bit_depth and fp_a.bit_depth != fp_b.bit_depth:
-                issues.append(f"Bit Depth Change ({fp_a.bit_depth}->{fp_b.bit_depth})")
-
-            # 9. Solid Color Check (QC - Expensive!)
+            # 3. Solid Color Check (Expensive, not in QCRules static logic)
             if self.config.qc_check_solid_color and ImageStat:
-                # Only check destination (B) to save time
                 try:
-                    # Load highly downscaled version (e.g., 32px) to detect flatness
-                    img = load_image(path_b, shrink=max(1, min(fp_b.resolution) // 32))
+                    shrink_factor = max(1, min(fp_b.resolution) // 32)
+                    img = load_image(path_b, shrink=shrink_factor)
                     if img:
                         stat = ImageStat.Stat(img)
-                        # Check variance. If variance is near 0, it's a solid color.
-                        # Sum variance across channels
                         total_variance = sum(stat.var)
-                        if total_variance < 10.0:  # Threshold for "Solid enough"
+                        if total_variance < 10.0:
                             issues.append("Solid Color Detected")
                 except Exception:
                     pass
 
-            # 10. Compression Format Mismatch (QC)
-            if self.config.qc_check_compression:
-                fmt_a = str(fp_a.compression_format).upper()
-                fmt_b = str(fp_b.compression_format).upper()
+            area_a = fp_a.resolution[0] * fp_a.resolution[1]
+            area_b = fp_b.resolution[0] * fp_b.resolution[1]
 
-                lossless_formats = ["PNG", "TGA", "BMP", "PSD", "TIFF", "TIF"]
-
-                # Case A: Source Lossless -> Dest Lossy (BC/DXT) - Often normal, but note it
-                # if any(f in fmt_a for f in lossless_formats) and ("BC" in fmt_b or "DXT" in fmt_b):
-                #     pass
-
-                # Case B: Format changed between compressed formats (e.g. BC7 -> BC1)
-                if fmt_a != fmt_b and "BC" in fmt_a and "BC" in fmt_b:
-                    issues.append(f"Format Change ({fmt_a}->{fmt_b})")
-
-                # Case C: Source Compressed -> Dest Lossless (Decompressed?)
-                elif ("BC" in fmt_a or "DXT" in fmt_a) and any(f in fmt_b for f in lossless_formats):
-                    issues.append(f"Decompressed ({fmt_a}->{fmt_b})")
-
-            # 11. Block Compression Alignment Check (QC)
-            if self.config.qc_check_block_align:
-                # Check only target folder (B)
-                w, h = fp_b.resolution
-                # DXT/BC textures require dimensions divisible by 4 to avoid artifacts
-                if w > 0 and h > 0 and (w % 4 != 0 or h % 4 != 0):
-                    issues.append(f"Bad Alignment ({w}x{h})")
-
-            # Filtering Logic: Hide same resolution groups IF they have no issues
+            # Filtering: Hide same resolution groups IF no issues found
             if self.config.hide_same_resolution_groups and area_a == area_b and not issues:
                 processed += 1
                 if processed % 50 == 0:
                     self.state.update_progress(processed, total_common)
                 continue
 
-            # Construct Diff Method String
             if issues:
                 diff_method = " | ".join(issues)
             elif area_a == area_b:
                 diff_method = "Same Size"
             else:
-                # Case where B > A, not technically a downgrade but a difference
                 diff_method = "Higher Resolution"
 
             # Determine Best vs Duplicate based on Resolution
@@ -666,19 +582,138 @@ class FolderComparisonStrategy(ScanStrategy):
                 duplicate = fp_a
 
             score = 100
-
-            # Add to groups
             final_groups[best] = {(duplicate, score, diff_method)}
 
             processed += 1
             if processed % 50 == 0:
                 self.state.update_progress(processed, total_common)
 
-        # Report results
         self.scanner_core._finalize_scan(
             {"db_path": None, "groups_data": final_groups, "lazy_summary": None},
             len(final_groups),
             ScanMode.DUPLICATES,
             time.time() - start_time,
             self.all_skipped_files,
+        )
+
+
+class SingleFolderQCStrategy(ScanStrategy):
+    """
+    A specific strategy for Quality Control (QC) within a single folder.
+    Groups results by "Combined Issue Type" using QCRules.
+    Files with multiple issues appear in a group named "Issue A + Issue B".
+    """
+
+    def execute(self, stop_event: threading.Event, start_time: float):
+        files = self._find_files_as_list(stop_event)
+        if self.scanner_core._check_stop_or_empty(
+            stop_event, files, self.config.scan_mode, {"db_path": None, "groups_data": None}, start_time
+        ):
+            return
+
+        # Map: Combined Issue Description -> List of ImageFingerprints
+        issues_map = defaultdict(list)
+
+        self.state.set_phase("Running QC Checks...", 0.9)
+
+        ImageStat = None
+        if self.config.qc_check_solid_color:
+            with contextlib.suppress(ImportError):
+                from PIL import ImageStat
+
+        total_files = len(files)
+        processed = 0
+
+        for path in files:
+            if stop_event.is_set():
+                break
+
+            meta = get_image_metadata(path)
+            if not meta:
+                self.all_skipped_files.append(str(path))
+                continue
+
+            fp = ImageFingerprint(path=path, hashes=np.array([]), **meta)
+
+            # --- Check using Centralized Rules ---
+            # 1. Absolute checks only (Single folder)
+            issues = QCRules.check_absolute(fp, self.config)
+
+            # 2. Solid Color Check (Expensive, local logic)
+            if self.config.qc_check_solid_color and ImageStat:
+                try:
+                    w, h = fp.resolution
+                    shrink_factor = max(1, min(w, h) // 32)
+                    img = load_image(path, shrink=shrink_factor)
+                    if img:
+                        stat = ImageStat.Stat(img)
+                        total_variance = sum(stat.var)
+                        if total_variance < 10.0:
+                            issues.append("Solid Color Texture")
+                except Exception:
+                    pass
+
+            # Group by Combined Issues
+            if issues:
+                # Sort the issues to ensure "A + B" matches "B + A" (deterministic key)
+                issues.sort()
+                combined_issue_key = " + ".join(issues)
+                issues_map[combined_issue_key].append(fp)
+
+            processed += 1
+            if processed % 50 == 0:
+                self.state.update_progress(processed, total_files)
+
+        if stop_event.is_set():
+            self.scanner_core._finalize_scan(None, 0, None, 0, [])
+            return
+
+        # --- Report Results ---
+        final_groups = {}
+        total_issues_found = 0
+
+        # Sort issues alphabetically so the UI list is stable
+        sorted_issues = sorted(issues_map.items())
+
+        for issue_name, affected_fps in sorted_issues:
+            if not affected_fps:
+                continue
+
+            count = len(affected_fps)
+            total_issues_found += count
+
+            header_fp = self._create_qc_header(issue_name, count)
+
+            group_set = set()
+            for fp in affected_fps:
+                # Score 0 for informational listing
+                group_set.add((fp, 0, "QC Issue"))
+
+            final_groups[header_fp] = group_set
+
+        self.scanner_core._finalize_scan(
+            {"db_path": None, "groups_data": final_groups, "lazy_summary": None},
+            total_issues_found,
+            ScanMode.SINGLE_FOLDER_QC,
+            time.time() - start_time,
+            self.all_skipped_files,
+        )
+
+    def _create_qc_header(self, title: str, count: int) -> ImageFingerprint:
+        """Creates a dummy fingerprint to serve as a group header in the UI."""
+        return ImageFingerprint(
+            path=Path(f"ISSUES: {title}"),
+            hashes=np.array([]),
+            resolution=(0, 0),
+            file_size=0,
+            mtime=0,
+            capture_date=None,
+            format_str="QC",
+            compression_format="",
+            format_details=f"{count} items",
+            has_alpha=False,
+            bit_depth=0,
+            mipmap_count=0,
+            texture_type="",
+            color_space="",
         )
