@@ -11,9 +11,11 @@ from pathlib import Path
 from PySide6.QtCore import QModelIndex, Qt, QThreadPool, Slot
 from PySide6.QtWidgets import (
     QApplication,
+    QFrame,
     QHBoxLayout,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
     QSplitter,
     QStatusBar,
     QVBoxLayout,
@@ -93,7 +95,8 @@ class App(QMainWindow):
         self.top_left_container = QWidget()
         top_left_layout = QVBoxLayout(self.top_left_container)
         top_left_layout.setSpacing(SPACING)
-        top_left_layout.setContentsMargins(0, 0, 0, 0)
+        # Remove margins here, as they will be handled by the scroll area or wrapper
+        top_left_layout.setContentsMargins(SPACING, SPACING, SPACING, SPACING)
 
         # Instantiate Panels
         self.options_panel = OptionsPanel(self.settings_manager)
@@ -121,7 +124,14 @@ class App(QMainWindow):
         self.top_pane_wrapper = QWidget()
         top_pane_layout = QVBoxLayout(self.top_pane_wrapper)
         top_pane_layout.setContentsMargins(0, 0, 0, SPACING)
-        top_pane_layout.addWidget(self.top_left_container)
+
+        # Wrap the settings container in a ScrollArea to allow window resizing
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.settings_scroll.setWidget(self.top_left_container)
+
+        top_pane_layout.addWidget(self.settings_scroll)
 
         self.bottom_pane_wrapper = QWidget()
         bottom_pane_layout = QVBoxLayout(self.bottom_pane_wrapper)
