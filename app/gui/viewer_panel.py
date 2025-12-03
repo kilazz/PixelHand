@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -21,7 +22,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
-    QSizePolicy,
     QSlider,
     QStackedWidget,
     QVBoxLayout,
@@ -97,12 +97,22 @@ class ImageViewerPanel(QGroupBox):
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
+        # Standard margins
+        main_layout.setContentsMargins(4, 8, 4, 4)
+
         self.list_container = QWidget()
         list_layout = QVBoxLayout(self.list_container)
+        list_layout.setContentsMargins(0, 0, 0, 0)
+        list_layout.setSpacing(4)
+
         self._create_list_view_controls(list_layout)
+
         self.compare_container = QWidget()
         compare_layout = QVBoxLayout(self.compare_container)
+        compare_layout.setContentsMargins(0, 0, 0, 0)
+
         self._create_compare_view_controls(compare_layout)
+
         main_layout.addWidget(self.list_container)
         main_layout.addWidget(self.compare_container)
 
@@ -110,87 +120,131 @@ class ImageViewerPanel(QGroupBox):
         # Top Bar Container
         top_bar = QHBoxLayout()
         top_bar.setContentsMargins(0, 0, 0, 0)
-        # Increase spacing between control groups (Mode, Size, HDR, BG)
-        top_bar.setSpacing(15)
+        top_bar.setSpacing(4)  # Minimal spacing (4px)
 
-        # 1. View Mode Switcher (List / Grid)
+        # 1. View Mode Switcher (Group)
         self.viewer_mode_group = QButtonGroup(self)
 
-        self.btn_view_list = QPushButton("☰")  # List Symbol
+        self.btn_view_list = QPushButton("☰")
         self.btn_view_list.setCheckable(True)
         self.btn_view_list.setChecked(True)
-        self.btn_view_list.setFixedWidth(30)
+        self.btn_view_list.setFixedSize(30, 26)
         self.btn_view_list.setToolTip("List View (Details)")
 
-        self.btn_view_grid = QPushButton("⊞")  # Grid Symbol
+        self.btn_view_grid = QPushButton("⊞")
         self.btn_view_grid.setCheckable(True)
-        self.btn_view_grid.setFixedWidth(30)
+        self.btn_view_grid.setFixedSize(30, 26)
         self.btn_view_grid.setToolTip("Grid View (Thumbnails)")
 
         self.viewer_mode_group.addButton(self.btn_view_list)
         self.viewer_mode_group.addButton(self.btn_view_grid)
 
+        # Button Layout
         mode_btn_layout = QHBoxLayout()
-        # Add spacing between the two buttons themselves
-        mode_btn_layout.setSpacing(4)
         mode_btn_layout.setContentsMargins(0, 0, 0, 0)
+        mode_btn_layout.setSpacing(2)
         mode_btn_layout.addWidget(self.btn_view_list)
         mode_btn_layout.addWidget(self.btn_view_grid)
 
         mode_widget = QWidget()
         mode_widget.setLayout(mode_btn_layout)
-        top_bar.addWidget(mode_widget)
+        top_bar.addWidget(mode_widget, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # 2. Size Slider
-        top_bar.addWidget(QLabel("Size:"))
+        # Separator Line
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.VLine)
+        line.setFrameShadow(QFrame.Shadow.Sunken)
+        line.setFixedHeight(16)
+
+        line_layout = QHBoxLayout()
+        line_layout.setContentsMargins(4, 0, 4, 0)
+        line_layout.addWidget(line)
+        line_wrapper = QWidget()
+        line_wrapper.setLayout(line_layout)
+
+        top_bar.addWidget(line_wrapper, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 2. Size Slider (Group)
+        size_widget = QWidget()
+        size_layout = QHBoxLayout(size_widget)
+        size_layout.setContentsMargins(0, 0, 0, 0)
+        size_layout.setSpacing(6)
+
+        size_layout.addWidget(QLabel("Size:"))
         self.preview_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.preview_size_slider.setRange(UIConfig.Sizes.PREVIEW_MIN_SIZE, UIConfig.Sizes.PREVIEW_MAX_SIZE)
-        # Allow slider to expand to fill available width
-        self.preview_size_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.preview_size_slider.setMinimumWidth(80)
-        top_bar.addWidget(self.preview_size_slider)
+        self.preview_size_slider.setFixedWidth(120)
+        size_layout.addWidget(self.preview_size_slider)
 
-        # 3. HDR Controls
+        top_bar.addWidget(size_widget, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 3. BG Alpha Controls (Moved here)
+        bg_widget = QWidget()
+        bg_layout = QHBoxLayout(bg_widget)
+        bg_layout.setContentsMargins(0, 0, 0, 0)
+        bg_layout.setSpacing(6)
+
+        # Small spacer to separate Size from BG
+        spacer = QWidget()
+        spacer.setFixedWidth(10)
+        top_bar.addWidget(spacer)
+
+        self.bg_alpha_check = QCheckBox("BG:")
+        self.bg_alpha_check.setToolTip("Toggle Transparency Grid")
+        bg_layout.addWidget(self.bg_alpha_check)
+
+        self.alpha_slider = QSlider(Qt.Orientation.Horizontal)
+        self.alpha_slider.setRange(0, 255)
+        self.alpha_slider.setValue(255)
+        self.alpha_slider.setFixedWidth(80)
+        bg_layout.addWidget(self.alpha_slider)
+
+        self.alpha_label = QLabel("255")
+        self.alpha_label.setFixedWidth(28)
+        self.alpha_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        bg_layout.addWidget(self.alpha_label)
+
+        top_bar.addWidget(bg_widget, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 4. HDR Controls (Moved to end)
+        hdr_widget = QWidget()
+        hdr_layout = QHBoxLayout(hdr_widget)
+        hdr_layout.setContentsMargins(0, 0, 0, 0)
+        hdr_layout.setSpacing(6)
+
+        # Small spacer to separate BG from HDR
+        spacer2 = QWidget()
+        spacer2.setFixedWidth(10)
+        top_bar.addWidget(spacer2)
+
         self.thumbnail_tonemap_check = QCheckBox("HDR")
         self.thumbnail_tonemap_check.setToolTip("Enable HDR Tonemapping")
-        top_bar.addWidget(self.thumbnail_tonemap_check)
+        hdr_layout.addWidget(self.thumbnail_tonemap_check)
 
         self.thumbnail_tonemap_combo = QComboBox()
         self.thumbnail_tonemap_combo.setToolTip("Tone Mapping Operator")
-        self.thumbnail_tonemap_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.thumbnail_tonemap_combo.setMinimumWidth(80)
+        self.thumbnail_tonemap_combo.setMinimumWidth(100)
 
         if TONE_MAPPER and TONE_MAPPER.available_views:
             self.thumbnail_tonemap_combo.addItems(TONE_MAPPER.available_views)
         else:
             self.thumbnail_tonemap_combo.setEnabled(False)
 
-        top_bar.addWidget(self.thumbnail_tonemap_combo)
+        hdr_layout.addWidget(self.thumbnail_tonemap_combo)
 
-        # 4. BG Alpha Controls
-        self.bg_alpha_check = QCheckBox("BG:")
-        self.bg_alpha_check.setToolTip("Toggle Transparency Grid")
-        top_bar.addWidget(self.bg_alpha_check)
+        top_bar.addWidget(hdr_widget, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        self.alpha_slider = QSlider(Qt.Orientation.Horizontal)
-        self.alpha_slider.setRange(0, 255)
-        self.alpha_slider.setValue(255)
-        # Allow slider to expand
-        self.alpha_slider.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.alpha_slider.setMinimumWidth(60)
-        top_bar.addWidget(self.alpha_slider)
+        # Push everything to the left
+        top_bar.addStretch(1)
 
-        self.alpha_label = QLabel("255")
-        self.alpha_label.setFixedWidth(30)
-        self.alpha_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        top_bar.addWidget(self.alpha_label)
-
-        # Add layout to parent
+        # Add Top Bar to Parent
         parent_layout.addLayout(top_bar)
 
+        # 5. Compare Button (Own Row)
         self.compare_button = QPushButton("Compare (0)")
         parent_layout.addWidget(self.compare_button)
 
+        # 6. List View
         self.model = ImagePreviewModel(self.thread_pool, self)
         # Forward missing file signal
         self.model.file_missing.connect(self.file_missing_detected.emit)
@@ -209,6 +263,7 @@ class ImageViewerPanel(QGroupBox):
         # Set to False to allow variable heights in Grid mode (for wrapped text)
         self.list_view.setUniformItemSizes(False)
         self.list_view.setSpacing(5)
+
         parent_layout.addWidget(self.list_view)
 
     def _create_compare_view_controls(self, parent_layout):
