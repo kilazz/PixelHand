@@ -210,7 +210,7 @@ class FindDuplicatesStrategy(ScanStrategy):
                         {
                             "group_id": group_id,
                             "name": group_name,
-                            "count": len(dups),
+                            "count": len(dups) + 1,  # +Best
                             "total_size": total_size,
                         }
                     )
