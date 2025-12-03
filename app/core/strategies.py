@@ -606,6 +606,9 @@ class SingleFolderQCStrategy(ScanStrategy):
 
     def execute(self, stop_event: threading.Event, start_time: float):
         files = self._find_files_as_list(stop_event)
+
+        self.signals.log_message.emit(f"QC Scan found {len(files)} candidate files.", "info")
+
         if self.scanner_core._check_stop_or_empty(
             stop_event, files, self.config.scan_mode, {"db_path": None, "groups_data": None}, start_time
         ):
@@ -623,6 +626,7 @@ class SingleFolderQCStrategy(ScanStrategy):
 
         total_files = len(files)
         processed = 0
+        clean_count = 0
 
         for path in files:
             if stop_event.is_set():
@@ -630,6 +634,8 @@ class SingleFolderQCStrategy(ScanStrategy):
 
             meta = get_image_metadata(path)
             if not meta:
+                # Log that metadata failed (e.g. DDS decode error)
+                app_logger.warning(f"[SKIP] Metadata failed for: {path.name}")
                 self.all_skipped_files.append(str(path))
                 continue
 
@@ -659,10 +665,18 @@ class SingleFolderQCStrategy(ScanStrategy):
                 issues.sort()
                 combined_issue_key = " + ".join(issues)
                 issues_map[combined_issue_key].append(fp)
+            else:
+                clean_count += 1
 
             processed += 1
             if processed % 50 == 0:
                 self.state.update_progress(processed, total_files)
+
+        # Log summary stats
+        self.signals.log_message.emit(
+            f"QC Checked: {processed}. Issues: {total_files - clean_count - len(self.all_skipped_files)}. Clean: {clean_count}. Skipped: {len(self.all_skipped_files)}",
+            "info",
+        )
 
         if stop_event.is_set():
             self.scanner_core._finalize_scan(None, 0, None, 0, [])
