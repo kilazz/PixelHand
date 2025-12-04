@@ -7,6 +7,7 @@ Handles custom painting for Group Grid View and Image Viewer (List/Grid).
 import logging
 from pathlib import Path
 
+from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
     QModelIndex,
     QRect,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import QAbstractItemView, QStyle, QStyledItemDelegate
 
 from app.constants import BEST_FILE_METHOD_NAME, METHOD_DISPLAY_NAMES, UIConfig
 from app.data_models import GroupNode, ResultNode
+from app.gui.models import VfxRole  # Import custom role for VFX flag
 from app.gui.tasks import ImageLoader
 from app.gui.widgets import PaintUtilsMixin
 
@@ -35,12 +37,10 @@ app_logger = logging.getLogger("PixelHand.gui.delegates")
 
 def _format_metadata_string(node: ResultNode) -> str:
     """Helper to create the detailed metadata string."""
-    # Skip metadata for dummy node
     if node.path == "loading_dummy":
         return ""
 
     res = f"{node.resolution_w}x{node.resolution_h}"
-    # Handle file_size being 0 or None gracefully
     size_mb = (node.file_size or 0) / (1024**2)
     size_str = f"{size_mb:.2f} MB"
     bit_depth_str = f"{node.bit_depth}-bit"
@@ -72,8 +72,8 @@ class GroupGridDelegate(QStyledItemDelegate):
 
         # Layout settings
         self.padding = 10
-        self.text_height = 60  # Space reserved for text below image
-        self.set_base_size(130)  # Default size
+        self.text_height = 60
+        self.set_base_size(130)
 
         # Caching
         self.cache: dict[str, QPixmap] = {}
@@ -92,10 +92,7 @@ class GroupGridDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # 1. Retrieve Data
         node = index.data(Qt.ItemDataRole.UserRole)
-
-        # 2. Draw Background
         rect = option.rect
         bg_rect = rect.adjusted(4, 4, -4, -4)
 
@@ -112,21 +109,13 @@ class GroupGridDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        # 3. Determine Image Path
         best_file_path = self._get_best_file_path(index, node)
 
-        # Calculate Image Rectangle (Centered horizontally)
         img_x = rect.x() + (rect.width() - self.thumb_size) // 2
         img_y = rect.y() + self.padding
 
-        img_rect = QRect(
-            img_x,
-            img_y,
-            self.thumb_size,
-            self.thumb_size,
-        )
+        img_rect = QRect(img_x, img_y, self.thumb_size, self.thumb_size)
 
-        # 4. Draw Thumbnail
         pixmap_to_draw = None
 
         if best_file_path:
@@ -148,19 +137,12 @@ class GroupGridDelegate(QStyledItemDelegate):
             painter.setBrush(QColor("#202020"))
             painter.setPen(QColor("#404040"))
             painter.drawRoundedRect(img_rect, 6, 6)
-
             painter.setPen(QColor("#606060"))
             status_text = "Loading..." if best_file_path else "No Image"
             painter.drawText(img_rect, Qt.AlignmentFlag.AlignCenter, status_text)
 
-        # 5. Draw Text: Group Name
         text_y_start = img_rect.bottom() + 10
-        text_rect = QRect(
-            rect.x() + 5,
-            text_y_start,
-            rect.width() - 10,
-            20,
-        )
+        text_rect = QRect(rect.x() + 5, text_y_start, rect.width() - 10, 20)
 
         font = painter.font()
         font.setBold(True)
@@ -172,7 +154,6 @@ class GroupGridDelegate(QStyledItemDelegate):
         elided_name = metrics.elidedText(node.name, Qt.TextElideMode.ElideMiddle, text_rect.width())
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, elided_name)
 
-        # 6. Draw Text: Item Count
         sub_text_rect = QRect(rect.x() + 5, text_rect.bottom(), rect.width() - 10, 15)
         font.setBold(False)
         font.setPointSize(8)
@@ -187,33 +168,27 @@ class GroupGridDelegate(QStyledItemDelegate):
             item_text += f" • {size_mb:.1f} MB"
 
         painter.drawText(sub_text_rect, Qt.AlignmentFlag.AlignCenter, item_text)
-
         painter.restore()
 
     def _get_best_file_path(self, index: QModelIndex, node: GroupNode) -> str | None:
-        """Helper to find the representative path, supporting lazy loading."""
         model = index.model()
         while hasattr(model, "sourceModel"):
             model = model.sourceModel()
 
-        # 1. Check in-memory cache first
         if hasattr(model, "group_id_to_best_path"):
             path = model.group_id_to_best_path.get(node.group_id)
             if path:
                 return path
 
-        # 2. Check children (if fetched)
         if node.fetched and node.children:
             return str(node.children[0].path)
 
-        # 3. Fallback: Ask model to lazy-fetch from DB
         if hasattr(model, "get_best_path_for_group_lazy"):
             return model.get_best_path_for_group_lazy(node.group_id)
 
         return None
 
     def _start_loading(self, path_str: str):
-        """Initiates async image loading."""
         self.loading_paths.add(path_str)
         loader = ImageLoader(
             path_str=path_str,
@@ -221,23 +196,26 @@ class GroupGridDelegate(QStyledItemDelegate):
             target_size=250,
             tonemap_mode="none",
             use_cache=True,
-            receiver=self,
-            on_finish_slot="_on_image_loaded",
-            on_error_slot="_on_image_error",
             ui_key=path_str,
         )
+        # Use Signals
+        loader.signals.result.connect(self._on_image_loaded)
+        loader.signals.error.connect(self._on_image_error)
         self.thread_pool.start(loader)
 
-    @Slot(str, QImage)
-    def _on_image_loaded(self, key: str, image: QImage):
+    @Slot(str, object)
+    def _on_image_loaded(self, key: str, pil_img: object):
         if key in self.loading_paths:
             self.loading_paths.remove(key)
 
-        if not image.isNull():
-            self.cache[key] = QPixmap.fromImage(image)
-            # Update view
-            if self.parent() and isinstance(self.parent(), QAbstractItemView):
-                self.parent().viewport().update()
+        if pil_img:
+            try:
+                q_img = ImageQt(pil_img)
+                self.cache[key] = QPixmap.fromImage(q_img)
+                if self.parent() and isinstance(self.parent(), QAbstractItemView):
+                    self.parent().viewport().update()
+            except Exception as e:
+                app_logger.error(f"Failed to convert grid thumbnail: {e}")
 
     @Slot(str, str)
     def _on_image_error(self, key: str, msg: str):
@@ -262,7 +240,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         self.bold_font.setBold(True)
         self.bold_font_metrics = QFontMetrics(self.bold_font)
 
-        # Store font explicitly to prevent garbage collection/access issues
         self.regular_font = QFont()
         self.regular_font_metrics = QFontMetrics(self.regular_font)
 
@@ -286,19 +263,14 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
 
     def sizeHint(self, option, index):
         if self.is_grid_mode:
-            # Grid Mode
             width = self.preview_size + 10
-            # Height = Image + Padding + Text Area
-            # Text area needs to accommodate ~3-4 lines of wrapped metadata
             text_area_height = 140
             return QSize(width, self.preview_size + text_area_height)
         else:
-            # List Mode
             return QSize(self.preview_size + 250, self.preview_size + 10)
 
     @Slot(QModelIndex, object)
     def set_hover_channel(self, index: QModelIndex, channel: str | None):
-        """Called by the view when mouse moves over specific zones."""
         item_key = None
         if index.isValid():
             item_data = index.data(Qt.ItemDataRole.UserRole)
@@ -339,12 +311,10 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
 
     def _draw_thumbnail(self, painter, option, index, item_data):
         if self.is_grid_mode:
-            # Center Top
             x = option.rect.x() + (option.rect.width() - self.preview_size) // 2
             y = option.rect.y() + 5
             thumb_rect = QRect(x, y, self.preview_size, self.preview_size)
         else:
-            # Left Aligned
             thumb_rect = option.rect.adjusted(5, 5, -(option.rect.width() - self.preview_size - 5), -5)
 
         if self.is_transparency_enabled:
@@ -353,18 +323,38 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
                 self.get_checkered_pixmap(thumb_rect.size(), self.bg_alpha),
             )
 
-        pixmap = index.data(Qt.ItemDataRole.DecorationRole)
+        raw_pixmap = index.data(Qt.ItemDataRole.DecorationRole)
+        is_vfx = index.data(VfxRole)  # Get the VFX flag from model
 
+        pixmap_to_draw = raw_pixmap
         is_hovered = id(item_data) == self._hover_index_key
-        if is_hovered and self._hover_channel and pixmap and not pixmap.isNull():
-            key = (item_data.path, self._hover_channel)
-            if key in self._channel_cache:
-                pixmap = self._channel_cache[key]
-            else:
-                pixmap = self._generate_channel_pixmap(pixmap, self._hover_channel)
-                self._channel_cache[key] = pixmap
-                if len(self._channel_cache) > self._CACHE_SIZE:
-                    self._channel_cache.popitem()
+
+        # Handle Channel Hover logic
+        if is_hovered and self._hover_channel:
+            # SPECIAL CASE: User wants to see Alpha of a VFX texture.
+            # tasks.py forced the thumbnail to RGB (Opaque) so it's visible.
+            # We must override channel 'A' to show BLACK (0) instead of White (255)
+            # to represent the true data.
+            if self._hover_channel == "A" and is_vfx and raw_pixmap:
+                key = f"{item_data.path}_BLACK_PLACEHOLDER"
+                if key in self._channel_cache:
+                    pixmap_to_draw = self._channel_cache[key]
+                else:
+                    black = QPixmap(raw_pixmap.size())
+                    black.fill(QColor("black"))
+                    self._channel_cache[key] = black
+                    pixmap_to_draw = black
+
+            # Standard Channel Extraction
+            elif raw_pixmap and not raw_pixmap.isNull():
+                key = (item_data.path, self._hover_channel)
+                if key in self._channel_cache:
+                    pixmap_to_draw = self._channel_cache[key]
+                else:
+                    pixmap_to_draw = self._generate_channel_pixmap(raw_pixmap, self._hover_channel)
+                    self._channel_cache[key] = pixmap_to_draw
+                    if len(self._channel_cache) > self._CACHE_SIZE:
+                        self._channel_cache.popitem()
 
         # Handle loading/error state
         error_msg = None
@@ -372,8 +362,8 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             cache_key = f"{item_data.path}_{item_data.channel or 'full'}"
             error_msg = self.parent().model.error_paths.get(cache_key)
 
-        if pixmap and not pixmap.isNull():
-            scaled = pixmap.scaled(
+        if pixmap_to_draw and not pixmap_to_draw.isNull():
+            scaled = pixmap_to_draw.scaled(
                 thumb_rect.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
@@ -436,7 +426,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         sec_c = QColor(main_c)
         sec_c.setAlpha(150)
 
-        # 1. Similarity Score / Method
         dist_text = ""
         if item_data.is_best:
             dist_text = f"[{BEST_FILE_METHOD_NAME}]"
@@ -444,16 +433,13 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             m = METHOD_DISPLAY_NAMES.get(item_data.found_by)
             dist_text = m if m else f"{item_data.distance}%"
 
-        # 2. Metadata String
         meta_text = _format_metadata_string(item_data)
 
         if self.is_grid_mode:
-            # GRID MODE
             y = option.rect.y() + self.preview_size + 8
             w = option.rect.width() - 4
             x = option.rect.x() + 2
 
-            # Draw Filename (Bold, max 2 lines)
             painter.setFont(self.bold_font)
             painter.setPen(main_c)
             name_rect = QRect(x, y, w, 40)
@@ -463,7 +449,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
                 filename,
             )
 
-            # Calc actual height used
             used_h = painter.boundingRect(
                 name_rect,
                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
@@ -471,14 +456,10 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             ).height()
             y += used_h + 4
 
-            # Draw Metadata (Regular, Wrapped)
             painter.setFont(self.regular_font)
             painter.setPen(sec_c)
 
-            # Construct multi-line info for Grid
             size_mb = (item_data.file_size or 0) / (1024**2)
-
-            # Line A: Score | Res | Size
             grid_meta_lines = []
             grid_meta_lines.append(f"{dist_text}")
             grid_meta_lines.append(f"{item_data.resolution_w}x{item_data.resolution_h} • {size_mb:.2f} MB")
@@ -497,7 +478,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             )
 
         else:
-            # LIST MODE
             r = option.rect.adjusted(self.preview_size + 15, 5, -5, -5)
             x, y = r.left(), r.top() + self.bold_font_metrics.ascent()
 
@@ -509,7 +489,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             painter.setFont(self.regular_font)
             painter.setPen(sec_c)
 
-            # List mode combines score and meta in one line using ternary
             full_meta_line = f"{dist_text} | {meta_text}" if dist_text else meta_text
 
             painter.drawText(

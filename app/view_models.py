@@ -7,9 +7,9 @@ from collections import OrderedDict
 from pathlib import Path
 
 from PIL import Image
-from PIL.ImageQt import fromqimage
+from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QPixmap
 
 from app.data_models import ResultNode
 from app.gui.tasks import ImageLoader
@@ -58,7 +58,6 @@ class ImageComparerState(QObject):
         self.candidates_changed.emit(len(self._candidates))
 
         # The view listens to this signal to know which rows to redraw.
-        # Sending the original path string is sufficient for this.
         added_path = str(added_node.path) if added_node else ""
         removed_path = str(removed_node.path) if removed_node else ""
         self.candidate_updated.emit(added_path, removed_path)
@@ -95,38 +94,48 @@ class ImageComparerState(QObject):
 
         self.images_loading.emit()
         for node in candidates:
-            # IMPORTANT: Use the original path and force full-color loading by setting channel_to_load=None.
             path_str = str(node.path)
+
+            # Create Loader without 'receiver' to use Signals instead (prevents QImage conversion issues)
             loader = ImageLoader(
                 path_str=path_str,
                 mtime=node.mtime,
                 target_size=None,  # Load full resolution
                 tonemap_mode=tonemap_mode,
                 use_cache=False,  # Always reload full-res to apply new settings
-                receiver=self,
-                on_finish_slot="_on_image_loaded",
-                on_error_slot="_on_load_error",
                 channel_to_load=None,  # This ensures the original color image is loaded
             )
+
+            # Connect signals to slots
+            loader.signals.result.connect(self._on_image_loaded)
+            loader.signals.error.connect(self._on_load_error)
+
             self._active_loaders[path_str] = loader
             self.thread_pool.start(loader)
 
-    @Slot(str, QImage)
-    def _on_image_loaded(self, path_str: str, q_img: QImage):
-        """Handles a successfully loaded image from a worker task."""
+    @Slot(str, object)
+    def _on_image_loaded(self, path_str: str, pil_img: object):
+        """
+        Handles a successfully loaded image from a worker task.
+        Receives a raw PIL object to preserve data integrity (Alpha=0 vs RGB data).
+        """
         if path_str not in self._active_loaders:
             return
 
         del self._active_loaders[path_str]
 
-        if not q_img.isNull():
-            # Convert QImage to PIL Image for processing (e.g., diffing)
-            pil_img = fromqimage(q_img)
+        if pil_img:
+            # Store the raw PIL image directly.
+            # This allows subsequent processing (like getextrema) to see the real data.
             self._pil_images[path_str] = pil_img
 
-            # Emit the QPixmap for direct display in the UI
-            pixmap = QPixmap.fromImage(q_img)
-            self.image_loaded.emit(path_str, pixmap)
+            # Generate QPixmap for the UI immediately on the main thread
+            try:
+                q_img = ImageQt(pil_img)
+                pixmap = QPixmap.fromImage(q_img)
+                self.image_loaded.emit(path_str, pixmap)
+            except Exception as e:
+                self.load_error.emit(f"Display Error {Path(path_str).name}", str(e))
 
         if not self._active_loaders:
             self.load_complete.emit()
@@ -136,7 +145,9 @@ class ImageComparerState(QObject):
         """Handles an error during image loading."""
         if path_str in self._active_loaders:
             del self._active_loaders[path_str]
+
         self.load_error.emit(f"Failed to load {Path(path_str).name}", error_msg)
+
         if not self._active_loaders:
             self.load_complete.emit()
 

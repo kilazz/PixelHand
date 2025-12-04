@@ -50,15 +50,23 @@ class DirectXTexLoader(BaseLoader):
             if pil_image is None:
                 raise TypeError(f"Unhandled NumPy dtype from DirectXTex decoder: {dtype}")
 
+            # --- CRITICAL FIX: FORCE DATA COPY ---
+            # Pillow might hold a reference to the numpy array, which holds a reference
+            # to C++ memory that might get garbage collected.
+            # Calling .load() forces Pillow to copy the data into its own memory buffer.
+            pil_image.load()
+            # Alternatively, creating a full copy explicitly:
+            pil_image = pil_image.copy()
+            # -------------------------------------
+
+            ignore_zero_alpha = shrink > 1
+
             if shrink > 1:
-                # Ensure dimensions never collapse to 0
                 target_w = max(1, pil_image.width // shrink)
                 target_h = max(1, pil_image.height // shrink)
-
-                # Use LANCZOS for high quality downscaling
                 pil_image.thumbnail((target_w, target_h), Image.Resampling.LANCZOS)
 
-            return self._handle_alpha_logic(pil_image)
+            return self._handle_alpha_logic(pil_image, ignore_zero_alpha)
 
         except Exception as e:
             app_logger.warning(f"DirectXTex decode failed for {path.name}: {e}")
@@ -93,25 +101,24 @@ class DirectXTexLoader(BaseLoader):
             "A" in fmt and any(s in fmt for s in ["R8G8B8A8", "R16G16B16A16", "B8G8R8A8"])
         )
 
-    def _handle_alpha_logic(self, pil_image: Image.Image) -> Image.Image:
+    def _handle_alpha_logic(self, pil_image: Image.Image, ignore_zero_alpha: bool) -> Image.Image:
         """
-        Smart Alpha Handling (Simplified/Fast):
+        Smart Alpha Handling:
         1. If Alpha is fully opaque (255), discard it to save memory.
-        2. If Alpha is fully transparent (0), but RGB has data (Emission/VFX),
-           discard Alpha to make the content visible.
+        2. If Alpha is fully transparent (0), but RGB has data:
+           - If ignore_zero_alpha=True (Thumbnails): Discard Alpha to show content.
+           - If ignore_zero_alpha=False (Analysis): Keep Alpha 0 (Authentic data).
         """
         if pil_image.mode != "RGBA":
             return pil_image
 
-        # Use PIL's C-based getextrema() for speed.
-        # This is much faster than converting to numpy for large images.
         try:
             extrema = pil_image.getextrema()
-            # RGBA extrema format: [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
+            # RGBA extrema: [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
             if len(extrema) >= 4:
                 alpha_min, alpha_max = extrema[3]
 
-                # Case 1: Alpha is fully opaque (255). Drop alpha channel.
+                # Case 1: Alpha is fully opaque (255). Safe to drop.
                 if alpha_min >= 255:
                     return pil_image.convert("RGB")
 
@@ -121,10 +128,15 @@ class DirectXTexLoader(BaseLoader):
                     g_max = extrema[1][1]
                     b_max = extrema[2][1]
 
-                    # If RGB contains data, dropping Alpha makes it visible (Opaque).
-                    # This fixes "Black Preview" for additive/emission textures.
+                    # If RGB contains data (VFX/Emission)
                     if r_max > 0 or g_max > 0 or b_max > 0:
-                        return pil_image.convert("RGB")
+                        if ignore_zero_alpha:
+                            # Thumbnail Mode: Drop alpha so user sees the color data.
+                            return pil_image.convert("RGB")
+                        else:
+                            # Compare Mode: Keep transparency.
+                            # The viewer_panel logic will force opacity for display.
+                            return pil_image
 
         except Exception:
             pass

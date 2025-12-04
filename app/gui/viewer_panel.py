@@ -122,7 +122,7 @@ class ImageViewerPanel(QGroupBox):
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(4)  # Minimal spacing (4px)
 
-        # 1. View Mode Switcher (Group)
+        # --- 1. View Mode Switcher (Group) ---
         self.viewer_mode_group = QButtonGroup(self)
 
         self.btn_view_list = QPushButton("☰")
@@ -164,7 +164,7 @@ class ImageViewerPanel(QGroupBox):
 
         top_bar.addWidget(line_wrapper, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # 2. Size Slider (Group)
+        # --- 2. Size Slider (Group) ---
         size_widget = QWidget()
         size_layout = QHBoxLayout(size_widget)
         size_layout.setContentsMargins(0, 0, 0, 0)
@@ -178,7 +178,7 @@ class ImageViewerPanel(QGroupBox):
 
         top_bar.addWidget(size_widget, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # 3. BG Alpha Controls (Moved here)
+        # --- 3. BG Alpha Controls (Moved here) ---
         bg_widget = QWidget()
         bg_layout = QHBoxLayout(bg_widget)
         bg_layout.setContentsMargins(0, 0, 0, 0)
@@ -206,7 +206,7 @@ class ImageViewerPanel(QGroupBox):
 
         top_bar.addWidget(bg_widget, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        # 4. HDR Controls (Moved to end)
+        # --- 4. HDR Controls (Moved to end) ---
         hdr_widget = QWidget()
         hdr_layout = QHBoxLayout(hdr_widget)
         hdr_layout.setContentsMargins(0, 0, 0, 0)
@@ -742,6 +742,11 @@ class ImageViewerPanel(QGroupBox):
             button.setStyleSheet(f"background-color: #2c3e50; border: 1px solid {border_color}; color: {border_color};")
 
     def _update_compare_views(self):
+        """
+        Updates the comparison views based on loaded images and selected channels.
+        Handles the visualization of "Invisible" textures (Alpha=0) by forcing opacity
+        if needed for composite views.
+        """
         images = self.state.get_pil_images()
         if len(images) != 2:
             return
@@ -753,14 +758,42 @@ class ImageViewerPanel(QGroupBox):
             if pil_image.mode != "RGBA":
                 pil_image = pil_image.convert("RGBA")
 
+            # --- SINGLE CHANNEL VIEW ---
+            # Always show single channels as OPAQUE Grayscale to inspect data.
             if num_active_channels == 1:
                 channel_name = active_channels[0]
                 channel = pil_image.getchannel(channel_name)
                 grayscale_img = Image.merge("RGB", (channel, channel, channel))
-                grayscale_img.putalpha(Image.new("L", grayscale_img.size, 255))
+                grayscale_img.putalpha(Image.new("L", grayscale_img.size, 255))  # Force Opaque
                 return QPixmap.fromImage(ImageQt(grayscale_img))
+
+            # --- COMPOSITE VIEW ---
             else:
                 r, g, b, a = pil_image.split()
+
+                # --- VFX TEXTURE VISIBILITY FIX ---
+                # Check if the image has content in RGB but a fully transparent Alpha.
+                # If so, force Alpha to 255 so the user can see the RGB content.
+                try:
+                    alpha_extrema = a.getextrema()
+                    # If Alpha is completely black (min=0, max=0)
+                    if alpha_extrema[1] == 0:
+                        has_data = False
+                        # Check if any ACTIVE channel has data
+                        if (
+                            (self.channel_states["R"] and r.getextrema()[1] > 0)
+                            or (self.channel_states["G"] and g.getextrema()[1] > 0)
+                            or (self.channel_states["B"] and b.getextrema()[1] > 0)
+                        ):
+                            has_data = True
+
+                        # If we have color data but no alpha, force alpha to 255
+                        if has_data:
+                            a = Image.new("L", pil_image.size, 255)
+                except Exception:
+                    pass
+
+                # Zero out inactive channels
                 if not self.channel_states["R"]:
                     r = r.point(lambda _: 0)
                 if not self.channel_states["G"]:
@@ -768,7 +801,8 @@ class ImageViewerPanel(QGroupBox):
                 if not self.channel_states["B"]:
                     b = b.point(lambda _: 0)
                 if not self.channel_states["A"]:
-                    a = a.point(lambda _: 255)
+                    a = a.point(lambda _: 255)  # Force Opaque if Alpha disabled
+
                 processed_pil = Image.merge("RGBA", (r, g, b, a))
                 return QPixmap.fromImage(ImageQt(processed_pil))
 

@@ -170,7 +170,7 @@ class ModelManager:
     def load_model(self, config: dict):
         requested_model = config["model_name"]
 
-        # Protect the entire check-and-load process
+        # Protect the entire check-andload process
         with self.access_lock:
             # If model is already loaded and matching, do nothing
             if self.inference_engine and self.current_model_name == requested_model:
@@ -267,6 +267,7 @@ def _read_and_process_batch_for_ai(
     """
     Reads images from disk, resizes them efficiently, and prepares them for the AI model.
     Handles channel splitting and luminance conversion.
+    Includes VFX Fix for invisible additive/emission textures.
     """
     images = []
     successful_paths_with_channels = []
@@ -337,9 +338,30 @@ def _read_and_process_batch_for_ai(
 
             else:  # Composite
                 if pil_image.mode == "RGBA":
-                    # Paste onto black background to handle transparency
-                    processed_image = Image.new("RGB", pil_image.size, (0, 0, 0))
-                    processed_image.paste(pil_image, mask=pil_image.split()[3])
+                    # --- VFX / ADDITIVE TEXTURE FIX ---
+                    # Check if this is an "Invisible" texture (Alpha=0, RGB>0).
+                    # If so, ignore the alpha channel so the AI sees the color data.
+                    is_vfx = False
+                    try:
+                        extrema = pil_image.getextrema()
+                        # RGBA extrema: [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
+                        # Check: Alpha completely black (Max=0) but RGB has data (Max > 0)
+                        if (
+                            len(extrema) >= 4
+                            and extrema[3][1] == 0
+                            and (extrema[0][1] > 0 or extrema[1][1] > 0 or extrema[2][1] > 0)
+                        ):
+                            is_vfx = True
+                    except Exception:
+                        pass
+
+                    if is_vfx:
+                        # Drop Alpha, keep RGB. AI sees the fire/data.
+                        processed_image = pil_image.convert("RGB")
+                    else:
+                        # Standard transparency handling: Paste onto black using alpha mask.
+                        processed_image = Image.new("RGB", pil_image.size, (0, 0, 0))
+                        processed_image.paste(pil_image, mask=pil_image.split()[3])
                 else:
                     processed_image = pil_image.convert("RGB")
                 channel_name = None

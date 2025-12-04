@@ -10,6 +10,7 @@ from collections import OrderedDict
 from dataclasses import fields
 from pathlib import Path
 
+from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
     QAbstractItemModel,
     QAbstractListModel,
@@ -21,7 +22,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QPixmap
 
 from app.constants import (
     BEST_FILE_METHOD_NAME,
@@ -37,18 +38,17 @@ if LANCEDB_AVAILABLE:
 
 app_logger = logging.getLogger("PixelHand.gui.models")
 
-# Custom role for sorting
+# Custom roles
 SortRole = Qt.ItemDataRole.UserRole + 1
+VfxRole = Qt.ItemDataRole.UserRole + 2  # New role to pass VFX/Invisible status to Delegate
 
 
 def _format_metadata_string(node: ResultNode) -> str:
     """Helper to create the detailed metadata string for the UI."""
-    # Skip metadata for dummy node
     if node.path == "loading_dummy":
         return ""
 
     res = f"{node.resolution_w}x{node.resolution_h}"
-    # Handle file_size being 0 or None gracefully
     size_mb = (node.file_size or 0) / (1024**2)
     size_str = f"{size_mb:.2f} MB"
     bit_depth_str = f"{node.bit_depth}-bit"
@@ -85,7 +85,6 @@ class ResultsTreeModel(QAbstractItemModel):
         self.check_states: dict[str, Qt.CheckState] = {}
         self.filter_text = ""
 
-        # Quick lookups
         self.path_to_group_id: dict[str, int] = {}
         self.group_id_to_best_path: dict[int, str] = {}
 
@@ -110,7 +109,6 @@ class ResultsTreeModel(QAbstractItemModel):
         self.endResetModel()
 
     def _create_dummy_child(self, group_id: int) -> ResultNode:
-        """Creates a temporary node to display 'Loading...'."""
         return ResultNode(
             path="loading_dummy",
             is_best=False,
@@ -142,7 +140,6 @@ class ResultsTreeModel(QAbstractItemModel):
         full_groups = payload.get("groups_data")
 
         if lazy_summary:
-            # Mode: Lazy Loading (Database backed)
             for item in lazy_summary:
                 gid = item["group_id"]
                 gn = GroupNode(
@@ -154,11 +151,9 @@ class ResultsTreeModel(QAbstractItemModel):
                     children=[self._create_dummy_child(gid)],
                 )
                 self.groups_data[gid] = gn
-
             self.sorted_group_ids = sorted(self.groups_data.keys())
 
         elif full_groups:
-            # Mode: In-Memory (Search results, small scans)
             self._process_full_groups(full_groups)
 
         self.endResetModel()
@@ -209,7 +204,6 @@ class ResultsTreeModel(QAbstractItemModel):
             )
             children.append(best_node)
 
-            # Map paths/IDs
             self.path_to_group_id[str(best_fp.path)] = group_id_counter
             self.group_id_to_best_path[group_id_counter] = str(best_fp.path)
 
@@ -252,11 +246,9 @@ class ResultsTreeModel(QAbstractItemModel):
         parent = parent or QModelIndex()
         if not parent.isValid():
             return len(self.sorted_group_ids)
-
         node = parent.internalPointer()
         if isinstance(node, GroupNode):
             return len(node.children)
-
         return 0
 
     def columnCount(self, parent: QModelIndex | None = None) -> int:
@@ -265,12 +257,9 @@ class ResultsTreeModel(QAbstractItemModel):
     def parent(self, index):
         if not index.isValid():
             return QModelIndex()
-
         node = index.internalPointer()
-
         if isinstance(node, GroupNode):
             return QModelIndex()
-
         if isinstance(node, ResultNode):
             group_id = node.group_id
             if group_id in self.groups_data:
@@ -283,7 +272,6 @@ class ResultsTreeModel(QAbstractItemModel):
 
     def index(self, row, col, parent: QModelIndex | None = None):
         parent = parent or QModelIndex()
-
         if not parent.isValid():
             if 0 <= row < len(self.sorted_group_ids):
                 group_id = self.sorted_group_ids[row]
@@ -292,14 +280,12 @@ class ResultsTreeModel(QAbstractItemModel):
             parent_node = parent.internalPointer()
             if isinstance(parent_node, GroupNode) and 0 <= row < len(parent_node.children):
                 return self.createIndex(row, col, parent_node.children[row])
-
         return QModelIndex()
 
     def hasChildren(self, parent: QModelIndex | None = None) -> bool:
         parent = parent or QModelIndex()
         if not parent.isValid():
             return bool(self.groups_data)
-
         node = parent.internalPointer()
         if isinstance(node, GroupNode):
             return len(node.children) > 0
@@ -314,30 +300,23 @@ class ResultsTreeModel(QAbstractItemModel):
     def fetchMore(self, parent):
         if not self.canFetchMore(parent):
             return
-
         node = parent.internalPointer()
         group_id = node.group_id
-
         self.pending_fetches[group_id] = QPersistentModelIndex(parent)
-
         task = LanceDBGroupFetcherTask(self.db_path, group_id)
         task.signals.finished.connect(self._on_fetch_finished)
         task.signals.error.connect(self._on_fetch_error)
-
         QThreadPool.globalInstance().start(task)
 
     @Slot(list, int)
     def _on_fetch_finished(self, children_dicts: list[dict], group_id: int):
         if group_id not in self.pending_fetches:
             return
-
         persistent_index = self.pending_fetches.pop(group_id)
         if not persistent_index.isValid():
             return
-
         parent_index = QModelIndex(persistent_index)
         node = parent_index.internalPointer()
-
         if not isinstance(node, GroupNode):
             return
 
@@ -371,11 +350,9 @@ class ResultsTreeModel(QAbstractItemModel):
             self.fetch_completed.emit(parent_index)
             return
 
-        # 1. Update the Dummy Node (Index 0) -> Real Node #1
         node.children[0] = children[0]
         self.dataChanged.emit(self.index(0, 0, parent_index), self.index(0, self.columnCount() - 1, parent_index))
 
-        # 2. Insert remaining nodes
         if len(children) > 1:
             rest_children = children[1:]
             self.beginInsertRows(parent_index, 1, len(rest_children))
@@ -384,7 +361,6 @@ class ResultsTreeModel(QAbstractItemModel):
 
         node.count = len(node.children)
         node.fetched = True
-
         self.fetch_completed.emit(parent_index)
 
     @Slot(str)
@@ -396,7 +372,6 @@ class ResultsTreeModel(QAbstractItemModel):
             return None
         node = index.internalPointer()
 
-        # IMPORTANT: Return the raw node object for the custom Delegate
         if role == Qt.ItemDataRole.UserRole:
             return node
 
@@ -422,11 +397,9 @@ class ResultsTreeModel(QAbstractItemModel):
         if role == Qt.ItemDataRole.CheckStateRole and index.column() == 0:
             if isinstance(node, ResultNode) and node.path == "loading_dummy":
                 return None
-
             if isinstance(node, GroupNode):
                 if not node.fetched:
                     return Qt.CheckState.Unchecked
-
                 checked_count = sum(
                     1 for child in node.children if self.check_states.get(child.path) == Qt.CheckState.Checked
                 )
@@ -554,7 +527,6 @@ class ResultsTreeModel(QAbstractItemModel):
             self.endRemoveRows()
 
     def get_group_children(self, group_id: int) -> list[ResultNode]:
-        """Returns the list of ResultNodes associated with a specific group ID."""
         if group_id in self.groups_data:
             node = self.groups_data[group_id]
             if node.fetched:
@@ -565,11 +537,11 @@ class ResultsTreeModel(QAbstractItemModel):
         if not self.groups_data:
             return
         self.beginResetModel()
-        if sort_key == UIConfig.ResultsView.SORT_OPTIONS[0]:  # "By Duplicate Count"
+        if sort_key == UIConfig.ResultsView.SORT_OPTIONS[0]:
             self.sorted_group_ids.sort(key=lambda gid: self.groups_data[gid].count, reverse=True)
-        elif sort_key == UIConfig.ResultsView.SORT_OPTIONS[1]:  # "By Size on Disk"
+        elif sort_key == UIConfig.ResultsView.SORT_OPTIONS[1]:
             self.sorted_group_ids.sort(key=lambda gid: self.groups_data[gid].total_size, reverse=True)
-        else:  # "By Filename"
+        else:
             self.sorted_group_ids.sort(key=lambda gid: self.groups_data[gid].name)
         self.endResetModel()
 
@@ -594,7 +566,6 @@ class ResultsTreeModel(QAbstractItemModel):
             if node.fetched:
                 for child in node.children:
                     self.check_states[child.path] = state_logic_func(child)
-
         self.dataChanged.emit(self.index(0, 0), self.index(self.rowCount() - 1, self.columnCount() - 1))
 
     def get_link_map_for_paths(self, paths_to_replace: list[Path]) -> dict[Path, Path]:
@@ -615,7 +586,6 @@ class ResultsTreeModel(QAbstractItemModel):
     def get_summary_text(self) -> str:
         num_groups = len(self.sorted_group_ids)
         total_items = sum(max(0, d.count - 1) for d in self.groups_data.values())
-
         return (
             f"({num_groups} Groups, ~{total_items} duplicates)"
             if self.mode == ScanMode.DUPLICATES
@@ -625,15 +595,12 @@ class ResultsTreeModel(QAbstractItemModel):
     def remove_deleted_paths(self, deleted_paths: list[Path]):
         deleted_set = {os.path.normcase(str(p)) for p in deleted_paths}
         groups_to_remove = []
-
         for gid, data in self.groups_data.items():
             if not data.fetched:
                 continue
-
             original_count = len(data.children)
             data.children = [f for f in data.children if os.path.normcase(str(f.path)) not in deleted_set]
             data.count = len(data.children)
-
             if data.count != original_count:
                 min_items = 2 if self.mode == ScanMode.DUPLICATES else 1
                 if data.count < min_items:
@@ -646,40 +613,26 @@ class ResultsTreeModel(QAbstractItemModel):
                     )
                     data.children[0] = new_best
                     self.group_id_to_best_path[gid] = new_best.path
-
         for gid in groups_to_remove:
             if gid in self.groups_data:
                 del self.groups_data[gid]
-
         self.sorted_group_ids = [gid for gid in self.sorted_group_ids if gid not in groups_to_remove]
-
         paths_to_clear = list(self.check_states.keys())
         for path_str in paths_to_clear:
             if os.path.normcase(path_str) in deleted_set:
                 del self.check_states[path_str]
 
     def get_paths_for_group_sync(self, group_id: int) -> list[Path]:
-        """
-        Synchronously retrieves all file paths for a group.
-        Used for 'Delete Group' action to ensure we get all files even if not fetched in UI.
-        """
         if group_id not in self.groups_data:
             return []
-
         node = self.groups_data[group_id]
-
-        # Case 1: Already fetched in RAM
         if node.fetched:
             return [Path(c.path) for c in node.children]
-
-        # Case 2: Lazy Load - Query DB directly
         if not self.db_path or not LANCEDB_AVAILABLE:
             return []
-
         try:
             db = lancedb.connect(self.db_path)
             table = db.open_table("scan_results")
-            # Query just the paths for this group
             rows = table.search().where(f"group_id = {group_id}").limit(10000).to_list()
             return [Path(r["path"]) for r in rows]
         except Exception as e:
@@ -687,27 +640,16 @@ class ResultsTreeModel(QAbstractItemModel):
             return []
 
     def get_best_path_for_group_lazy(self, group_id: int) -> str | None:
-        """
-        Retrieves the path of the 'Best' file in a group directly from DB.
-        This allows the Grid View delegate to show a thumbnail without fetching the whole group.
-        """
-        # 1. Check in-memory cache first
         if group_id in self.group_id_to_best_path:
             return self.group_id_to_best_path[group_id]
-
-        # 2. Query DB
         if not self.db_path or not LANCEDB_AVAILABLE:
             return None
-
         try:
             db = lancedb.connect(self.db_path)
             table = db.open_table("scan_results")
-            # Query for the item marked is_best within the group
             res = table.search().where(f"group_id = {group_id} AND is_best = true").limit(1).to_list()
-
             if res:
                 path = str(res[0]["path"])
-                # Cache it for next repaint
                 self.group_id_to_best_path[group_id] = path
                 return path
         except Exception:
@@ -728,6 +670,7 @@ class ImagePreviewModel(QAbstractListModel):
         self.group_id: int = -1
         self.items: list[ResultNode] = []
         self.pixmap_cache: OrderedDict[str, QPixmap] = OrderedDict()
+        self.vfx_flags: dict[str, bool] = {}  # Store 'is_vfx' flags here
         self.CACHE_SIZE_LIMIT = 200
         self.thread_pool = thread_pool
 
@@ -753,6 +696,7 @@ class ImagePreviewModel(QAbstractListModel):
         self.cancel_all_tasks()
         self.beginResetModel()
         self.pixmap_cache.clear()
+        self.vfx_flags.clear()
         self.loading_paths.clear()
         self.error_paths.clear()
         self.endResetModel()
@@ -768,6 +712,7 @@ class ImagePreviewModel(QAbstractListModel):
         self.group_id = -1
         self.items = items
         self.pixmap_cache.clear()
+        self.vfx_flags.clear()
         self.loading_paths.clear()
         self.error_paths.clear()
         self.group_base_channel = None
@@ -791,6 +736,10 @@ class ImagePreviewModel(QAbstractListModel):
         if role == Qt.ItemDataRole.ToolTipRole:
             return f"{path_str}\nChannel: {channel_to_load or 'Full'}"
 
+        # New Role for Delegate to check transparency logic
+        if role == VfxRole:
+            return self.vfx_flags.get(cache_key, False)
+
         if role == Qt.ItemDataRole.DecorationRole:
             if cache_key in self.pixmap_cache:
                 return self.pixmap_cache[cache_key]
@@ -804,30 +753,43 @@ class ImagePreviewModel(QAbstractListModel):
                     target_size=self.target_size,
                     tonemap_mode=self.tonemap_mode,
                     use_cache=True,
-                    receiver=self,
-                    on_finish_slot="_on_image_loaded",
-                    on_error_slot="_on_image_error",
                     channel_to_load=channel_to_load,
                     ui_key=cache_key,
                 )
+
+                loader.signals.result.connect(self._on_image_loaded)
+                loader.signals.error.connect(self._on_image_error)
 
                 self.active_tasks[cache_key] = loader
                 self.thread_pool.start(loader)
             return None
         return None
 
-    @Slot(str, QImage)
-    def _on_image_loaded(self, ui_key: str, q_img: QImage):
+    @Slot(str, object)
+    def _on_image_loaded(self, ui_key: str, pil_img: object):
+        """
+        Receives raw PIL image from worker thread via Signal.
+        Extracts VFX flag and converts to QPixmap on UI thread.
+        """
         if ui_key in self.loading_paths:
             self.loading_paths.remove(ui_key)
             if ui_key in self.active_tasks:
                 del self.active_tasks[ui_key]
 
-            if not q_img.isNull():
-                pixmap = QPixmap.fromImage(q_img)
-                self.pixmap_cache[ui_key] = pixmap
-                if len(self.pixmap_cache) > self.CACHE_SIZE_LIMIT:
-                    self.pixmap_cache.popitem(last=False)
+            if pil_img:
+                try:
+                    # Extract VFX Flag
+                    if hasattr(pil_img, "info"):
+                        is_vfx = pil_img.info.get("is_vfx", False)
+                        self.vfx_flags[ui_key] = is_vfx
+
+                    q_img = ImageQt(pil_img)
+                    pixmap = QPixmap.fromImage(q_img)
+                    self.pixmap_cache[ui_key] = pixmap
+                    if len(self.pixmap_cache) > self.CACHE_SIZE_LIMIT:
+                        self.pixmap_cache.popitem(last=False)
+                except Exception as e:
+                    app_logger.error(f"Failed to convert PIL to Pixmap: {e}")
 
             self._emit_data_changed_for_key(ui_key)
 

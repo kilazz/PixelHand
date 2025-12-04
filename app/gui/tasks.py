@@ -11,16 +11,11 @@ from pathlib import Path
 
 import send2trash
 from PIL import Image
-from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
-    Q_ARG,
-    QMetaObject,
     QObject,
     QRunnable,
-    Qt,
     Signal,
 )
-from PySide6.QtGui import QImage
 
 from app.cache import get_thumbnail_cache_key, thumbnail_cache
 from app.constants import (
@@ -97,7 +92,6 @@ class ModelConverter(QRunnable):
             model = ModelClass.from_pretrained(self.hf_model_name)
 
             # Determine if we need to cast to FP16 before export
-            # Note: For INT8, we export FP32 first, then quantize.
             export_fp16 = self.quant_mode == QuantizationMode.FP16
 
             if export_fp16:
@@ -117,7 +111,6 @@ class ModelConverter(QRunnable):
                 self._export_with_legacy(model, processor, target_dir, torch, Image, adapter, export_fp16)
 
             # --- Post-Export Optimization (INT8) ---
-            # This logic is now delegated to the core module
             if self.quant_mode == QuantizationMode.INT8:
                 self.signals.log.emit("Optimizing and Quantizing to INT8...", "info")
                 optimize_model_post_export(visual_out_path, text_out_path, self.quant_mode)
@@ -136,12 +129,10 @@ class ModelConverter(QRunnable):
                 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = original_progress_bar_setting
 
     def _setup_directories(self, models_dir: Path, adapter) -> Path:
-        # Use centralized naming logic to match config_builder
         target_dir_name = get_model_folder_name(self.onnx_name_base, self.quant_mode)
         target_dir = models_dir / target_dir_name
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save processor config for future use
         ProcessorClass = adapter.get_processor_class()
         processor = ProcessorClass.from_pretrained(self.hf_model_name)
         processor.save_pretrained(target_dir)
@@ -241,8 +232,15 @@ class ModelConverter(QRunnable):
 
 class ImageLoader(QRunnable):
     """
-    A cancellable task to load an image in a background thread for the UI.
+    A cancellable task to load an image in a background thread.
+    Uses Signals to safely transport raw PIL objects to the UI thread.
     """
+
+    class Signals(QObject):
+        # Signal emits: (ui_key, pil_image_object)
+        result = Signal(str, object)
+        # Signal emits: (ui_key, error_message)
+        error = Signal(str, str)
 
     def __init__(
         self,
@@ -251,9 +249,6 @@ class ImageLoader(QRunnable):
         target_size: int | None,
         tonemap_mode: str = TonemapMode.ENABLED.value,
         use_cache: bool = True,
-        receiver: QObject | None = None,
-        on_finish_slot=None,
-        on_error_slot=None,
         channel_to_load: str | None = None,
         ui_key: str | None = None,
     ):
@@ -265,11 +260,9 @@ class ImageLoader(QRunnable):
         self.tonemap_mode = tonemap_mode
         self.use_cache = use_cache
         self._is_cancelled = False
-        self.receiver = receiver
-        self.on_finish_slot = on_finish_slot
-        self.on_error_slot = on_error_slot
         self.channel_to_load = channel_to_load
-        self.ui_key = ui_key
+        self.ui_key = ui_key or path_str
+        self.signals = self.Signals()
 
     def cancel(self):
         self._is_cancelled = True
@@ -293,15 +286,15 @@ class ImageLoader(QRunnable):
             )
 
             # 1. Check Cache
-            if self.use_cache:
-                if self.is_cancelled:
-                    return
+            if self.use_cache and self.target_size and not self.is_cancelled:
                 cached_data = thumbnail_cache.get(cache_key)
                 if cached_data:
                     try:
                         pil_img = Image.open(io.BytesIO(cached_data))
-                    except Exception as e:
-                        app_logger.warning(f"Could not load from thumbnail cache: {e}")
+                        pil_img.load()
+                        # VFX flag in PNG info is not reliably preserved by all savers/loaders
+                        # We will re-detect below if needed for cached items.
+                    except Exception:
                         pil_img = None
 
             if self.is_cancelled:
@@ -311,17 +304,10 @@ class ImageLoader(QRunnable):
             if pil_img is None:
                 path_obj = Path(self.path_str)
                 if not path_obj.exists():
-                    if self.receiver and self.on_error_slot:
-                        result_key = self.ui_key if self.ui_key else self.path_str
-                        QMetaObject.invokeMethod(
-                            self.receiver,
-                            self.on_error_slot,
-                            Qt.ConnectionType.QueuedConnection,
-                            Q_ARG(str, result_key),
-                            Q_ARG(str, "File not found (Deleted)"),
-                        )
+                    self.signals.error.emit(self.ui_key, "File not found")
                     return
 
+                # Smart Shrink Logic
                 metadata = get_image_metadata(path_obj)
                 shrink = 1
                 if metadata and self.target_size:
@@ -336,7 +322,7 @@ class ImageLoader(QRunnable):
                 if self.is_cancelled:
                     return
 
-                pre_shrunk_img = load_image(
+                pil_img = load_image(
                     self.path_str,
                     tonemap_mode=self.tonemap_mode,
                     shrink=shrink,
@@ -345,82 +331,90 @@ class ImageLoader(QRunnable):
                 if self.is_cancelled:
                     return
 
-                if pre_shrunk_img:
+                if pil_img:
+                    # Handle Single Channel Request
                     if self.channel_to_load:
-                        pre_shrunk_img = pre_shrunk_img.convert("RGBA")
-                        channels = pre_shrunk_img.split()
+                        pil_img = pil_img.convert("RGBA")
+                        channels = pil_img.split()
                         channel_map = {"R": 0, "G": 1, "B": 2, "A": 3}
-                        channel_index = channel_map.get(self.channel_to_load)
-
-                        if channel_index is not None and channel_index < len(channels):
-                            single_channel = channels[channel_index]
-                            pil_img = Image.merge("RGB", (single_channel, single_channel, single_channel))
-                        else:
-                            pil_img = pre_shrunk_img.convert("RGBA")
+                        idx = channel_map.get(self.channel_to_load)
+                        if idx is not None and idx < len(channels):
+                            ch = channels[idx]
+                            pil_img = Image.merge("RGB", (ch, ch, ch))
                     else:
-                        pil_img = pre_shrunk_img.convert("RGBA")
+                        pil_img = pil_img.convert("RGBA")
+
+                    # --- VFX TEXTURE DETECTION ---
+                    # Detect if we have an "Invisible" texture (Alpha=0 but RGB>0).
+                    is_vfx = False
+                    if pil_img.mode == "RGBA":
+                        try:
+                            extrema = pil_img.getextrema()
+                            if (
+                                len(extrema) >= 4
+                                and extrema[3][1] == 0
+                                and (extrema[0][1] > 0 or extrema[1][1] > 0 or extrema[2][1] > 0)
+                            ):
+                                is_vfx = True
+                        except Exception:
+                            pass
+
+                    # Store detection flag in image info so Delegate knows it
+                    pil_img.info["is_vfx"] = is_vfx
 
                     if self.is_cancelled:
                         return
 
+                    # --- LOGIC SPLIT: THUMBNAIL vs FULL RES ---
                     if self.target_size:
+                        # THUMBNAIL MODE:
+                        # If it is a VFX texture, drop Alpha to make RGB visible in the grid.
+                        if is_vfx:
+                            pil_img = pil_img.convert("RGB")
+                            # Re-attach flag after conversion (convert() resets info)
+                            pil_img.info["is_vfx"] = True
+
                         pil_img.thumbnail(
                             (self.target_size, self.target_size),
                             Image.Resampling.LANCZOS,
                         )
 
-                    if self.use_cache and not self.is_cancelled:
-                        try:
-                            buffer = io.BytesIO()
-                            pil_img.save(buffer, "WEBP", quality=90)
-                            thumbnail_cache.put(cache_key, buffer.getvalue())
-                        except Exception as e:
-                            app_logger.warning(f"Cache write failed for {self.path_str}: {e}")
+                        # Write to Cache (PNG)
+                        # We use PNG to preserve quality. Since we converted to RGB if is_vfx,
+                        # the thumbnail is opaque and safe.
+                        if self.use_cache and not self.is_cancelled:
+                            try:
+                                buffer = io.BytesIO()
+                                pil_img.save(buffer, "PNG")
+                                thumbnail_cache.put(cache_key, buffer.getvalue())
+                            except Exception:
+                                pass
 
             if self.is_cancelled:
                 return
 
-            if self.receiver and self.on_finish_slot:
-                if pil_img:
-                    q_img = ImageQt(pil_img)
-                    result_key = self.ui_key if self.ui_key else self.path_str
-                    QMetaObject.invokeMethod(
-                        self.receiver,
-                        self.on_finish_slot,
-                        Qt.ConnectionType.QueuedConnection,
-                        Q_ARG(str, result_key),
-                        Q_ARG(QImage, q_img),
-                    )
-                elif self.on_error_slot:
-                    result_key = self.ui_key if self.ui_key else self.path_str
-                    QMetaObject.invokeMethod(
-                        self.receiver,
-                        self.on_error_slot,
-                        Qt.ConnectionType.QueuedConnection,
-                        Q_ARG(str, result_key),
-                        Q_ARG(str, "Image loader returned None."),
-                    )
+            if pil_img:
+                # For cached items, re-run quick detection if flag is missing
+                # (PNG metadata persistence is not always guaranteed for custom keys)
+                if "is_vfx" not in pil_img.info and pil_img.mode == "RGBA":
+                    try:
+                        ext = pil_img.getextrema()
+                        if ext[3][1] == 0 and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0):
+                            pil_img.info["is_vfx"] = True
+                    except Exception:
+                        pass
+
+                self.signals.result.emit(self.ui_key, pil_img)
+            else:
+                self.signals.error.emit(self.ui_key, "Image loader returned None")
 
         except Exception as e:
-            if not self.is_cancelled and self.receiver and self.on_error_slot:
-                result_key = self.ui_key if self.ui_key else self.path_str
-                QMetaObject.invokeMethod(
-                    self.receiver,
-                    self.on_error_slot,
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, result_key),
-                    Q_ARG(str, f"Loader error: {e}"),
-                )
+            if not self.is_cancelled:
+                self.signals.error.emit(self.ui_key, f"Loader error: {e}")
 
 
 class LanceDBGroupFetcherTask(QRunnable):
-    """
-    Fetches children of a specific group from LanceDB in a background thread.
-    Used for Async Lazy Loading in large datasets.
-    """
-
     class Signals(QObject):
-        # Emits list of dictionaries (children data) and the original group_id
         finished = Signal(list, int)
         error = Signal(str)
 
@@ -439,13 +433,9 @@ class LanceDBGroupFetcherTask(QRunnable):
         try:
             import lancedb
 
-            # Zero-copy connection
             db = lancedb.connect(self.db_uri)
             table = db.open_table("scan_results")
-
-            # Efficient query
             res = table.search().where(f"group_id = {self.group_id}").limit(10000).to_list()
-
             self.signals.finished.emit(res, self.group_id)
 
         except Exception as e:
@@ -454,10 +444,6 @@ class LanceDBGroupFetcherTask(QRunnable):
 
 
 class FileOperationTask(QRunnable):
-    """
-    A task to perform file operations (delete, link) in a background thread.
-    """
-
     class Signals(QObject):
         finished = Signal(list, int, int)
         log = Signal(str, str)
@@ -495,7 +481,6 @@ class FileOperationTask(QRunnable):
                     send2trash.send2trash(str(path))
                     moved.append(path)
                 else:
-                    # Treat non-existent as success (already deleted)
                     moved.append(path)
             except Exception:
                 failed += 1

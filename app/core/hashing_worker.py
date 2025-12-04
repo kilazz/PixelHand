@@ -110,7 +110,31 @@ def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channe
             else:
                 return None
         else:  # "Composite"
-            image_for_hashing = original_pil_img.convert("RGB")
+            if original_pil_img.mode == "RGBA":
+                is_vfx = False
+                try:
+                    extrema = original_pil_img.getextrema()
+                    # Check if Max Alpha is 0 (fully invisible) but RGB has data
+                    if (
+                        len(extrema) >= 4
+                        and extrema[3][1] == 0
+                        and (extrema[0][1] > 0 or extrema[1][1] > 0 or extrema[2][1] > 0)
+                    ):
+                        is_vfx = True
+                except Exception:
+                    pass
+
+                if is_vfx:
+                    # Just discard alpha, hash the hidden RGB data
+                    image_for_hashing = original_pil_img.convert("RGB")
+                else:
+                    # Standard consistency: composite against black background
+                    # using the alpha channel as a mask.
+                    bg = Image.new("RGB", original_pil_img.size, (0, 0, 0))
+                    bg.paste(original_pil_img, mask=original_pil_img.split()[3])
+                    image_for_hashing = bg
+            else:
+                image_for_hashing = original_pil_img.convert("RGB")
 
         if image_for_hashing and IMAGEHASH_AVAILABLE:
             dhash = imagehash.dhash(image_for_hashing)
