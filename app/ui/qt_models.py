@@ -15,7 +15,9 @@ from PySide6.QtCore import (
     QAbstractItemModel,
     QAbstractListModel,
     QModelIndex,
+    QObject,
     QPersistentModelIndex,
+    QRunnable,
     QSortFilterProxyModel,
     Qt,
     QThreadPool,
@@ -65,8 +67,47 @@ def _format_metadata_string(node: ResultNode) -> str:
         f"Mips: {node.mipmap_count}",
     ]
 
-    # CHANGED: Use dot instead of pipe
     return " • ".join(filter(None, parts))
+
+
+# --- NEW TASK CLASS ---
+class LanceDBBestPathFetcherTask(QRunnable):
+    """
+    Background task to fetch ONLY the 'best' file path for a given group ID.
+    Used for Grid View thumbnails to avoid loading entire groups.
+    """
+
+    class Signals(QObject):
+        finished = Signal(int, str)  # group_id, path
+
+    def __init__(self, group_id: int):
+        super().__init__()
+        self.setAutoDelete(True)
+        self.group_id = group_id
+        self.signals = self.Signals()
+
+    def run(self):
+        try:
+            # We use the DB_SERVICE connection directly.
+            # Note: We manually construct the query because DB_SERVICE.get_files_by_group
+            # returns everything, which might be slow for huge groups.
+            if not DB_SERVICE.db or "scan_results" not in DB_SERVICE.db.table_names():
+                return
+
+            tbl = DB_SERVICE.db.open_table("scan_results")
+            # We only need the path of the best file
+            res = tbl.search().where(f"group_id = {self.group_id} AND is_best = true").limit(1).to_list()
+
+            if res:
+                self.signals.finished.emit(self.group_id, str(res[0]["path"]))
+            else:
+                # Fallback: if no 'best' flagged (rare), take the first one
+                res_fallback = tbl.search().where(f"group_id = {self.group_id}").limit(1).to_list()
+                if res_fallback:
+                    self.signals.finished.emit(self.group_id, str(res_fallback[0]["path"]))
+
+        except Exception as e:
+            app_logger.error(f"Best path fetch failed for group {self.group_id}: {e}")
 
 
 class ResultsTreeModel(QAbstractItemModel):
@@ -87,6 +128,8 @@ class ResultsTreeModel(QAbstractItemModel):
         self.path_to_group_id: dict[str, int] = {}
         self.group_id_to_best_path: dict[int, str] = {}
         self.pending_fetches: dict[int, QPersistentModelIndex] = {}
+        # New set to track background path fetches
+        self.pending_best_path_fetches: set[int] = set()
 
     def clear(self):
         self.beginResetModel()
@@ -98,6 +141,7 @@ class ResultsTreeModel(QAbstractItemModel):
         self.path_to_group_id.clear()
         self.group_id_to_best_path.clear()
         self.pending_fetches.clear()
+        self.pending_best_path_fetches.clear()
         self.endResetModel()
 
     def filter(self, text: str):
@@ -288,7 +332,6 @@ class ResultsTreeModel(QAbstractItemModel):
         group_id = node.group_id
         self.pending_fetches[group_id] = QPersistentModelIndex(parent)
 
-        # Use the global DB_SERVICE indirectly via the task (no DB path needed)
         task = LanceDBGroupFetcherTask(group_id)
         task.signals.finished.connect(self._on_fetch_finished)
         task.signals.error.connect(self._on_fetch_error)
@@ -580,43 +623,60 @@ class ResultsTreeModel(QAbstractItemModel):
                 del self.check_states[p]
 
     def get_paths_for_group_sync(self, group_id: int) -> list[Path]:
-        """
-        Synchronously retrieves all file paths associated with a group ID.
-        Uses the thread-safe DB_SERVICE to avoid file locks.
-        """
         if group_id in self.groups_data:
             node = self.groups_data[group_id]
             if node.fetched:
                 return [Path(c.path) for c in node.children]
 
-        # Use Global Singleton
         try:
             rows = DB_SERVICE.get_files_by_group(group_id)
             return [Path(r["path"]) for r in rows]
         except Exception:
             return []
 
+    # --- MODIFIED METHOD FOR ASYNC BEST PATH FETCHING ---
+    def request_best_path(self, group_id: int):
+        """Starts a background task to fetch just the best path for a group."""
+        if group_id in self.pending_best_path_fetches:
+            return
+
+        self.pending_best_path_fetches.add(group_id)
+        task = LanceDBBestPathFetcherTask(group_id)
+        task.signals.finished.connect(self._on_best_path_fetched)
+        QThreadPool.globalInstance().start(task)
+
+    @Slot(int, str)
+    def _on_best_path_fetched(self, group_id: int, path: str):
+        if group_id in self.pending_best_path_fetches:
+            self.pending_best_path_fetches.remove(group_id)
+
+        self.group_id_to_best_path[group_id] = path
+
+        # Trigger repaint of the Grid View
+        # We need to find the index of the group node
+        if group_id in self.groups_data:
+            try:
+                row = self.sorted_group_ids.index(group_id)
+                # Emit dataChanged for the whole row to be safe
+                idx = self.index(row, 0)
+                self.dataChanged.emit(idx, idx)
+            except ValueError:
+                pass
+
     def get_best_path_for_group_lazy(self, group_id: int) -> str | None:
         """
         Retrieves the path of the 'best' file in a group.
-        If not cached, returns None to avoid blocking the UI thread with a DB query.
-        The GroupDelegate will handle the lazy load via fetchMore or display a placeholder.
+        If not cached, it triggers a background fetch and returns None immediately.
         """
         if group_id in self.group_id_to_best_path:
             return self.group_id_to_best_path[group_id]
 
-        # Optimization: We do not query DB_SERVICE here to prevent micro-stutters
-        # in the UI rendering loop. If the data isn't cached, we let the
-        # fetchMore mechanism populate it eventually.
+        # Trigger automatic background fetch if missing
+        self.request_best_path(group_id)
         return None
 
 
 class ImagePreviewModel(QAbstractListModel):
-    """
-    Model for the Image Viewer Panel (Right Side).
-    Handles loading thumbnails and storing VF flags.
-    """
-
     file_missing = Signal(Path)
 
     def __init__(self, thread_pool: QThreadPool, parent=None):
