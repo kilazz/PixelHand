@@ -1,0 +1,322 @@
+# app/infrastructure/cache.py
+"""
+Manages file and fingerprint caching to avoid reprocessing unchanged files.
+"""
+
+import abc
+import hashlib
+import logging
+import shutil
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+
+# --- Polars integration ---
+try:
+    import polars as pl
+
+    POLARS_AVAILABLE = True
+except ImportError:
+    pl = None
+    POLARS_AVAILABLE = False
+
+# --- LanceDB integration ---
+if TYPE_CHECKING:
+    from lancedb.table import Table
+
+from app.domain.data_models import ImageFingerprint, ScanConfig
+from app.shared.constants import CACHE_DIR, LANCEDB_AVAILABLE
+
+try:
+    import imagehash
+
+    IMAGEHASH_AVAILABLE = True
+except ImportError:
+    imagehash = None
+    IMAGEHASH_AVAILABLE = False
+
+
+app_logger = logging.getLogger("PixelHand.cache")
+
+
+class CacheManager:
+    """Manages a cache using the primary LanceDB Table for all metadata and vectors."""
+
+    def __init__(self, scanned_folder_path: Path, model_name: str, lancedb_table: Any):
+        self.lancedb_table: Table = lancedb_table
+        self.db_path = None
+        self.model_name = model_name
+        self.is_valid = LANCEDB_AVAILABLE and POLARS_AVAILABLE
+
+        if not self.is_valid:
+            app_logger.error("LanceDB or Polars library not found; file caching will be disabled.")
+            return
+
+    def get_cached_fingerprints(self, all_file_paths: list[Path]) -> tuple[list[Path], list[ImageFingerprint]]:
+        """
+        Retrieves cached fingerprints from LanceDB.
+        Now uses batching to query only relevant paths instead of loading the entire DB.
+        """
+        if not self.is_valid or not all_file_paths:
+            return all_file_paths, []
+
+        to_process_paths = set()
+        cached_fps = []
+
+        # Optimization: Only process unique paths
+        unique_paths = list({p for p in all_file_paths if p.exists() and p.is_file()})
+
+        # Batch size for SQL IN (...) query
+        BATCH_SIZE = 2000
+
+        try:
+            total_items = len(unique_paths)
+
+            for i in range(0, total_items, BATCH_SIZE):
+                batch_paths = unique_paths[i : i + BATCH_SIZE]
+
+                # 1. Create Polars DataFrame for the current batch (Disk State)
+                batch_disk_data = [
+                    {
+                        "path": str(p),
+                        "mtime": p.stat().st_mtime,
+                        "file_size": p.stat().st_size,
+                    }
+                    for p in batch_paths
+                ]
+                disk_df = pl.DataFrame(batch_disk_data)
+
+                # 2. Query LanceDB specifically for these paths (DB State)
+                path_list_sql = ", ".join(f"'{str(p).replace("'", "''")}'" for p in batch_paths)
+
+                try:
+                    # Fetch only matching paths from DB
+                    db_df = self.lancedb_table.search().where(f"path IN ({path_list_sql})").limit(None).to_polars()
+                except Exception:
+                    db_df = pl.DataFrame([])
+
+                if db_df.is_empty():
+                    to_process_paths.update(batch_paths)
+                    continue
+
+                # Rename LanceDB columns to avoid conflict during join
+                if "vector" in db_df.columns:
+                    db_df = db_df.rename({"vector": "hashes"})
+
+                db_df = db_df.rename({"mtime": "mtime_cached", "file_size": "file_size_cached"})
+
+                # 3. Join Disk Batch vs DB Result
+                joined_df = disk_df.join(db_df, on="path", how="left")
+
+                # 4. Filter: To Process (New or Modified)
+                changed_df = joined_df.filter(
+                    (pl.col("mtime_cached").is_null())
+                    | (pl.col("mtime_cached") != pl.col("mtime"))
+                    | (pl.col("file_size_cached") != pl.col("file_size"))
+                )
+
+                for row in changed_df.select("path").iter_rows():
+                    to_process_paths.add(Path(row[0]))
+
+                # 5. Filter: Valid Cache Hits
+                valid_df = joined_df.filter(
+                    (pl.col("mtime_cached") == pl.col("mtime"))
+                    & (pl.col("file_size_cached") == pl.col("file_size"))
+                    & (pl.col("hashes").is_not_null())
+                )
+
+                # 6. Reconstruct Objects
+                for row_dict in valid_df.to_dicts():
+                    try:
+                        row_dict["mtime"] = row_dict["mtime_cached"]
+                        row_dict["file_size"] = row_dict["file_size_cached"]
+
+                        vector_data = (
+                            np.array(row_dict["hashes"], dtype=np.float32) if row_dict.get("hashes") else np.array([])
+                        )
+
+                        fp = ImageFingerprint(
+                            path=Path(row_dict["path"]),
+                            hashes=vector_data,
+                            resolution=(row_dict["resolution_w"], row_dict["resolution_h"]),
+                            file_size=row_dict["file_size"],
+                            mtime=row_dict["mtime"],
+                            capture_date=row_dict.get("capture_date"),
+                            format_str=row_dict["format_str"],
+                            compression_format=row_dict.get("compression_format", row_dict.get("format_str")),
+                            format_details=row_dict["format_details"],
+                            has_alpha=bool(row_dict["has_alpha"]),
+                            bit_depth=row_dict["bit_depth"],
+                            xxhash=row_dict.get("xxhash"),
+                            dhash=imagehash.hex_to_hash(row_dict["dhash"])
+                            if row_dict.get("dhash") and IMAGEHASH_AVAILABLE
+                            else None,
+                            phash=imagehash.hex_to_hash(row_dict["phash"])
+                            if row_dict.get("phash") and IMAGEHASH_AVAILABLE
+                            else None,
+                            mipmap_count=row_dict.get("mipmap_count", 1),
+                            texture_type=row_dict.get("texture_type", "2D"),
+                            color_space=row_dict.get("color_space"),
+                            channel=row_dict.get("channel"),
+                        )
+                        cached_fps.append(fp)
+                    except Exception:
+                        to_process_paths.add(Path(row_dict["path"]))
+
+            return list(to_process_paths), cached_fps
+
+        except Exception as e:
+            app_logger.warning(
+                f"Failed to read from LanceDB cache: {e}. Rebuilding cache.",
+                exc_info=True,
+            )
+            return all_file_paths, []
+
+    def put_many(self, fingerprints: list[ImageFingerprint]):
+        """
+        Updates the LanceDB table with new metadata and vectors (upsert).
+        """
+        if not self.is_valid or not fingerprints:
+            return
+
+        data_to_insert = []
+        for fp in fingerprints:
+            data_to_insert.append(fp.to_lancedb_dict(channel=fp.channel))
+
+        if not data_to_insert:
+            return
+
+        try:
+            df = pl.DataFrame(data_to_insert)
+
+            # Delete old records by path to avoid duplicates
+            paths_to_delete = {d["path"] for d in data_to_insert}
+            path_list_str = ", ".join(f"'{str(p).replace("'", "''")}'" for p in paths_to_delete)
+            if path_list_str:
+                self.lancedb_table.delete(f"path IN ({path_list_str})")
+
+            arrow_table = df.to_arrow()
+            self.lancedb_table.add(data=arrow_table)
+
+        except Exception as e:
+            app_logger.error(f"LanceDB metadata/vector update failed: {e}", exc_info=True)
+
+    def close(self):
+        pass
+
+
+# --- Simplified Thumbnail Cache System ---
+class AbstractThumbnailCache(abc.ABC):
+    @abc.abstractmethod
+    def get(self, key: str) -> bytes | None:
+        pass
+
+    @abc.abstractmethod
+    def put(self, key: str, data: bytes):
+        pass
+
+    @abc.abstractmethod
+    def close(self):
+        pass
+
+
+class LanceDBThumbnailCache(AbstractThumbnailCache):
+    def __init__(self, in_memory: bool, db_name: str = "thumbnails"):
+        self.db = None
+        self.table = None
+
+        if not LANCEDB_AVAILABLE:
+            return
+
+        try:
+            import lancedb
+            import pyarrow as pa
+
+            db_path = CACHE_DIR / db_name
+            if in_memory and db_path.exists():
+                shutil.rmtree(db_path)
+
+            db_path.mkdir(parents=True, exist_ok=True)
+            self.db = lancedb.connect(str(db_path))
+
+            if db_name in self.db.table_names():
+                self.table = self.db.open_table(db_name)
+            else:
+                schema = pa.schema(
+                    [
+                        pa.field("key", pa.string()),
+                        pa.field("data", pa.binary()),
+                    ]
+                )
+                self.table = self.db.create_table(db_name, schema=schema)
+
+        except Exception as e:
+            app_logger.error(f"Failed to initialize thumbnail cache: {e}")
+
+    def get(self, key: str) -> bytes | None:
+        if not self.table:
+            return None
+        try:
+            result = self.table.query().where(f"key = '{key}'").limit(1).to_list()
+            return result[0]["data"] if result else None
+        except Exception:
+            return None
+
+    def put(self, key: str, data: bytes):
+        if not self.table:
+            return
+        try:
+            import pyarrow as pa
+
+            self.table.delete(f"key = '{key}'")
+            record = pa.Table.from_pylist([{"key": key, "data": data}])
+            self.table.add(record)
+        except Exception:
+            pass
+
+    def close(self):
+        self.table = None
+        self.db = None
+
+
+class DummyThumbnailCache(AbstractThumbnailCache):
+    def get(self, key: str) -> bytes | None:
+        return None
+
+    def put(self, key: str, data: bytes):
+        pass
+
+    def close(self):
+        pass
+
+
+thumbnail_cache: AbstractThumbnailCache = DummyThumbnailCache()
+
+
+def get_thumbnail_cache_key(
+    path_str: str,
+    mtime: float,
+    target_size: int | None,
+    tonemap_mode: str,
+    channel_to_load: str | None,
+) -> str:
+    # Use 0 if target_size is None to keep key valid string
+    size_str = str(target_size) if target_size is not None else "full"
+    key_str = f"{path_str}|{mtime}|{size_str}|{tonemap_mode}|{channel_to_load or 'full'}"
+    return hashlib.sha1(key_str.encode()).hexdigest()
+
+
+def setup_caches(config: ScanConfig):
+    global thumbnail_cache
+    thumbnail_cache.close()
+    if LANCEDB_AVAILABLE:
+        thumbnail_cache = LanceDBThumbnailCache(in_memory=config.lancedb_in_memory)
+    else:
+        thumbnail_cache = DummyThumbnailCache()
+
+
+def teardown_caches():
+    global thumbnail_cache
+    thumbnail_cache.close()
+    thumbnail_cache = DummyThumbnailCache()

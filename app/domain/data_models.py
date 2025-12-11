@@ -1,0 +1,490 @@
+# app/domain/data_models.py
+"""
+Contains all primary data structures (dataclasses) and enumerations used
+throughout the application. Centralizing these helps to ensure type
+consistency and avoids circular import dependencies.
+"""
+
+import json
+import threading
+import uuid
+from dataclasses import dataclass, field, fields
+from enum import Enum, auto
+from pathlib import Path
+from typing import Any, Literal
+
+import numpy as np
+
+from app.shared.constants import (
+    ALL_SUPPORTED_EXTENSIONS,
+    CONFIG_FILE,
+    DEFAULT_SEARCH_PRECISION,
+    ROOT_DIR,
+    SUPPORTED_MODELS,
+    QuantizationMode,
+)
+
+# Type hint for the analysis type. "Composite" means the full, standard image.
+AnalysisType = Literal["Composite", "Luminance", "R", "G", "B", "A"]
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisItem:
+    """Represents a single item to be analyzed by the pipeline."""
+
+    path: Path
+    analysis_type: AnalysisType
+
+
+def get_fingerprint_fields_schema() -> dict:
+    """Returns the schema dictionary, loading pyarrow on demand."""
+    import pyarrow as pa
+
+    return {
+        "path": {"pyarrow": pa.string()},
+        "resolution_w": {"pyarrow": pa.int32()},
+        "resolution_h": {"pyarrow": pa.int32()},
+        "file_size": {"pyarrow": pa.int64()},
+        "mtime": {"pyarrow": pa.float64()},
+        "capture_date": {"pyarrow": pa.float64()},
+        "format_str": {"pyarrow": pa.string()},
+        "compression_format": {"pyarrow": pa.string()},
+        "format_details": {"pyarrow": pa.string()},
+        "has_alpha": {"pyarrow": pa.bool_()},
+        "bit_depth": {"pyarrow": pa.int32()},
+        "mipmap_count": {"pyarrow": pa.int32()},
+        "texture_type": {"pyarrow": pa.string()},
+        "color_space": {"pyarrow": pa.string()},
+        "channel": {"pyarrow": pa.string()},
+    }
+
+
+FINGERPRINT_FIELDS = get_fingerprint_fields_schema()
+
+
+class EvidenceMethod(Enum):
+    XXHASH = "xxHash"
+    DHASH = "dHash"
+    PHASH = "pHash"
+    WHASH = "wHash"
+    AI = "AI"
+    UNKNOWN = "Unknown"
+
+
+class ScanMode(Enum):
+    DUPLICATES = auto()
+    TEXT_SEARCH = auto()
+    SAMPLE_SEARCH = auto()
+    FOLDER_COMPARE = auto()
+    SINGLE_FOLDER_QC = auto()
+
+
+class FileOperation(Enum):
+    """Enum to track the current file operation in progress."""
+
+    NONE = auto()
+    DELETING = auto()
+    HARDLINKING = auto()
+    REFLINKING = auto()
+
+
+@dataclass(slots=True)
+class ImageFingerprint:
+    """A container for all metadata and hashes of an image."""
+
+    path: Path
+    hashes: np.ndarray
+    resolution: tuple[int, int]
+    file_size: int
+    mtime: float
+    capture_date: float | None
+    format_str: str
+    compression_format: str
+    format_details: str
+    has_alpha: bool
+    bit_depth: int
+    mipmap_count: int
+    texture_type: str
+    color_space: str | None
+
+    xxhash: str | None = field(default=None)
+    dhash: Any | None = field(default=None)
+    phash: Any | None = field(default=None)
+    whash: Any | None = field(default=None)
+    channel: str | None = field(default=None)
+
+    def __hash__(self) -> int:
+        return hash((self.path, self.channel))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, ImageFingerprint):
+            return self.path == other.path and self.channel == other.channel
+        return NotImplemented
+
+    def to_lancedb_dict(self, channel: str | None = None) -> dict[str, Any]:
+        """Converts the object to a dictionary suitable for writing to LanceDB."""
+        final_channel = channel or self.channel
+
+        # Ensure vector is a flat list for LanceDB
+        vector_list = self.hashes.tolist() if isinstance(self.hashes, np.ndarray) else self.hashes
+
+        data = {
+            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, str(self.path) + (final_channel or ""))),
+            "vector": vector_list,
+            "path": str(self.path),
+            "resolution_w": int(self.resolution[0]),
+            "resolution_h": int(self.resolution[1]),
+            "file_size": int(self.file_size),
+            "mtime": float(self.mtime),
+            "capture_date": float(self.capture_date) if self.capture_date is not None else None,
+            "format_str": str(self.format_str),
+            "compression_format": str(self.compression_format),
+            "format_details": str(self.format_details),
+            "has_alpha": bool(self.has_alpha),
+            "bit_depth": int(self.bit_depth),
+            "mipmap_count": int(self.mipmap_count),
+            "texture_type": str(self.texture_type),
+            "color_space": str(self.color_space) if self.color_space is not None else None,
+            "channel": final_channel,
+        }
+        return data
+
+    @classmethod
+    def from_db_row(cls, row: dict) -> "ImageFingerprint":
+        """Factory method to create an ImageFingerprint from a final results database row."""
+        vector_data = row.get("vector")
+        hashes = np.array(vector_data) if vector_data is not None else np.array([])
+        fp = cls(
+            path=Path(row["path"]),
+            hashes=hashes,
+            resolution=(row["resolution_w"], row["resolution_h"]),
+            file_size=row["file_size"],
+            mtime=row["mtime"],
+            capture_date=row.get("capture_date"),
+            format_str=row["format_str"],
+            compression_format=row.get("compression_format", row.get("format_str")),
+            format_details=row["format_details"],
+            has_alpha=bool(row["has_alpha"]),
+            bit_depth=row.get("bit_depth", 8),
+            mipmap_count=row.get("mipmap_count", 1),
+            texture_type=row.get("texture_type", "2D"),
+            color_space=row.get("color_space", "sRGB"),
+            xxhash=row.get("xxhash"),
+            dhash=row.get("dhash"),
+            phash=row.get("phash"),
+            whash=row.get("whash"),
+            channel=row.get("channel"),
+        )
+        return fp
+
+
+# Type Aliases
+DuplicateInfo = tuple[ImageFingerprint, int]
+DuplicateGroup = set[DuplicateInfo]
+DuplicateResults = dict[ImageFingerprint, Any]
+SearchResult = list[tuple[ImageFingerprint, float]]
+
+
+@dataclass(frozen=True, slots=True)
+class ResultNode:
+    path: str
+    is_best: bool
+    group_id: int
+    resolution_w: int
+    resolution_h: int
+    file_size: int
+    mtime: float
+    capture_date: float | None
+    distance: int
+    format_str: str
+    compression_format: str
+    format_details: str
+    has_alpha: bool
+    bit_depth: int
+    mipmap_count: int
+    texture_type: str
+    color_space: str | None
+    found_by: str
+    channel: str | None = None
+    type: str = "result"
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ResultNode":
+        class_fields = {f.name for f in fields(cls)}
+        # Filter data to prevent TypeError when slots=True (no __dict__)
+        filtered_data = {k: v for k, v in data.items() if k in class_fields}
+
+        # Set defaults for missing fields
+        if "compression_format" not in filtered_data:
+            filtered_data["compression_format"] = filtered_data.get("format_str", "Unknown")
+        if "mipmap_count" not in filtered_data:
+            filtered_data["mipmap_count"] = 1
+        if "texture_type" not in filtered_data:
+            filtered_data["texture_type"] = "2D"
+        if "color_space" not in filtered_data:
+            filtered_data["color_space"] = "sRGB"
+
+        return cls(**filtered_data)
+
+
+@dataclass(slots=True)
+class GroupNode:
+    name: str
+    count: int
+    total_size: int
+    group_id: int
+    children: list[ResultNode] = field(default_factory=list)
+    fetched: bool = False
+    type: str = "group"
+
+
+# Configuration Dataclasses
+@dataclass
+class PerformanceConfig:
+    num_workers: int = 4
+    run_at_low_priority: bool = True
+    batch_size: int = 256
+
+
+@dataclass
+class ScanConfig:
+    # --- All fields WITHOUT a default value MUST come first ---
+    folder_path: Path
+    similarity_threshold: int
+    save_visuals: bool
+    max_visuals: int
+    excluded_folders: list[str]
+    model_name: str
+    model_dim: int
+    selected_extensions: list[str]
+    perf: PerformanceConfig
+    search_precision: str
+    scan_mode: ScanMode
+    device: str
+    use_ai: bool
+    find_exact_duplicates: bool
+    find_simple_duplicates: bool
+    dhash_threshold: int
+    find_perceptual_duplicates: bool
+    phash_threshold: int
+    find_structural_duplicates: bool
+    whash_threshold: int
+    compare_by_luminance: bool
+    compare_by_channel: bool
+    lancedb_in_memory: bool
+    visuals_columns: int
+    tonemap_visuals: bool
+    tonemap_view: str
+
+    # --- All fields WITH a default value MUST come after ---
+    ignore_solid_channels: bool = True
+
+    # Selected Channels (R, G, B, A)
+    active_channels: list[str] = field(default_factory=lambda: ["R", "G", "B", "A"])
+
+    channel_split_tags: list[str] = field(default_factory=list)
+    model_info: dict = field(default_factory=dict)
+    sample_path: Path | None = None
+    search_query: str | None = None
+
+    # Folder Compare / QC specific
+    comparison_folder_path: Path | None = None
+
+    # QC Flags
+    hide_same_resolution_groups: bool = False
+    qc_check_alpha: bool = False
+    qc_check_npot: bool = False
+    qc_check_mipmaps: bool = False
+    qc_check_size_bloat: bool = False
+    qc_check_solid_color: bool = False
+    qc_check_color_space: bool = False
+    qc_check_bit_depth: bool = False
+    match_by_stem: bool = False
+
+    # New QC Flags
+    qc_check_compression: bool = False
+    qc_check_block_align: bool = False
+
+
+@dataclass
+class HashingSettings:
+    use_ai: bool = True
+    find_exact: bool = True
+    find_simple: bool = True
+    dhash_threshold: int = 8
+    find_perceptual: bool = True
+    phash_threshold: int = 8
+    find_structural: bool = False
+    whash_threshold: int = 2
+    compare_by_luminance: bool = False
+    compare_by_channel: bool = False
+    channel_split_tags: str = ""
+    ignore_solid_channels: bool = True
+
+    # Channel toggles for persistence
+    channel_r: bool = True
+    channel_g: bool = True
+    channel_b: bool = True
+    channel_a: bool = True
+
+    # QC / Compare settings
+    hide_same_resolution_groups: bool = False
+    qc_check_alpha: bool = False
+    qc_check_npot: bool = False
+    qc_check_mipmaps: bool = False
+    qc_check_size_bloat: bool = False
+    qc_check_solid_color: bool = False
+    qc_check_color_space: bool = False
+    qc_check_bit_depth: bool = False
+    match_by_stem: bool = False
+
+    # New QC Flags
+    qc_check_compression: bool = False
+    qc_check_block_align: bool = False
+
+    # Auto-Cleanup logic
+    last_model_name: str = ""
+
+
+@dataclass
+class PerformanceSettings:
+    num_workers: str = "4"
+    batch_size: str = "256"
+    low_priority: bool = True
+    search_precision: str = DEFAULT_SEARCH_PRECISION
+    device: str = "CPUExecutionProvider"
+    quantization_mode: str = QuantizationMode.FP16.value
+
+
+@dataclass
+class VisualsSettings:
+    save: bool = False
+    max_count: str = "100"
+    columns: int = 6
+    tonemap_enabled: bool = False
+
+
+@dataclass
+class ViewerSettings:
+    preview_size: int = 250
+    show_transparency: bool = True
+    thumbnail_tonemap_enabled: bool = False
+    compare_tonemap_enabled: bool = False
+    tonemap_view: str = "Khronos PBR Neutral"
+
+
+@dataclass
+class AppSettings:
+    folder_path: str = ""
+    threshold: str = "95"
+    exclude: str = ""
+    model_key: str = "Fastest (OpenCLIP ViT-B/32)"
+    selected_extensions: list[str] = field(default_factory=list)
+    lancedb_in_memory: bool = True
+    theme: str = "Dark"
+
+    hashing: HashingSettings = field(default_factory=HashingSettings)
+    performance: PerformanceSettings = field(default_factory=PerformanceSettings)
+    visuals: VisualsSettings = field(default_factory=VisualsSettings)
+    viewer: ViewerSettings = field(default_factory=ViewerSettings)
+
+    @classmethod
+    def load(cls) -> "AppSettings":
+        if not CONFIG_FILE.exists():
+            return cls(selected_extensions=list(ALL_SUPPORTED_EXTENSIONS), folder_path=str(ROOT_DIR))
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Backward Compatibility Logic
+            if "find_exact_duplicates" in data:
+                data["hashing"] = {
+                    "use_ai": data.pop("use_ai", True),
+                    "find_exact": data.pop("find_exact_duplicates", True),
+                    "find_simple": data.pop("find_simple_duplicates", True),
+                    "dhash_threshold": data.pop("dhash_threshold", 8),
+                    "find_perceptual": data.pop("find_perceptual_duplicates", True),
+                    "phash_threshold": data.pop("phash_threshold", 8),
+                    "compare_by_luminance": data.pop("compare_by_luminance", False),
+                    "compare_by_channel": data.pop("compare_by_channel", False),
+                    "channel_split_tags": data.pop("channel_split_tags", ""),
+                    "ignore_solid_channels": data.pop("ignore_solid_channels", True),
+                }
+
+            # Generic Loader
+            settings = cls()
+            for key, value in data.items():
+                if hasattr(settings, key):
+                    attr = getattr(settings, key)
+                    if isinstance(attr, (HashingSettings, PerformanceSettings, VisualsSettings, ViewerSettings)):
+                        # Update nested dataclasses
+                        if isinstance(value, dict):
+                            for k, v in value.items():
+                                if hasattr(attr, k):
+                                    setattr(attr, k, v)
+                    else:
+                        setattr(settings, key, value)
+
+            if not settings.selected_extensions:
+                settings.selected_extensions = list(ALL_SUPPORTED_EXTENSIONS)
+
+            # Default model fallback
+            if settings.model_key not in SUPPORTED_MODELS:
+                settings.model_key = next(iter(SUPPORTED_MODELS.keys()))
+
+            return settings
+        except (OSError, json.JSONDecodeError) as e:
+            print(f"Warning: Could not load settings file, using defaults. Error: {e}")
+            return cls(selected_extensions=list(ALL_SUPPORTED_EXTENSIONS), folder_path=str(ROOT_DIR))
+
+    def save(self):
+        try:
+            # recursive dict conversion for nested dataclasses
+            data_to_save = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in self.__dict__.items()}
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(data_to_save, f, indent=4)
+        except OSError as e:
+            print(f"Error: Could not save settings to {CONFIG_FILE}: {e}")
+
+
+class ScanState:
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.phase_name: str = ""
+        self.phase_details: str = ""
+        self.phase_current: int = 0
+        self.phase_total: int = 0
+        self.base_progress: float = 0.0
+        self.phase_weight: float = 0.0
+
+    def reset(self):
+        with self.lock:
+            self.phase_name = ""
+            self.phase_details = ""
+            self.phase_current = 0
+            self.phase_total = 0
+            self.base_progress = 0.0
+            self.phase_weight = 0.0
+
+    def set_phase(self, name: str, weight: float):
+        with self.lock:
+            self.base_progress += self.phase_weight
+            self.phase_name, self.phase_weight = name, weight
+            self.phase_current, self.phase_total = 0, 0
+
+    def update_progress(self, current: int, total: int, details: str = ""):
+        with self.lock:
+            self.phase_current, self.phase_total = current, total
+            if details:
+                self.phase_details = details
+
+    def get_snapshot(self) -> dict[str, Any]:
+        with self.lock:
+            return {
+                "phase_name": self.phase_name,
+                "phase_details": self.phase_details,
+                "phase_current": self.phase_current,
+                "phase_total": self.phase_total,
+                "base_progress": self.base_progress,
+                "phase_weight": self.phase_weight,
+            }
