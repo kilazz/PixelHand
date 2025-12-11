@@ -59,6 +59,7 @@ class DatabaseService:
         self.db_path = None
         self.is_ready = False
         self._access_lock = threading.RLock()
+        self.current_dim = 512  # Default dimension
         self._initialized = True
 
     def initialize(self, config: ScanConfig) -> bool:
@@ -74,6 +75,7 @@ class DatabaseService:
                 folder_hash = hashlib.md5(str(config.folder_path).encode()).hexdigest()
                 db_name = f"lancedb_vectors_{folder_hash}_{sanitized_model}"
                 self.db_path = CACHE_DIR / db_name
+                self.current_dim = config.model_dim
 
                 if config.lancedb_in_memory:
                     APP_SIGNAL_BUS.log_message.emit("DB Mode: In-Memory (Volatile).", "info")
@@ -135,7 +137,26 @@ class DatabaseService:
                     return
 
                 partitions = min(2048, max(128, int(num_rows**0.5)))
-                self.table.create_index(metric="cosine", num_partitions=partitions, num_sub_vectors=96, replace=True)
+
+                # Dynamic sub_vectors calculation
+                # Must divide vector dimension evenly. Ideally dim / 16 or dim / 8.
+                # Common dims: 512, 768, 1024
+                # We try to keep sub-vector size around 8-16 floats.
+                if self.current_dim % 96 == 0:
+                    sub_vectors = 96
+                elif self.current_dim % 64 == 0:
+                    sub_vectors = 64
+                elif self.current_dim % 32 == 0:
+                    sub_vectors = 32
+                elif self.current_dim % 16 == 0:
+                    sub_vectors = 16
+                else:
+                    # Fallback for weird dimensions
+                    sub_vectors = 8
+
+                self.table.create_index(
+                    metric="cosine", num_partitions=partitions, num_sub_vectors=sub_vectors, replace=True
+                )
             except Exception as e:
                 app_logger.warning(f"Index creation warning: {e}")
 
