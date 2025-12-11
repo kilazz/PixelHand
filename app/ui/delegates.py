@@ -234,7 +234,8 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
     def sizeHint(self, option, index):
         if self.is_grid_mode:
             width = self.preview_size + 10
-            text_area_height = 140
+            # INCREASED: Give more vertical space for 3-line filenames + metadata
+            text_area_height = 180
             return QSize(width, self.preview_size + text_area_height)
         else:
             return QSize(self.preview_size + 250, self.preview_size + 10)
@@ -384,45 +385,48 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             if item_data.is_best
             else (METHOD_DISPLAY_NAMES.get(item_data.found_by) or f"{item_data.distance}%")
         )
-        # Use full metadata string for both views now
+
+        # Use common metadata logic with dots
         meta_text = _format_metadata_string(item_data)
 
         if self.is_grid_mode:
+            padding = 4
+            x = option.rect.x() + padding
+            w = option.rect.width() - (padding * 2)
             y = option.rect.y() + self.preview_size + 8
-            w = option.rect.width() - 4
-            x = option.rect.x() + 2
 
+            # --- 1. Draw Filename (Bold) ---
             painter.setFont(self.bold_font)
             painter.setPen(main_c)
-            name_rect = QRect(x, y, w, 40)
-            painter.drawText(
-                name_rect,
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
-                filename,
-            )
 
-            y += (
-                painter.boundingRect(
-                    name_rect,
-                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
-                    filename,
-                ).height()
-                + 4
-            )
+            flags = Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap
+
+            # Calculate dynamic height of filename
+            bounding_rect = painter.boundingRect(QRect(x, y, w, 100), flags, filename)
+            name_height = min(bounding_rect.height(), 60)  # Cap at roughly 3 lines
+
+            painter.drawText(QRect(x, y, w, int(name_height)), flags, filename)
+
+            # --- 2. Draw Metadata (Regular) ---
+            # Move Y down based on filename height
+            y += name_height + 4
+
             painter.setFont(self.regular_font)
             painter.setPen(sec_c)
 
             # Combine Score/Best with Metadata using dot separator
             full_grid_meta = f"{dist_text} • {meta_text}" if dist_text else meta_text
 
-            # Render full string with word wrap in Grid View
-            painter.drawText(
-                QRect(x, y, w, 120),
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
-                full_grid_meta,
-            )
+            remaining_height = option.rect.bottom() - y - padding
+
+            if remaining_height > 10:
+                painter.drawText(
+                    QRect(x, int(y), w, int(remaining_height)),
+                    flags,
+                    full_grid_meta,
+                )
         else:
-            # List View
+            # --- List View ---
             r = option.rect.adjusted(self.preview_size + 15, 5, -5, -5)
             x, y = r.left(), r.top() + self.bold_font_metrics.ascent()
             painter.setFont(self.bold_font)
