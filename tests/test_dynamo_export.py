@@ -15,10 +15,9 @@ sys.path.insert(0, str(script_dir))
 # --- All other imports can now be at the top ---
 import torch
 import torch._dynamo
+from app.model_adapter import DinoV2Adapter, get_model_adapter
 from PIL import Image
 from torch.export import Dim
-
-from app.model_adapter import DinoV2Adapter, get_model_adapter
 
 # This check prevents errors if the script is run without the necessary libraries
 try:

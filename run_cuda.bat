@@ -1,110 +1,58 @@
 @echo off
 setlocal EnableDelayedExpansion
-title PixelHand Launcher (CUDA)
+title PixelHand Portable Launcher (CUDA)
 
-:: CHANGE DIRECTORY TO THE SCRIPT'S LOCATION
+:: --- 1. Path Configuration ---
 cd /d "%~dp0"
+set "TOOLS_DIR=%~dp0.tools"
+set "UV_EXE=%TOOLS_DIR%\uv.exe"
 
-:: --- Configuration ---
-set "VENV_DIR=.venv-cuda"
-set "ONNX_BACKEND=cuda"
-set "PYTHON_EXE=python"
-set "REINSTALL_MODE="
-set "DIAG_MODE="
-set "PROFILE_MODE="
+set "UV_CACHE_DIR=%TOOLS_DIR%\uv-cache"
+set "UV_PYTHON_INSTALL_DIR=%TOOLS_DIR%\uv-python"
+set "UV_TOOL_DIR=%TOOLS_DIR%\uv-tools"
+set "UV_SYSTEM_PYTHON=0"
 
-:: --- Argument Parsing ---
-for %%a in (%*) do (
-    if /i "%%a"=="--reinstall" ( set "REINSTALL_MODE=1" )
-    if /i "%%a"=="--diag" ( set "DIAG_MODE=1" )
-    if /i "%%a"=="--profile" ( set "PROFILE_MODE=1" )
-)
+:: === ENVIRONMENT ISOLATION ===
+set "UV_PROJECT_ENVIRONMENT=%~dp0.venv-cuda"
 
-:: --- Header ---
 echo =======================================================
-echo         PixelHand Launcher for [CUDA]
+echo      PixelHand Portable Launcher via UV [CUDA]
 echo =======================================================
 echo.
-
-:: --- [1/5] Project Sanity Check ---
-echo [1/5] Verifying project structure...
-if not exist "pyproject.toml" ( goto :error "pyproject.toml not found. Please run this script from the project root." )
-echo [OK] Project structure is valid.
+echo [INFO] Tools Dir: .tools
+echo [INFO] Venv Dir:  .venv-cuda
 echo.
 
-:: --- [2/5] Virtual Environment Setup ---
-if defined REINSTALL_MODE (
-    if exist "%VENV_DIR%" (
-        echo [2/5] Reinstall mode: Deleting existing '%VENV_DIR%'...
-        rmdir /s /q "%VENV_DIR%"
-        if errorlevel 1 ( goto :error "Could not delete the '%VENV_DIR%' directory." )
+:: --- 2. Check and Install UV Locally ---
+if not exist "%UV_EXE%" (
+    echo [INFO] Portable 'uv' not found. Downloading...
+    if exist "%TOOLS_DIR%" rmdir /s /q "%TOOLS_DIR%"
+    mkdir "%TOOLS_DIR%"
+    powershell -Command "$ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip' -OutFile '%TOOLS_DIR%\uv.zip'"
+    powershell -Command "Expand-Archive -Path '%TOOLS_DIR%\uv.zip' -DestinationPath '%TOOLS_DIR%' -Force"
+    powershell -Command "Get-ChildItem -Path '%TOOLS_DIR%' -Filter 'uv.exe' -Recurse | Move-Item -Destination '%TOOLS_DIR%' -Force"
+    if exist "%TOOLS_DIR%\uv.zip" del "%TOOLS_DIR%\uv.zip"
+    if not exist "%UV_EXE%" (
+        echo [ERROR] Failed to setup uv.exe.
+        pause
+        exit /b 1
     )
+    echo [OK] uv installed successfully.
 )
 
-if not exist "%VENV_DIR%\Scripts\activate.bat" (
-    echo [2/5] Creating Python virtual environment in '%VENV_DIR%'...
-    %PYTHON_EXE% -m venv %VENV_DIR%
-    if errorlevel 1 ( goto :error "Failed to create the virtual environment." )
-    set "NEEDS_INSTALL=1"
-) else (
-    echo [2/5] Virtual environment '%VENV_DIR%' already exists.
-)
-
-echo Activating virtual environment...
-set "PATH=%CD%\%VENV_DIR%\Scripts;%PATH%"
-echo [OK] Virtual environment is active.
+:: --- 3. Launch Application ---
+echo [INFO] Syncing dependencies for CUDA...
 echo.
 
-:: --- [3/5] Installing Dependencies ---
-if not defined NEEDS_INSTALL if not defined REINSTALL_MODE (
-    echo [3/5] Dependencies appear to be installed. Skipping.
-    goto :deps_done
-)
+"%UV_EXE%" run --extra cuda main.py %*
 
-echo [3/5] Installing dependencies for [%ONNX_BACKEND%] backend...
-pip install --upgrade pip
-pip install --upgrade ".[%ONNX_BACKEND%]"
-if errorlevel 1 ( goto :error "Failed to install dependencies." )
-
-:deps_done
-echo [OK] Dependencies are ready.
-echo.
-
-:: --- [4/5] Running Diagnostics ---
-echo [4/5] Running environment diagnostics...
-python -m app.diagnostics
 if errorlevel 1 (
-    echo [WARNING] One or more diagnostic checks failed.
+    echo.
+    echo !!!!!!!!!!!!!!!!!!!! [APPLICATION CRASHED] !!!!!!!!!!!!!!!!!!!!
     pause
-) else (
-    echo [OK] All diagnostic checks passed.
-)
-if defined DIAG_MODE ( goto :end_success )
-echo.
-
-:: --- [5/5] Launching Application ---
-echo =======================================================
-echo [5/5] Starting PixelHand with [%ONNX_BACKEND%]...
-echo =======================================================
-echo.
-
-if defined PROFILE_MODE (
-    echo [INFO] Running in profile mode. All arguments like --debug will be passed.
-    python -m cProfile -o "app_data\scan_profile.pstats" main.py %*
-) else (
-    echo [INFO] Passing arguments to application: %*
-    python main.py %*
+    exit /b 1
 )
 
-if errorlevel 1 ( goto :error "Application exited unexpectedly." )
-goto :end_success
-
-:error
-echo. & echo !!!!!!!!!!!!!!!!!!!! [FATAL ERROR] %~1 !!!!!!!!!!!!!!!!!!!! & echo.
-pause
-exit /b 1
-
-:end_success
-endlocal
-echo. & echo Script finished.
+echo.
+echo [INFO] Application exited normally.
 pause

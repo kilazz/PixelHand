@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "PixelHand"
@@ -9,36 +9,39 @@ version = "1.0.0"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
-authors = [{ name = "kilazz"}]
+authors = [{name = "kilazz"}]
 
 dependencies = [
     # Core Application & GUI
-    "PySide6>=6.10.0",
+    "PySide6>=6.10.1",
     "send2trash>=1.8.3",
     # AI & Machine Learning
     "torch>=2.9.1",
-    "transformers>=4.57.1",
+    "transformers>=4.57.3",
+	#"transformers>=5.0.0rc0",
     "sentencepiece>=0.2.1",
-    "huggingface_hub[hf_xet]>=0.36.0", #transformers
-    "onnx>=1.19.1",
-    "onnxscript>=0.5.6",
+	"huggingface_hub[hf_xet]>=0.36.0", #transformers
+    #"huggingface_hub[hf_xet]>=1.2.2", #transformers
+    "onnx>=1.20.0",
+    "onnxscript>=0.5.7.dev20251209",
     # Data Handling and Vector DB
+    "pylance>=1.0.0rc3",
     "lancedb>=0.25.3",
-    "numpy>=2.3.4",
-    "numba>=0.62.1",
+    "numpy>=2.3.5",
+    "numba>=0.63.1",
     "pyarrow>=22.0.0",
-    "polars>=1.35.2",
+    "polars>=1.36.1",
     "xxhash>=3.6.0",
     "ImageHash>=4.3.2",
     # Image Processing
     "simple-ocio>=0.2.0",
     "Pillow>=12.0.0",
-    "OpenImageIO>=3.1.7.0",
+    "OpenImageIO>=3.1.8.0",
     #"directxtex-decoder", #for DDS
 ]
 
 [project.optional-dependencies]
-# ONNX Runtime
+# ONNX Runtime variants
 cpu      = ["onnxruntime>=1.23.2"]
 cuda     = ["onnxruntime-gpu>=1.23.2"]
 directml = ["onnxruntime-directml>=1.23.0"]
@@ -51,6 +54,21 @@ dev = [
     "tabulate2",
     "psutil",
     "tqdm",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.hatch.build]
+exclude = [
+    "app_data",
+    ".venv",
+	".venv-webgpu",
+	".venv-directml",
+	".venv-cuda",
+	".venv-cpu",
+    "_src_directxtex_decoder",
+    "tests",
 ]
 
 [tool.ruff]
@@ -84,10 +102,6 @@ exclude = [
 	"app_data",
 	"venv",
 	".venv",
-	".venv-webgpu",
-	".venv-directml",
-	".venv-cuda",
-	".venv-cpu",
 ]
 
 line-length = 120
@@ -118,11 +132,3 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
-
-[tool.setuptools]
-include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["app*"]
-exclude = ["app_data*"]
