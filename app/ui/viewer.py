@@ -217,11 +217,20 @@ class ImageViewerPanel(QGroupBox):
         self.back_button = QPushButton("< Back to List")
         self.compare_type_combo = QComboBox()
         self.compare_type_combo.addItems([e.value for e in CompareMode])
+
+        # Reset Button for Zoom/Pan
+        self.reset_view_button = QPushButton("Fit / Reset")
+        self.reset_view_button.setToolTip("Reset Zoom and Pan (Fit to screen)")
+        self.reset_view_button.clicked.connect(self._reset_compare_views)
+
         top_controls.addWidget(self.back_button)
         top_controls.addWidget(self.compare_type_combo)
+        top_controls.addWidget(self.reset_view_button)
+
         self.tiling_check = QCheckBox("Tile Check (3x3)")
         top_controls.addWidget(self.tiling_check)
         top_controls.addStretch()
+
         self.tonemap_view_label = QLabel("View:")
         self.tonemap_view_combo = QComboBox()
         if TONE_MAPPER and TONE_MAPPER.available_views:
@@ -279,6 +288,12 @@ class ImageViewerPanel(QGroupBox):
         self.compare_stack.addWidget(self.compare_widget)
         self.compare_stack.addWidget(self.diff_view)
         parent_layout.addWidget(self.compare_stack, 1)
+
+        # Connect Synchronous Zoom Signals
+        self.compare_view_1.view_changed.connect(self._sync_views)
+        self.compare_view_2.view_changed.connect(self._sync_views)
+        self.compare_widget.view_changed.connect(self._sync_views)
+        self.diff_view.view_changed.connect(self._sync_views)
 
     def _init_context_menu(self):
         self.context_menu_path: Path | None = None
@@ -530,6 +545,10 @@ class ImageViewerPanel(QGroupBox):
             self._update_channel_button_style(button, True)
         self.state.stop_loaders()
         self.tiling_check.setChecked(False)
+
+        # Reset any lingering zoom when exiting compare mode
+        self._reset_compare_views()
+
         self._set_view_mode(is_list=True)
         self.list_view.viewport().update()
         if self.model.rowCount() > 0:
@@ -691,3 +710,23 @@ class ImageViewerPanel(QGroupBox):
         b_diff = ImageChops.difference(b1, b2) if self.channel_states["B"] else Image.new("L", img1.size, 0)
         a_diff = ImageChops.difference(a1, a2) if self.channel_states["A"] else Image.new("L", img1.size, 255)
         return QPixmap.fromImage(ImageQt(Image.merge("RGBA", (r_diff, g_diff, b_diff, a_diff))))
+
+    @Slot(float, QPoint)
+    def _sync_views(self, zoom: float, offset: QPoint):
+        """Synchronizes zoom/pan across all compare widgets."""
+        sender = self.sender()
+        widgets = [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]
+        for w in widgets:
+            if w != sender:
+                w.blockSignals(True)
+                w.set_sync_view(zoom, offset)
+                w.blockSignals(False)
+
+    @Slot()
+    def _reset_compare_views(self):
+        """Resets zoom and pan to default (Fit)."""
+        widgets = [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]
+        for w in widgets:
+            w.blockSignals(True)
+            w.reset_view()
+            w.blockSignals(False)

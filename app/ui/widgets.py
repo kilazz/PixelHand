@@ -1,15 +1,15 @@
 # app/ui/widgets.py
 """
 Contains small, reusable custom QWidget subclasses used throughout the GUI.
+Refactored to support Synchronous Zoom & Pan via InteractiveViewMixin.
 """
 
 from collections import OrderedDict
 from typing import ClassVar
 
-# Added QModelIndex to fix F821
-from PySide6.QtCore import QModelIndex, QPoint, QRect, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QListView, QWidget
+from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, Signal
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
+from PySide6.QtWidgets import QListView, QSizePolicy, QWidget
 
 from app.shared.constants import CompareMode, UIConfig
 
@@ -51,9 +51,11 @@ class PaintUtilsMixin:
             return [base_rect]
         rects = []
         w, h = base_rect.width(), base_rect.height()
+        # Draw 3x3 grid around center
         for dy in range(-1, 2):
             for dx in range(-1, 2):
                 tiled_rect = base_rect.translated(dx * w, dy * h)
+                # Optimization: only draw if visible
                 if tiled_rect.intersects(bounds):
                     rects.append(tiled_rect)
         return rects
@@ -65,14 +67,110 @@ class PaintUtilsMixin:
             painter.drawRect(r)
 
 
-class AlphaBackgroundWidget(QWidget, PaintUtilsMixin):
+class InteractiveViewMixin:
+    """
+    Mixin to handle Zoom and Pan logic.
+    Emits signals to sync with other widgets.
+    """
+
+    view_changed = Signal(float, QPoint)  # zoom, offset
+
+    def __init__(self):
+        self._zoom = 1.0
+        self._offset = QPoint(0, 0)
+        self._is_panning = False
+        self._last_mouse_pos = QPoint()
+
+    def reset_view(self):
+        self._zoom = 1.0
+        self._offset = QPoint(0, 0)
+        self.update()
+
+    def set_sync_view(self, zoom: float, offset: QPoint):
+        """Called by external controller/signal to sync state."""
+        self._zoom = zoom
+        self._offset = offset
+        self.update()
+
+    def _calculate_geometry(self, pixmap_size: QSize, widget_size: QSize) -> QRect:
+        if pixmap_size.isEmpty():
+            return QRect()
+
+        # 1. Base Fit (Aspect Ratio)
+        scaled_size = pixmap_size.scaled(widget_size, Qt.AspectRatioMode.KeepAspectRatio)
+
+        # 2. Apply Zoom
+        final_w = int(scaled_size.width() * self._zoom)
+        final_h = int(scaled_size.height() * self._zoom)
+
+        # 3. Center
+        center_x = (widget_size.width() - final_w) // 2
+        center_y = (widget_size.height() - final_h) // 2
+
+        # 4. Apply Pan Offset
+        x = center_x + self._offset.x()
+        y = center_y + self._offset.y()
+
+        return QRect(x, y, final_w, final_h)
+
+    # --- Event Handlers (must be hooked or called by QWidget subclass) ---
+
+    def handle_wheel_event(self, event: QWheelEvent):
+        # Zoom logic
+        delta = event.angleDelta().y()
+        zoom_factor = 1.15
+
+        if delta > 0:
+            self._zoom *= zoom_factor
+        else:
+            self._zoom /= zoom_factor
+            # Limit min zoom
+            if self._zoom < 0.1:
+                self._zoom = 0.1
+
+        # Notify sync
+        if hasattr(self, "view_changed"):
+            self.view_changed.emit(self._zoom, self._offset)
+        self.update()
+
+    def handle_mouse_press(self, event: QMouseEvent):
+        # Middle button OR Left+Ctrl for Pan
+        if event.button() == Qt.MouseButton.MiddleButton or (
+            event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            self._is_panning = True
+            self._last_mouse_pos = event.pos()
+            if hasattr(self, "setCursor"):
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def handle_mouse_move(self, event: QMouseEvent):
+        if self._is_panning:
+            delta = event.pos() - self._last_mouse_pos
+            self._offset += delta
+            self._last_mouse_pos = event.pos()
+            if hasattr(self, "view_changed"):
+                self.view_changed.emit(self._zoom, self._offset)
+            self.update()
+
+    def handle_mouse_release(self, event: QMouseEvent):
+        if self._is_panning:
+            self._is_panning = False
+            if hasattr(self, "setCursor"):
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+
+
+class AlphaBackgroundWidget(QWidget, PaintUtilsMixin, InteractiveViewMixin):
+    view_changed = Signal(float, QPoint)  # Re-declare signal for QWidget meta-object
+
     def __init__(self, parent=None):
-        super().__init__(parent)
+        QWidget.__init__(self, parent)
+        InteractiveViewMixin.__init__(self)
         self.pixmap = QPixmap()
         self.error_message = ""
         self.bg_alpha = 255
         self.is_transparency_enabled = True
         self.is_tiling_enabled = False
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def set_alpha(self, alpha: int):
         self.bg_alpha = alpha
@@ -95,44 +193,68 @@ class AlphaBackgroundWidget(QWidget, PaintUtilsMixin):
         self.update()
 
     def paintEvent(self, event):
-        super().paintEvent(event)
         with QPainter(self) as painter:
+            # Draw Background
             if self.is_transparency_enabled:
                 painter.drawPixmap(self.rect(), self.get_checkered_pixmap(self.size(), self.bg_alpha))
             else:
                 painter.fillRect(self.rect(), self.palette().base())
 
             if self.error_message:
+                painter.setPen(self.palette().text().color())
                 painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.error_message)
             elif not self.pixmap.isNull():
-                scaled = self.pixmap.scaled(
-                    self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                )
-                base_rect = QRect(
-                    (self.width() - scaled.width()) // 2,
-                    (self.height() - scaled.height()) // 2,
-                    scaled.width(),
-                    scaled.height(),
-                )
-                draw_rects = self.get_draw_rects(base_rect, self.rect(), self.is_tiling_enabled)
+                # Use Mixin calculation
+                target_rect = self._calculate_geometry(self.pixmap.size(), self.size())
+
+                # Get draw rects (handles tiling)
+                draw_rects = self.get_draw_rects(target_rect, self.rect(), self.is_tiling_enabled)
+
+                # Use Smooth Transform if zooming
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self._zoom != 1.0)
+
                 for r in draw_rects:
-                    painter.drawPixmap(r, scaled)
+                    painter.drawPixmap(r, self.pixmap)
+
                 if self.is_tiling_enabled:
                     self.draw_tile_borders(painter, draw_rects)
 
+    # --- Input Events ---
+    def wheelEvent(self, event):
+        self.handle_wheel_event(event)
 
-class ImageCompareWidget(QWidget, PaintUtilsMixin):
+    def mousePressEvent(self, event):
+        # Allow simple left drag for this widget if no modifiers
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._is_panning = True
+            self._last_mouse_pos = event.pos()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        else:
+            self.handle_mouse_press(event)
+
+    def mouseMoveEvent(self, event):
+        self.handle_mouse_move(event)
+
+    def mouseReleaseEvent(self, event):
+        self.handle_mouse_release(event)
+
+
+class ImageCompareWidget(QWidget, PaintUtilsMixin, InteractiveViewMixin):
+    view_changed = Signal(float, QPoint)
+
     def __init__(self, parent=None):
-        super().__init__(parent)
+        QWidget.__init__(self, parent)
+        InteractiveViewMixin.__init__(self)
         self.pixmap1, self.pixmap2 = QPixmap(), QPixmap()
         self.mode = CompareMode.WIPE
         self.wipe_x = self.width() // 2
         self.overlay_alpha = 128
         self.bg_alpha = 255
-        self.is_dragging = False
+        self.is_dragging_wipe = False  # Specific for wipe handle
         self.is_transparency_enabled = True
         self.is_tiling_enabled = False
         self.setMouseTracking(True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
     def setPixmaps(self, p1: QPixmap, p2: QPixmap):
         self.pixmap1, self.pixmap2 = p1, p2
@@ -161,7 +283,6 @@ class ImageCompareWidget(QWidget, PaintUtilsMixin):
         self.update()
 
     def paintEvent(self, event):
-        super().paintEvent(event)
         with QPainter(self) as painter:
             if self.is_transparency_enabled:
                 painter.drawPixmap(self.rect(), self.get_checkered_pixmap(self.size(), self.bg_alpha))
@@ -170,65 +291,92 @@ class ImageCompareWidget(QWidget, PaintUtilsMixin):
 
             if self.pixmap1.isNull() or self.pixmap2.isNull():
                 return
-            base_rect = self._calculate_scaled_rect(self.pixmap1)
-            draw_rects = self.get_draw_rects(base_rect, self.rect(), self.is_tiling_enabled)
+
+            # Geometry calculation (based on pixmap1)
+            target_rect = self._calculate_geometry(self.pixmap1.size(), self.size())
+            draw_rects = self.get_draw_rects(target_rect, self.rect(), self.is_tiling_enabled)
+
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, self._zoom != 1.0)
 
             if self.mode == CompareMode.WIPE:
+                # Layer 2 (Bottom)
                 for r in draw_rects:
                     painter.drawPixmap(r, self.pixmap2)
+
+                # Layer 1 (Top) - Clipped
                 painter.setClipRect(QRect(0, 0, self.wipe_x, self.height()))
                 for r in draw_rects:
                     painter.drawPixmap(r, self.pixmap1)
+
                 painter.setClipping(False)
+
+                # Draw Wipe Handle
                 painter.setPen(QPen(QColor(UIConfig.Colors.DIVIDER), 2))
                 painter.drawLine(self.wipe_x, 0, self.wipe_x, self.height())
                 painter.setBrush(QColor(UIConfig.Colors.DIVIDER))
                 painter.drawEllipse(QPoint(self.wipe_x, self.height() // 2), 8, 8)
+
                 if self.is_tiling_enabled:
                     self.draw_tile_borders(painter, draw_rects)
+
             elif self.mode == CompareMode.OVERLAY:
+                # Layer 1
                 for r in draw_rects:
                     painter.drawPixmap(r, self.pixmap1)
+
+                # Layer 2 (Transparent)
                 painter.setOpacity(self.overlay_alpha / 255.0)
                 for r in draw_rects:
                     painter.drawPixmap(r, self.pixmap2)
                 painter.setOpacity(1.0)
+
                 if self.is_tiling_enabled:
                     self.draw_tile_borders(painter, draw_rects)
 
-    def _calculate_scaled_rect(self, pixmap: QPixmap) -> QRect:
-        scaled = pixmap.scaled(
-            self.size(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-        )
-        return QRect(
-            (self.width() - scaled.width()) // 2,
-            (self.height() - scaled.height()) // 2,
-            scaled.width(),
-            scaled.height(),
-        )
+    # --- Input Events ---
+    def wheelEvent(self, event):
+        self.handle_wheel_event(event)
 
     def mousePressEvent(self, event):
+        # Priority: Wipe Handle -> Pan
         if (
             event.button() == Qt.MouseButton.LeftButton
             and self.mode == CompareMode.WIPE
-            and abs(event.pos().x() - self.wipe_x) < 10
+            and abs(event.pos().x() - self.wipe_x) < 15
         ):
-            self.is_dragging = True
-            self.setCursor(Qt.CursorShape.SplitHCursor)
-
-    def mouseMoveEvent(self, event):
-        if self.is_dragging:
-            self.wipe_x = max(0, min(self.width(), event.pos().x()))
-            self.update()
-        elif self.mode == CompareMode.WIPE and abs(event.pos().x() - self.wipe_x) < 10:
+            self.is_dragging_wipe = True
             self.setCursor(Qt.CursorShape.SplitHCursor)
         else:
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            # Allow left drag for pan in Wipe mode IF far from handle
+            if event.button() == Qt.MouseButton.LeftButton and (
+                self.mode != CompareMode.WIPE or not self.is_dragging_wipe
+            ):
+                self._is_panning = True
+                self._last_mouse_pos = event.pos()
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            else:
+                self.handle_mouse_press(event)
+
+    def mouseMoveEvent(self, event):
+        if self.is_dragging_wipe:
+            self.wipe_x = max(0, min(self.width(), event.pos().x()))
+            self.update()
+        else:
+            self.handle_mouse_move(event)
+
+            # Cursor update for hover
+            if not self._is_panning and self.mode == CompareMode.WIPE:
+                if abs(event.pos().x() - self.wipe_x) < 15:
+                    self.setCursor(Qt.CursorShape.SplitHCursor)
+                else:
+                    self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.is_dragging = False
+        if event.button() == Qt.MouseButton.LeftButton and self.is_dragging_wipe:
+            self.is_dragging_wipe = False
             self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self.handle_mouse_release(event)
 
 
 class ResizedListView(QListView):
