@@ -1,35 +1,34 @@
 # PixelHand
-**An AI-powered tool for finding and managing duplicate and visually similar images.**
+**A local tool for finding duplicate images, visual similarity search, and quality control.**
 
 > **Note: This is a Prototype**
 
-## Key Features
-*   **🧠 Advanced Search Pipeline**: Find duplicates using a multi-stage process you control: from byte-perfect matches (**xxHash**) and perceptual hashes (**dHash, pHash, wHash**) to deep AI-driven visual similarity (CLIP, SigLIP, DINOv2).
-
-*   **🛠️ Flexible Scan Modes**:
-    *   **Find Duplicates**: The standard mode for cleaning up your collection.
-    *   **Technical Analysis**: Compare images by **Luminance** only or by individual **R, G, B, A Channels** to find assets with reused technical maps (e.g., roughness, metallic).
-    *   **AI Search**: Search your entire library by a **text query** or find images visually similar to a **sample file**.
-
-*   **🚀 Hardware Acceleration**: GPU-accelerated backends via **ONNXRuntime** (CUDA, DirectML, WebGPU). Tune performance with controls for compute precision, batch size, and search accuracy.
-
-*   **📊 Comparison Tools**: Analyze finds with Side-by-Side, Wipe, Overlay, and Difference views with RGB/A channel toggling. Includes HDR tonemapping and generates visual reports.
-
-*   **💾 File Management**: Save disk space by replacing duplicates with **hardlinks** or safer copy-on-write **reflinks**. All deletions are safely moved to the system's recycle bin.
-
-*   **📁 Broad Format Support**: `JPG`, `PNG`, `WEBP`, `BMP`, `TGA`, `PSD`, `EXR`, `HDR`, `TIF`, `DDS`, `AVIF`, `HEIC`, and many more ~
+## Features
+*   🔍 **Duplicate Detection**
+    Finds everything from exact byte-matches (**xxHash**) to visual lookalikes (**dHash/pHash**) and conceptual duplicates via AI models (**CLIP, SigLIP**).
+*   🧠 **Smart Search**
+    *   **Text Search**: Find images by description (e.g., "concrete wall").
+    *   **Image Search**: Drop a reference image to find similar assets.
+*   📐 **Quality Control (QC)**
+    Useful for GameDev & VFX. Automates checks for:
+    *   **NPOT** (Non-Power-of-Two) dimensions.
+    *   Missing **Mip-maps**.
+    *   **Solid color** textures and Alpha channel issues.
+*   📂 **Compare Modes**
+    *   **Folder vs Folder**: Compare a source directory against a target (e.g., Source vs. Build).
+    *   **Channel Analysis**: Find duplicates based on specific channels (**R, G, B, A**) or Luminance.
+*   🖼️ **Viewer**
+    Built-in comparison tools (**Side-by-Side, Wipe, Overlay, Diff**) with **HDR** tone mapping support (OCIO).
+*   💾 **Format Support**
+    Handles standard formats (`PNG`, `JPG`) and professional ones (`DDS`, `EXR`, `TIF`, `PSD`).
+*   🔗 **Actions**
+    Save space using **Hardlinks** or **Reflinks** (Copy-on-Write). Deletions are safely moved to the Recycle Bin.
 
 ## Tech Stack
-*   **GUI**: PySide6
-*   **AI Core**: PyTorch, Transformers, ONNXRuntime
-*   **Databases**: LanceDB
-*   **Image Processing**: OpenImageIO, Pillow, DirectXTex
-
-## Requirements
-*   Python 3.13
+*   **Core**: Python 3.13, PySide6 (Qt)
+*   **AI/DB**: ONNXRuntime, LanceDB
+*   **Imaging**: OpenImageIO, DirectXTex, Pillow
 
 ## Quick Start
 1.  Clone the repository.
 2.  Run `run_cpu/cuda/directml/webgpu.bat`.
-
-The script will automatically set up a virtual environment, install all dependencies, and launch the application.
