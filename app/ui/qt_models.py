@@ -41,12 +41,18 @@ VfxRole = Qt.ItemDataRole.UserRole + 2
 
 
 def _format_metadata_string(node: ResultNode) -> str:
+    """
+    Helper to create the detailed metadata string.
+    Uses '•' as a separator for consistency with the Grid View.
+    """
     if node.path == "loading_dummy":
         return ""
+
     res = f"{node.resolution_w}x{node.resolution_h}"
     size_mb = (node.file_size or 0) / (1024**2)
     size_str = f"{size_mb:.2f} MB"
     bit_depth_str = f"{node.bit_depth}-bit"
+
     parts = [
         res,
         size_str,
@@ -58,10 +64,17 @@ def _format_metadata_string(node: ResultNode) -> str:
         node.texture_type,
         f"Mips: {node.mipmap_count}",
     ]
-    return " | ".join(filter(None, parts))
+
+    # CHANGED: Use dot instead of pipe
+    return " • ".join(filter(None, parts))
 
 
 class ResultsTreeModel(QAbstractItemModel):
+    """
+    Model for the Results Panel (Left Side).
+    Supports hierarchical data (Groups -> Files).
+    """
+
     fetch_completed = Signal(QModelIndex)
 
     def __init__(self, parent=None):
@@ -599,6 +612,11 @@ class ResultsTreeModel(QAbstractItemModel):
 
 
 class ImagePreviewModel(QAbstractListModel):
+    """
+    Model for the Image Viewer Panel (Right Side).
+    Handles loading thumbnails and storing VF flags.
+    """
+
     file_missing = Signal(Path)
 
     def __init__(self, thread_pool: QThreadPool, parent=None):

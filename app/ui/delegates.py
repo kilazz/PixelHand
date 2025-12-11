@@ -43,7 +43,8 @@ def _format_metadata_string(node: ResultNode) -> str:
         f"Mips: {node.mipmap_count}",
     ]
 
-    return " | ".join(filter(None, parts))
+    # CHANGED: Use dot instead of pipe
+    return " • ".join(filter(None, parts))
 
 
 class GroupGridDelegate(QStyledItemDelegate):
@@ -140,7 +141,6 @@ class GroupGridDelegate(QStyledItemDelegate):
 
         item_text = f"{node.count} files"
         size_mb = node.total_size / (1024**2)
-        # Fixed E701
         if size_mb > 0:
             item_text += f" • {size_mb:.1f} MB"
 
@@ -154,7 +154,6 @@ class GroupGridDelegate(QStyledItemDelegate):
 
         if hasattr(model, "group_id_to_best_path"):
             path = model.group_id_to_best_path.get(node.group_id)
-            # Fixed E701
             if path:
                 return path
 
@@ -181,7 +180,6 @@ class GroupGridDelegate(QStyledItemDelegate):
 
     @Slot(str, object)
     def _on_image_loaded(self, key: str, pil_img: object):
-        # Fixed E701
         if key in self.loading_paths:
             self.loading_paths.remove(key)
         if pil_img:
@@ -194,7 +192,6 @@ class GroupGridDelegate(QStyledItemDelegate):
 
     @Slot(str, str)
     def _on_image_error(self, key: str, msg: str):
-        # Fixed E701
         if key in self.loading_paths:
             self.loading_paths.remove(key)
 
@@ -245,7 +242,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
     @Slot(QModelIndex, object)
     def set_hover_channel(self, index: QModelIndex, channel: str | None):
         item_key = None
-        # Fixed SIM102 and E701
         if index.isValid() and (item_data := index.data(Qt.ItemDataRole.UserRole)):
             item_key = id(item_data)
 
@@ -253,7 +249,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             self._hover_index_key = item_key
             self._hover_channel = channel
             if self.parent():
-                # Fixed E701
                 if hasattr(self.parent(), "list_view"):
                     self.parent().list_view.viewport().update()
                 elif hasattr(self.parent(), "viewport"):
@@ -264,7 +259,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         try:
             painter.setClipRect(option.rect)
             item_data: ResultNode = index.data(Qt.ItemDataRole.UserRole)
-            # Fixed E701
             if not item_data:
                 return
             self._draw_background(painter, option, item_data)
@@ -302,7 +296,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         if is_hovered and self._hover_channel:
             if self._hover_channel == "A" and is_vfx and raw_pixmap:
                 key = f"{item_data.path}_BLACK_PLACEHOLDER"
-                # Fixed E701
                 if key in self._channel_cache:
                     pixmap_to_draw = self._channel_cache[key]
                 else:
@@ -312,13 +305,11 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
                     pixmap_to_draw = black
             elif raw_pixmap and not raw_pixmap.isNull():
                 key = (item_data.path, self._hover_channel)
-                # Fixed E701
                 if key in self._channel_cache:
                     pixmap_to_draw = self._channel_cache[key]
                 else:
                     pixmap_to_draw = self._generate_channel_pixmap(raw_pixmap, self._hover_channel)
                     self._channel_cache[key] = pixmap_to_draw
-                    # Fixed E701
                     if len(self._channel_cache) > self._CACHE_SIZE:
                         self._channel_cache.popitem()
 
@@ -350,7 +341,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             from PIL.ImageQt import ImageQt, fromqimage
 
             q = px.toImage()
-            # Fixed E701
             if q.format() != QImage.Format.Format_RGBA8888:
                 q = q.convertToFormat(QImage.Format.Format_RGBA8888)
             p = fromqimage(q)
@@ -359,7 +349,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             if ch in m and m[ch] < len(b):
                 band = b[m[ch]]
                 return QPixmap.fromImage(ImageQt(Image.merge("RGB", (band, band, band))))
-        # Fixed E701
         except Exception:
             pass
         return px
@@ -379,7 +368,6 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
     def _draw_text_info(self, painter, option, item_data):
         path = Path(item_data.path)
         filename = path.name
-        # Fixed E701
         if item_data.channel:
             filename += f" ({item_data.channel})"
 
@@ -396,6 +384,7 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             if item_data.is_best
             else (METHOD_DISPLAY_NAMES.get(item_data.found_by) or f"{item_data.distance}%")
         )
+        # Use full metadata string for both views now
         meta_text = _format_metadata_string(item_data)
 
         if self.is_grid_mode:
@@ -423,19 +412,17 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             painter.setFont(self.regular_font)
             painter.setPen(sec_c)
 
-            size_mb = (item_data.file_size or 0) / (1024**2)
-            grid_meta = f"{dist_text}\n{item_data.resolution_w}x{item_data.resolution_h} • {size_mb:.2f} MB\n{item_data.format_str} ({item_data.bit_depth}b)"
-            # Fixed E701
-            if item_data.color_space:
-                grid_meta += f"\n{item_data.color_space}"
-            grid_meta += f"\n{item_data.texture_type} | Mips: {item_data.mipmap_count}"
+            # Combine Score/Best with Metadata using dot separator
+            full_grid_meta = f"{dist_text} • {meta_text}" if dist_text else meta_text
 
+            # Render full string with word wrap in Grid View
             painter.drawText(
-                QRect(x, y, w, 100),
+                QRect(x, y, w, 120),
                 Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter | Qt.TextFlag.TextWordWrap,
-                grid_meta,
+                full_grid_meta,
             )
         else:
+            # List View
             r = option.rect.adjusted(self.preview_size + 15, 5, -5, -5)
             x, y = r.left(), r.top() + self.bold_font_metrics.ascent()
             painter.setFont(self.bold_font)
@@ -445,7 +432,10 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             y += self.regular_font_metrics.height()
             painter.setFont(self.regular_font)
             painter.setPen(sec_c)
-            full_meta = f"{dist_text} | {meta_text}" if dist_text else meta_text
+
+            # Combine Score/Best with Metadata using dot separator
+            full_meta = f"{dist_text} • {meta_text}" if dist_text else meta_text
+
             painter.drawText(
                 x, y, self.regular_font_metrics.elidedText(full_meta, Qt.TextElideMode.ElideRight, r.width())
             )
