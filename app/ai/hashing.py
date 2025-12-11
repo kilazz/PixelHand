@@ -1,9 +1,10 @@
 # app/ai/hashing.py
 """
 Contains lightweight, standalone worker functions for hashing and metadata extraction.
+These functions are designed to be run in a ProcessPoolExecutor (CPU-bound) or
+ThreadPoolExecutor (I/O-bound).
 """
 
-import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,15 +29,20 @@ except ImportError:
 def worker_calculate_hashes_and_meta(path: Path) -> dict[str, Any] | None:
     """
     A lightweight worker that collects basic file metadata and a full-file xxHash.
+    Optimized to fail early if metadata cannot be read, avoiding unnecessary I/O.
     """
     try:
+        # 1. Try to read metadata first (Fast header read).
+        # If the file is corrupt or the format is unsupported, we stop here.
         meta = get_image_metadata(path)
         if not meta:
             return None
 
+        # 2. Calculate xxHash (Heavy I/O).
+        # We use a larger buffer (8MB) to optimize for modern SSDs.
         hasher = xxhash.xxh64()
         with open(path, "rb") as f:
-            while chunk := f.read(4 * 1024 * 1024):
+            while chunk := f.read(8 * 1024 * 1024):
                 hasher.update(chunk)
         xxh = hasher.hexdigest()
 
@@ -45,28 +51,34 @@ def worker_calculate_hashes_and_meta(path: Path) -> dict[str, Any] | None:
             "meta": meta,
             "xxhash": xxh,
         }
-    except OSError:
+    except (OSError, PermissionError):
+        # Common file system errors (locked file, permission denied)
         return None
-    except Exception as e:
-        print(f"!!! XXHASH WORKER CRASH on {path.name}: {e}")
-        traceback.print_exc()
+    except Exception:
+        # Catch-all for corrupt files or library errors to prevent worker crash.
+        # We avoid printing stack traces to keep the console clean in production.
         return None
 
 
 def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channels: bool) -> dict[str, Any] | None:
     """
-    Calculates perceptual hashes (dHash, pHash, wHash).
+    Calculates perceptual hashes (dHash, pHash, wHash) for an image or a specific channel.
     """
     path = item.path
     analysis_type = item.analysis_type
 
+    if not IMAGEHASH_AVAILABLE:
+        return None
+
     try:
-        # Optimization: We don't need full resolution for hashing.
+        # Optimization: We don't need full resolution for perceptual hashing.
+        # shrink=4 significantly reduces memory usage and decode time.
         original_pil_img = load_image(path, shrink=4)
 
         if not original_pil_img:
             return None
 
+        # Further downscale for hashing algorithms
         base_size = (128, 128)
         if original_pil_img.width > 128 or original_pil_img.height > 128:
             original_pil_img.thumbnail(base_size, Image.Resampling.NEAREST)
@@ -86,9 +98,13 @@ def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channe
                 channel_to_check = channels[channel_index]
 
                 if ignore_solid_channels:
+                    # Check if channel is solid color (e.g., all black alpha)
                     min_val, max_val = channel_to_check.getextrema()
+                    # Tolerance for compression artifacts
                     if max_val < 5 or min_val > 250:
                         return None
+
+                    # Statistical check for near-solid colors
                     stat = ImageStat.Stat(channel_to_check)
                     if stat.mean[0] < 5 or stat.mean[0] > 250:
                         return None
@@ -96,30 +112,33 @@ def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channe
                 image_for_hashing = channel_to_check
             else:
                 return None
-        else:  # "Composite"
+        else:  # "Composite" (Default)
             if original_pil_img.mode == "RGBA":
                 is_vfx = False
                 try:
+                    # VFX Check: Alpha is 0 (transparent), but RGB contains data (Emission/Roughness maps)
                     extrema = original_pil_img.getextrema()
                     if (
                         len(extrema) >= 4
-                        and extrema[3][1] == 0
-                        and (extrema[0][1] > 0 or extrema[1][1] > 0 or extrema[2][1] > 0)
+                        and extrema[3][1] == 0  # Max Alpha is 0
+                        and (extrema[0][1] > 0 or extrema[1][1] > 0 or extrema[2][1] > 0)  # RGB has data
                     ):
                         is_vfx = True
                 except Exception:
                     pass
 
                 if is_vfx:
+                    # If VFX, ignore alpha and hash the RGB data
                     image_for_hashing = original_pil_img.convert("RGB")
                 else:
+                    # Standard compositing: Paste onto black background
                     bg = Image.new("RGB", original_pil_img.size, (0, 0, 0))
                     bg.paste(original_pil_img, mask=original_pil_img.split()[3])
                     image_for_hashing = bg
             else:
                 image_for_hashing = original_pil_img.convert("RGB")
 
-        if image_for_hashing and IMAGEHASH_AVAILABLE:
+        if image_for_hashing:
             dhash = imagehash.dhash(image_for_hashing)
             phash = imagehash.phash(image_for_hashing)
             whash = imagehash.whash(image_for_hashing)
@@ -144,6 +163,6 @@ def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channe
                 "precise_meta": precise_meta,
             }
         return None
-    except Exception as e:
-        print(f"Hash Worker Error on {path}: {e}")
+    except Exception:
+        # Return None on error so the pipeline simply skips this item
         return None

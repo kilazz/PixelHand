@@ -29,7 +29,11 @@ from PySide6.QtWidgets import (
 )
 
 from app.domain.data_models import FileOperation, GroupNode, ResultNode, ScanMode
-from app.shared.constants import DB_TABLE_NAME, LANCEDB_AVAILABLE, UIConfig
+from app.infrastructure.db_service import DB_SERVICE
+from app.shared.constants import (
+    LANCEDB_AVAILABLE,
+    UIConfig,
+)
 from app.ui.delegates import GroupGridDelegate
 from app.ui.qt_models import ResultsProxyModel, ResultsTreeModel
 
@@ -112,7 +116,7 @@ class ResultsPanel(QGroupBox):
         self.reflink_button = QPushButton("Replace with Reflink")
         self.delete_button = QPushButton("Move to Trash")
 
-        # RESTORED IDs
+        # IDs for styling or testing
         self.hardlink_button.setObjectName("hardlink_button")
         self.reflink_button.setObjectName("reflink_button")
         self.delete_button.setObjectName("delete_button")
@@ -528,18 +532,18 @@ class ResultsPanel(QGroupBox):
             self.file_op_manager.request_reflink(link_map)
 
     def remove_items_from_results_db(self, paths_to_delete: list[Path]):
-        if not self.results_model.db_path or not paths_to_delete or not LANCEDB_AVAILABLE:
+        """
+        Safely removes deleted items from the database index using the global service.
+        """
+        if not paths_to_delete or not LANCEDB_AVAILABLE:
             return
-        try:
-            import lancedb
 
-            path_list_str = ", ".join(f"'{str(p).replace("'", "''")}'" for p in paths_to_delete)
-            db = lancedb.connect(str(self.results_model.db_path))
-            if DB_TABLE_NAME in db.table_names():
-                table = db.open_table(DB_TABLE_NAME)
-                table.delete(f"path IN ({path_list_str})")
+        try:
+            # FIX: Use DB_SERVICE to remove paths thread-safely
+            paths_str = [str(p) for p in paths_to_delete]
+            DB_SERVICE.delete_paths(paths_str)
         except Exception as e:
-            app_logger.error(f"Failed to remove items from LanceDB: {e}")
+            app_logger.error(f"Failed to remove items from DB via service: {e}")
 
     def update_after_deletion(self, deleted_paths: list[Path]):
         expanded = self._get_expanded_group_ids()

@@ -1,6 +1,8 @@
 # app/workflow/strategies.py
 """
 Contains different strategies for the scanning process.
+Refactored to use DB_SERVICE singleton, updated PipelineManager signature,
+and ensure results are persisted for UI access.
 """
 
 import contextlib
@@ -12,7 +14,6 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import numpy as np
-import pyarrow as pa
 
 try:
     import polars as pl
@@ -22,7 +23,6 @@ except ImportError:
     pl = None
     POLARS_AVAILABLE = False
 
-# Updated Imports
 from app.ai.manager import init_worker, worker_get_single_vector, worker_get_text_vector
 from app.domain.data_models import (
     AnalysisItem,
@@ -34,9 +34,9 @@ from app.domain.data_models import (
     ScanState,
 )
 from app.imaging.image_io import get_image_metadata, load_image
+from app.infrastructure.db_service import DB_SERVICE
 from app.shared.constants import (
     BEST_FILE_METHOD_NAME,
-    DB_TABLE_NAME,
     LANCEDB_AVAILABLE,
     SIMILARITY_SEARCH_K_NEIGHBORS,
 )
@@ -55,9 +55,6 @@ from app.workflow.stages import (
     ScanContext,
     ScanStage,
 )
-
-if LANCEDB_AVAILABLE:
-    pass
 
 app_logger = logging.getLogger("PixelHand.workflow.strategies")
 
@@ -103,14 +100,15 @@ class FindDuplicatesStrategy(ScanStrategy):
     """Strategy for finding duplicate images using a granular pipeline of stages."""
 
     def execute(self, stop_event: threading.Event, start_time: float):
+        # FIX: Use DB_SERVICE instead of self.scanner_core.db_context
         context = ScanContext(
             config=self.config,
             state=self.state,
             signals=self.signals,
             stop_event=stop_event,
             scanner_core=self.scanner_core,
-            lancedb_db=self.scanner_core.db_context.db,  # Updated access
-            lancedb_table=self.scanner_core.db_context.table,  # Updated access
+            lancedb_db=DB_SERVICE.db,
+            lancedb_table=DB_SERVICE.table,
         )
 
         pipeline_to_run = self._build_pipeline()
@@ -180,7 +178,8 @@ class FindDuplicatesStrategy(ScanStrategy):
     def _report_and_cleanup(self, final_groups: DuplicateResults, start_time: float):
         num_found = sum(len(d) for d in final_groups.values())
         duration = time.time() - start_time
-        db_uri = str(self.scanner_core.db_context.db.uri) if LANCEDB_AVAILABLE else None
+        # FIX: Access DB URI via DB_SERVICE
+        db_uri = str(DB_SERVICE.db.uri) if (LANCEDB_AVAILABLE and DB_SERVICE.db) else None
         groups_summary = []
 
         if num_found > 0 and LANCEDB_AVAILABLE:
@@ -234,12 +233,9 @@ class FindDuplicatesStrategy(ScanStrategy):
 
         if not data:
             return
-        db = self.scanner_core.db_context.db
-        table_name = "scan_results"
-        if table_name in db.table_names():
-            db.drop_table(table_name)
-        pa_table = pa.Table.from_pylist(data)
-        db.create_table(table_name, data=pa_table)
+
+        # FIX: Use DB_SERVICE to save the results table thread-safely
+        DB_SERVICE.save_results_table(data)
 
 
 class SearchStrategy(ScanStrategy):
@@ -247,28 +243,37 @@ class SearchStrategy(ScanStrategy):
 
     def execute(self, stop_event: threading.Event, start_time: float):
         all_files = self._find_files_as_list(stop_event)
+
+        # Check if we found files
+        if not all_files:
+            self.signals.log_message.emit("No files found in the selected folder.", "warning")
+            self.scanner_core._finalize_scan(None, 0, self.config.scan_mode, 0, [])
+            return
+
         if self.scanner_core._check_stop_or_empty(
             stop_event, all_files, self.config.scan_mode, {"db_path": None, "groups_data": None}, start_time
         ):
             return
 
         self.state.set_phase("Phase 2/2: Creating AI fingerprints...", 0.8)
-        vector_db_writer = self.scanner_core.db_context.table
 
+        # FIX: PipelineManager no longer needs vector_db_writer passed explicitly
         pipeline_manager = PipelineManager(
             config=self.config,
             state=self.state,
             signals=self.signals,
-            vector_db_writer=vector_db_writer,
-            table_name=DB_TABLE_NAME,
             stop_event=stop_event,
         )
 
         items = [AnalysisItem(path=path, analysis_type="Composite") for path in all_files]
         fps_map = {}
         for item in items:
-            if item.path not in fps_map and (meta := get_image_metadata(item.path)):
-                fps_map[item.path] = ImageFingerprint(path=item.path, hashes=np.array([]), **meta)
+            if item.path not in fps_map:
+                meta = get_image_metadata(item.path)
+                if meta:
+                    fps_map[item.path] = ImageFingerprint(path=item.path, hashes=np.array([]), **meta)
+                else:
+                    self.all_skipped_files.append(str(item.path))
 
         search_context = ScanContext(
             config=self.config,
@@ -276,8 +281,8 @@ class SearchStrategy(ScanStrategy):
             signals=self.signals,
             stop_event=stop_event,
             scanner_core=self.scanner_core,
-            lancedb_db=self.scanner_core.db_context.db,
-            lancedb_table=self.scanner_core.db_context.table,
+            lancedb_db=DB_SERVICE.db,
+            lancedb_table=DB_SERVICE.table,
             items_to_process=items,
             all_image_fps=fps_map,
         )
@@ -289,11 +294,33 @@ class SearchStrategy(ScanStrategy):
             self.signals.scan_error.emit("Failed to generate fingerprints.")
             return
 
+        # Force a small wait to ensure LanceDB flushes, though DB_SERVICE should handle it
+        if not stop_event.is_set():
+            # Check if DB has data
+            try:
+                count = DB_SERVICE.table.to_lance().count_rows()
+                self.signals.log_message.emit(f"Database contains {count} vectors.", "info")
+                if count == 0:
+                    self.signals.log_message.emit("No vectors were generated. Check model/files.", "warning")
+                    self.scanner_core._finalize_scan(
+                        None, 0, self.config.scan_mode, time.time() - start_time, self.all_skipped_files
+                    )
+                    return
+            except Exception as e:
+                app_logger.warning(f"Could not count rows: {e}")
+
         num_found, db_path, results_list = self._perform_similarity_search()
+
         if num_found is None:
+            # Error occurred during search
             return
 
         final_groups = self._create_search_groups(results_list)
+
+        # IMPORTANT: Persist these results to 'scan_results' table so UI can read them
+        if num_found > 0:
+            self._persist_search_results(final_groups)
+
         self.scanner_core._finalize_scan(
             {"db_path": db_path, "groups_data": final_groups, "lazy_summary": None},
             num_found,
@@ -310,10 +337,9 @@ class SearchStrategy(ScanStrategy):
             return None, None, []
 
         dist_threshold = 1.0 - (self.config.similarity_threshold / 100.0)
-        table = self.scanner_core.db_context.table
         results = []
 
-        if LANCEDB_AVAILABLE and table:
+        if LANCEDB_AVAILABLE and DB_SERVICE.is_ready:
             try:
                 from app.shared.constants import DEFAULT_SEARCH_PRECISION, SEARCH_PRECISION_PRESETS
 
@@ -321,17 +347,26 @@ class SearchStrategy(ScanStrategy):
                     self.config.search_precision, SEARCH_PRECISION_PRESETS[DEFAULT_SEARCH_PRECISION]
                 )
 
-                raw_hits = (
-                    table.search(query_vector)
-                    .metric("cosine")
-                    .limit(SIMILARITY_SEARCH_K_NEIGHBORS)
-                    .nprobes(precision_config["nprobes"])
-                    .refine_factor(precision_config["refine_factor"])
-                    .to_polars()
+                # FIX: Use DB_SERVICE to search
+                raw_rows = DB_SERVICE.search_vectors(
+                    query_vector,
+                    limit=SIMILARITY_SEARCH_K_NEIGHBORS,
+                    probes=precision_config["nprobes"],
+                    refine=precision_config["refine_factor"],
                 )
-                hits = raw_hits.filter(pl.col("_distance") < dist_threshold)
-                for row_dict in hits.iter_rows(named=True):
-                    results.append((ImageFingerprint.from_db_row(row_dict), row_dict["_distance"]))
+
+                # Filter results by distance threshold manually since search_vectors returns list[dict]
+                self.signals.log_message.emit(f"Raw search returned {len(raw_rows)} candidates.", "info")
+
+                for row_dict in raw_rows:
+                    dist = row_dict["_distance"]
+                    if dist < dist_threshold:
+                        results.append((ImageFingerprint.from_db_row(row_dict), dist))
+
+                self.signals.log_message.emit(
+                    f"Filtered to {len(results)} matches (threshold {dist_threshold}).", "info"
+                )
+
             except Exception as e:
                 self.signals.log_message.emit(f"LanceDB search failed: {e}", "error")
                 return None, None, []
@@ -339,7 +374,7 @@ class SearchStrategy(ScanStrategy):
             self.signals.scan_error.emit("No LanceDB is available.")
             return None, None, []
 
-        return len(results), str(self.scanner_core.db_context.db.uri), results
+        return len(results), str(DB_SERVICE.db.uri), results
 
     def _create_search_groups(self, results: list[tuple[ImageFingerprint, float]]) -> DuplicateResults:
         best_fp = self._create_search_context_fingerprint()
@@ -350,6 +385,37 @@ class SearchStrategy(ScanStrategy):
             score = int(max(0.0, (1.0 - d) * 100))
             dups.add((fp, score, EvidenceMethod.AI.value))
         return {best_fp: dups}
+
+    def _persist_search_results(self, final_groups: DuplicateResults):
+        """
+        Saves search results to the 'scan_results' table so the UI can fetch them via DB_SERVICE.
+        """
+        data = []
+        group_id = 1  # Search usually has only one group (the query)
+        for best_fp, dups in final_groups.items():
+            # Note: The query itself (best_fp) might not be in the DB if it's text,
+            # but we still save it as the group leader.
+            row = best_fp.to_lancedb_dict()
+            row.update({"group_id": group_id, "is_best": True, "distance": 0, "found_by": "Query"})
+            # Remove vector to save space in results table
+            if "vector" in row:
+                del row["vector"]
+            if "id" in row:
+                del row["id"]
+            data.append(row)
+
+            for dup_fp, score, method in dups:
+                row = dup_fp.to_lancedb_dict()
+                row.update({"group_id": group_id, "is_best": False, "distance": score, "found_by": method})
+                if "vector" in row:
+                    del row["vector"]
+                if "id" in row:
+                    del row["id"]
+                data.append(row)
+            group_id += 1
+
+        if data:
+            DB_SERVICE.save_results_table(data)
 
     def _create_search_context_fingerprint(self) -> ImageFingerprint | None:
         if self.config.scan_mode == ScanMode.SAMPLE_SEARCH and self.config.sample_path:
@@ -373,10 +439,13 @@ class SearchStrategy(ScanStrategy):
             )
 
     def _get_query_vector(self) -> np.ndarray | None:
+        # Re-init worker to ensure model is ready for single inference
         init_worker({"model_name": self.config.model_name, "device": self.config.device, "threads_per_worker": 1})
+
         if self.config.scan_mode == ScanMode.TEXT_SEARCH and self.config.search_query:
             self.signals.log_message.emit(f"Generating vector for query: '{self.config.search_query}'", "info")
             return worker_get_text_vector(self.config.search_query)
+
         elif self.config.scan_mode == ScanMode.SAMPLE_SEARCH and self.config.sample_path:
             self.signals.log_message.emit(f"Generating vector for sample: {self.config.sample_path.name}", "info")
             return worker_get_single_vector(str(self.config.sample_path))

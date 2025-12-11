@@ -1,6 +1,7 @@
 # app/ui/qt_models.py
 """
 Contains Qt Item Models for managing and providing data to views.
+Refactored to use the Singleton DB_SERVICE for thread-safe database access.
 """
 
 import logging
@@ -24,16 +25,13 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QBrush, QColor, QFont, QPixmap
 
 from app.domain.data_models import GroupNode, ResultNode, ScanMode
+from app.infrastructure.db_service import DB_SERVICE
 from app.shared.constants import (
     BEST_FILE_METHOD_NAME,
-    LANCEDB_AVAILABLE,
     METHOD_DISPLAY_NAMES,
     UIConfig,
 )
 from app.ui.background_tasks import ImageLoader, LanceDBGroupFetcherTask
-
-if LANCEDB_AVAILABLE:
-    import lancedb
 
 app_logger = logging.getLogger("PixelHand.ui.models")
 
@@ -68,7 +66,6 @@ class ResultsTreeModel(QAbstractItemModel):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.db_path: str | None = None
         self.mode: ScanMode | str = ""
         self.groups_data: dict[int, GroupNode] = {}
         self.sorted_group_ids: list[int] = []
@@ -80,7 +77,6 @@ class ResultsTreeModel(QAbstractItemModel):
 
     def clear(self):
         self.beginResetModel()
-        self.db_path = None
         self.mode = ""
         self.groups_data.clear()
         self.sorted_group_ids.clear()
@@ -122,7 +118,8 @@ class ResultsTreeModel(QAbstractItemModel):
         self.clear()
         self.beginResetModel()
         self.mode = mode
-        self.db_path = payload.get("db_path")
+        # Note: db_path from payload is no longer stored; we use DB_SERVICE global
+
         lazy_summary = payload.get("lazy_summary")
         full_groups = payload.get("groups_data")
 
@@ -278,7 +275,9 @@ class ResultsTreeModel(QAbstractItemModel):
         node = parent.internalPointer()
         group_id = node.group_id
         self.pending_fetches[group_id] = QPersistentModelIndex(parent)
-        task = LanceDBGroupFetcherTask(self.db_path, group_id)
+
+        # Use the global DB_SERVICE indirectly via the task (no DB path needed)
+        task = LanceDBGroupFetcherTask(group_id)
         task.signals.finished.connect(self._on_fetch_finished)
         task.signals.error.connect(self._on_fetch_error)
         QThreadPool.globalInstance().start(task)
@@ -569,36 +568,34 @@ class ResultsTreeModel(QAbstractItemModel):
                 del self.check_states[p]
 
     def get_paths_for_group_sync(self, group_id: int) -> list[Path]:
-        if group_id not in self.groups_data:
-            return []
-        node = self.groups_data[group_id]
-        if node.fetched:
-            return [Path(c.path) for c in node.children]
-        if not self.db_path or not LANCEDB_AVAILABLE:
-            return []
+        """
+        Synchronously retrieves all file paths associated with a group ID.
+        Uses the thread-safe DB_SERVICE to avoid file locks.
+        """
+        if group_id in self.groups_data:
+            node = self.groups_data[group_id]
+            if node.fetched:
+                return [Path(c.path) for c in node.children]
+
+        # Use Global Singleton
         try:
-            db = lancedb.connect(self.db_path)
-            table = db.open_table("scan_results")
-            rows = table.search().where(f"group_id = {group_id}").limit(10000).to_list()
+            rows = DB_SERVICE.get_files_by_group(group_id)
             return [Path(r["path"]) for r in rows]
         except Exception:
             return []
 
     def get_best_path_for_group_lazy(self, group_id: int) -> str | None:
+        """
+        Retrieves the path of the 'best' file in a group.
+        If not cached, returns None to avoid blocking the UI thread with a DB query.
+        The GroupDelegate will handle the lazy load via fetchMore or display a placeholder.
+        """
         if group_id in self.group_id_to_best_path:
             return self.group_id_to_best_path[group_id]
-        if not self.db_path or not LANCEDB_AVAILABLE:
-            return None
-        try:
-            db = lancedb.connect(self.db_path)
-            table = db.open_table("scan_results")
-            res = table.search().where(f"group_id = {group_id} AND is_best = true").limit(1).to_list()
-            if res:
-                path = str(res[0]["path"])
-                self.group_id_to_best_path[group_id] = path
-                return path
-        except Exception:
-            pass
+
+        # Optimization: We do not query DB_SERVICE here to prevent micro-stutters
+        # in the UI rendering loop. If the data isn't cached, we let the
+        # fetchMore mechanism populate it eventually.
         return None
 
 
@@ -677,6 +674,7 @@ class ImagePreviewModel(QAbstractListModel):
                 return self.pixmap_cache[ui_key]
             if ui_key not in self.loading_paths:
                 self.loading_paths.add(ui_key)
+                # ImageLoader now manages OOM protection internally via semaphore
                 loader = ImageLoader(
                     item.path, item.mtime, self.target_size, self.tonemap_mode, True, item.channel, ui_key
                 )

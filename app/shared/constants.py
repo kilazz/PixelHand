@@ -1,7 +1,7 @@
 # app/shared/constants.py
 """
 Global constants, file paths, and configuration enumerations.
-Handles library availability checks and environment setup.
+Handles library availability checks, environment setup, and performance tuning parameters.
 """
 
 import importlib.util
@@ -85,12 +85,25 @@ except (ImportError, NameError):
     PILLOW_AVAILABLE = False
 
 # --- Application Constants ---
-DB_WRITE_BATCH_SIZE = 4096
 CACHE_VERSION = "v5"
 DB_TABLE_NAME = "images"
 FP16_MODEL_SUFFIX = "_fp16"
 BEST_FILE_METHOD_NAME = "Best"
 MAX_PIXEL_DIMENSION = 32767
+
+# --- Tuning & Optimization Constants (New) ---
+# Limits the number of concurrent heavy image decodes to prevent OOM errors on large textures (8K+)
+MAX_CONCURRENT_IMAGE_LOADS = 4
+
+# Number of items to accumulate before writing to the database/cache
+# Higher = less disk I/O but more RAM usage.
+DB_WRITE_BATCH_SIZE = 512
+
+# Delay in milliseconds before triggering a search in UI list views
+SEARCH_DEBOUNCE_MS = 300
+
+# Number of processed items in the pipeline after which Python's GC is manually triggered
+GC_COLLECT_INTERVAL_ITEMS = 500
 
 # --- Supported File Formats ---
 _main_supported_ext = [

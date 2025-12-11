@@ -11,15 +11,17 @@ from pathlib import Path
 
 import send2trash
 from PIL import Image
-from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtCore import QObject, QRunnable, QSemaphore, Signal
 
 from app.ai.optimizer import optimize_model_post_export
 from app.domain.data_models import FileOperation
 from app.imaging.image_io import get_image_metadata, load_image
 from app.infrastructure.cache import get_thumbnail_cache_key, thumbnail_cache
+from app.infrastructure.db_service import DB_SERVICE
 from app.shared.constants import (
     DEEP_LEARNING_AVAILABLE,
     LANCEDB_AVAILABLE,
+    MAX_CONCURRENT_IMAGE_LOADS,
     MODELS_DIR,
     QuantizationMode,
     TonemapMode,
@@ -209,7 +211,10 @@ class ModelConverter(QRunnable):
 class ImageLoader(QRunnable):
     """
     A cancellable task to load an image in a background thread.
+    Uses a semaphore to limit concurrent heavy I/O operations (OOM protection).
     """
+
+    _semaphore = QSemaphore(MAX_CONCURRENT_IMAGE_LOADS)
 
     class Signals(QObject):
         result = Signal(str, object)
@@ -248,6 +253,7 @@ class ImageLoader(QRunnable):
         try:
             if self.is_cancelled:
                 return
+
             pil_img = None
             cache_key = get_thumbnail_cache_key(
                 self.path_str,
@@ -257,91 +263,108 @@ class ImageLoader(QRunnable):
                 self.channel_to_load,
             )
 
-            # 1. Check Cache
+            # 1. Check Cache (Fast, does not require semaphore)
             if self.use_cache and self.target_size and not self.is_cancelled:
                 cached_data = thumbnail_cache.get(cache_key)
                 if cached_data:
                     try:
                         pil_img = Image.open(io.BytesIO(cached_data))
                         pil_img.load()
+                        self.signals.result.emit(self.ui_key, pil_img)
+                        return
                     except Exception:
                         pil_img = None
 
             if self.is_cancelled:
                 return
 
-            # 2. Load from Disk
-            if pil_img is None:
-                path_obj = Path(self.path_str)
-                if not path_obj.exists():
-                    self.signals.error.emit(self.ui_key, "File not found")
-                    return
-
-                metadata = get_image_metadata(path_obj)
-                shrink = 1
-                if metadata and self.target_size:
-                    width, height = metadata["resolution"]
-                    if width > self.target_size * 1.5 or height > self.target_size * 1.5:
-                        shrink_w = width / (self.target_size * 1.5)
-                        shrink_h = height / (self.target_size * 1.5)
-                        shrink = max(1, int(min(shrink_w, shrink_h)))
-                        if shrink > 1:
-                            shrink = 1 << (shrink - 1).bit_length()
-
+            # 2. Heavy Load from Disk (Protected by Semaphore)
+            self._semaphore.acquire()
+            try:
                 if self.is_cancelled:
                     return
-                pil_img = load_image(self.path_str, tonemap_mode=self.tonemap_mode, shrink=shrink)
+
+                if pil_img is None:
+                    path_obj = Path(self.path_str)
+                    if not path_obj.exists():
+                        self.signals.error.emit(self.ui_key, "File not found")
+                        return
+
+                    metadata = get_image_metadata(path_obj)
+                    shrink = 1
+                    if metadata and self.target_size:
+                        width, height = metadata["resolution"]
+                        if width > self.target_size * 1.5 or height > self.target_size * 1.5:
+                            shrink_w = width / (self.target_size * 1.5)
+                            shrink_h = height / (self.target_size * 1.5)
+                            shrink = max(1, int(min(shrink_w, shrink_h)))
+                            if shrink > 1:
+                                shrink = 1 << (shrink - 1).bit_length()
+
+                    if self.is_cancelled:
+                        return
+
+                    pil_img = load_image(self.path_str, tonemap_mode=self.tonemap_mode, shrink=shrink)
+
+                    if self.is_cancelled:
+                        return
+
+                    if pil_img:
+                        if self.channel_to_load:
+                            pil_img = pil_img.convert("RGBA")
+                            channels = pil_img.split()
+                            idx = {"R": 0, "G": 1, "B": 2, "A": 3}.get(self.channel_to_load)
+                            if idx is not None and idx < len(channels):
+                                ch = channels[idx]
+                                pil_img = Image.merge("RGB", (ch, ch, ch))
+                        else:
+                            pil_img = pil_img.convert("RGBA")
+
+                        # VFX Fix
+                        is_vfx = False
+                        if pil_img.mode == "RGBA":
+                            try:
+                                ext = pil_img.getextrema()
+                                if (
+                                    len(ext) >= 4
+                                    and ext[3][1] == 0
+                                    and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0)
+                                ):
+                                    is_vfx = True
+                            except Exception:
+                                pass
+                        pil_img.info["is_vfx"] = is_vfx
+
+                        if self.target_size:
+                            if is_vfx:
+                                pil_img = pil_img.convert("RGB")
+                                pil_img.info["is_vfx"] = True
+                            pil_img.thumbnail((self.target_size, self.target_size), Image.Resampling.LANCZOS)
+                            if self.use_cache and not self.is_cancelled:
+                                try:
+                                    buffer = io.BytesIO()
+                                    pil_img.save(buffer, "PNG")
+                                    thumbnail_cache.put(cache_key, buffer.getvalue())
+                                except Exception:
+                                    pass
+
                 if self.is_cancelled:
                     return
 
                 if pil_img:
-                    if self.channel_to_load:
-                        pil_img = pil_img.convert("RGBA")
-                        channels = pil_img.split()
-                        idx = {"R": 0, "G": 1, "B": 2, "A": 3}.get(self.channel_to_load)
-                        if idx is not None and idx < len(channels):
-                            ch = channels[idx]
-                            pil_img = Image.merge("RGB", (ch, ch, ch))
-                    else:
-                        pil_img = pil_img.convert("RGBA")
-
-                    # VFX Fix
-                    is_vfx = False
-                    if pil_img.mode == "RGBA":
+                    if "is_vfx" not in pil_img.info and pil_img.mode == "RGBA":
                         try:
                             ext = pil_img.getextrema()
-                            if len(ext) >= 4 and ext[3][1] == 0 and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0):
-                                is_vfx = True
+                            if ext[3][1] == 0 and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0):
+                                pil_img.info["is_vfx"] = True
                         except Exception:
                             pass
-                    pil_img.info["is_vfx"] = is_vfx
+                    self.signals.result.emit(self.ui_key, pil_img)
+                else:
+                    self.signals.error.emit(self.ui_key, "Image loader returned None")
 
-                    if self.target_size:
-                        if is_vfx:
-                            pil_img = pil_img.convert("RGB")
-                            pil_img.info["is_vfx"] = True
-                        pil_img.thumbnail((self.target_size, self.target_size), Image.Resampling.LANCZOS)
-                        if self.use_cache and not self.is_cancelled:
-                            try:
-                                buffer = io.BytesIO()
-                                pil_img.save(buffer, "PNG")
-                                thumbnail_cache.put(cache_key, buffer.getvalue())
-                            except Exception:
-                                pass
-
-            if self.is_cancelled:
-                return
-            if pil_img:
-                if "is_vfx" not in pil_img.info and pil_img.mode == "RGBA":
-                    try:
-                        ext = pil_img.getextrema()
-                        if ext[3][1] == 0 and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0):
-                            pil_img.info["is_vfx"] = True
-                    except Exception:
-                        pass
-                self.signals.result.emit(self.ui_key, pil_img)
-            else:
-                self.signals.error.emit(self.ui_key, "Image loader returned None")
+            finally:
+                self._semaphore.release()
 
         except Exception as e:
             if not self.is_cancelled:
@@ -349,14 +372,18 @@ class ImageLoader(QRunnable):
 
 
 class LanceDBGroupFetcherTask(QRunnable):
+    """
+    Fetches children items for a specific group ID from the database.
+    Uses the global Singleton DB_SERVICE to avoid connection conflicts.
+    """
+
     class Signals(QObject):
         finished = Signal(list, int)
         error = Signal(str)
 
-    def __init__(self, db_uri: str, group_id: int):
+    def __init__(self, group_id: int):
         super().__init__()
         self.setAutoDelete(True)
-        self.db_uri = db_uri
         self.group_id = group_id
         self.signals = self.Signals()
 
@@ -364,13 +391,11 @@ class LanceDBGroupFetcherTask(QRunnable):
         if not LANCEDB_AVAILABLE:
             self.signals.error.emit("LanceDB not available.")
             return
-        try:
-            import lancedb
 
-            db = lancedb.connect(self.db_uri)
-            table = db.open_table("scan_results")
-            res = table.search().where(f"group_id = {self.group_id}").limit(10000).to_list()
-            self.signals.finished.emit(res, self.group_id)
+        try:
+            # Delegate db access to the thread-safe singleton
+            rows = DB_SERVICE.get_files_by_group(self.group_id)
+            self.signals.finished.emit(rows, self.group_id)
         except Exception as e:
             app_logger.error(f"Background group fetch failed: {e}", exc_info=True)
             self.signals.error.emit(str(e))

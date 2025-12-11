@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from app.domain.data_models import FileOperation, GroupNode, ResultNode, ScanConfig, ScanMode
 from app.infrastructure.cache import thumbnail_cache
 from app.infrastructure.configuration import ScanConfigBuilder
+from app.infrastructure.db_service import DB_SERVICE
 from app.infrastructure.filesystem import FileOperationManager
 from app.infrastructure.settings import SettingsManager
 from app.shared.constants import (
@@ -491,6 +492,7 @@ class App(QMainWindow):
     def _clear_scan_cache(self):
         if self._confirm_action("Clear Scan Cache", "Delete all temporary scan data?"):
             thumbnail_cache.close()
+            DB_SERVICE.close()  # Safe DB close
             success = clear_scan_cache()
             msg, level = ("Scan cache cleared.", "success") if success else ("Failed to clear scan cache.", "error")
             APP_SIGNAL_BUS.log_message.emit(msg, level)
@@ -510,6 +512,7 @@ class App(QMainWindow):
     def _clear_app_data(self):
         if self._confirm_action("Clear All App Data", "Delete ALL app data (caches, logs, settings, models)?"):
             thumbnail_cache.close()
+            DB_SERVICE.close()  # Safe DB close
             logging.shutdown()
             try:
                 success = clear_all_app_data()
@@ -525,6 +528,7 @@ class App(QMainWindow):
     def closeEvent(self, event):
         self.settings_manager.save()
         thumbnail_cache.close()
+        DB_SERVICE.close()  # Cleanly close DB connection
         if QThreadPool.globalInstance().activeThreadCount() > 0:
             QMessageBox.warning(self, "Operation in Progress", "Please wait for background operations to complete.")
             event.ignore()

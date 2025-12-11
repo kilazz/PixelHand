@@ -1,6 +1,7 @@
 # app/workflow/stages.py
 """
 Contains individual, encapsulated stages for the duplicate finding process.
+Refactored to use DB_SERVICE and update PipelineManager usage.
 """
 
 import logging
@@ -17,8 +18,6 @@ from typing import Any
 import numpy as np
 
 from app.ai.hashing import worker_calculate_hashes_and_meta, worker_calculate_perceptual_hashes
-
-# Updated Imports to new structure
 from app.ai.search_engine import LanceDBSimilarityEngine
 from app.domain.data_models import (
     AnalysisItem,
@@ -28,14 +27,11 @@ from app.domain.data_models import (
     ScanState,
 )
 from app.imaging.image_io import get_image_metadata
-from app.shared.constants import LANCEDB_AVAILABLE
+from app.infrastructure.db_service import DB_SERVICE
 from app.shared.signal_bus import SignalBus
 from app.shared.utils import UnionFind, find_best_in_group
 from app.workflow.auxiliary import FileFinder
 from app.workflow.pipeline import PipelineManager
-
-if LANCEDB_AVAILABLE:
-    pass
 
 app_logger = logging.getLogger("PixelHand.workflow.stages")
 
@@ -338,12 +334,11 @@ class FingerprintGenerationStage(ScanStage):
         if not context.config.use_ai or not context.items_to_process:
             return True
 
+        # FIX: Remove extra arguments from PipelineManager instantiation
         manager = PipelineManager(
             config=context.config,
             state=context.state,
             signals=context.signals,
-            vector_db_writer=context.lancedb_table,
-            table_name=context.scanner_core.vectors_table_name,
             stop_event=context.stop_event,
         )
         success, skipped = manager.run(context)
@@ -360,14 +355,9 @@ class DatabaseIndexStage(ScanStage):
         if not context.config.use_ai:
             return True
         try:
-            num_rows = context.lancedb_table.to_lance().count_rows()
-            if num_rows < 50000 or context.config.lancedb_in_memory:
-                return True
-            context.signals.log_message.emit(f"Indexing {num_rows} vectors...", "info")
-            partitions = min(2048, max(128, int(num_rows**0.5)))
-            context.lancedb_table.create_index(
-                metric="cosine", num_partitions=partitions, num_sub_vectors=96, replace=True
-            )
+            context.signals.log_message.emit("Indexing vectors...", "info")
+            # FIX: Use thread-safe DB_SERVICE method
+            DB_SERVICE.create_index()
         except Exception as e:
             app_logger.error(f"Index creation failed: {e}")
         return True
@@ -381,6 +371,12 @@ class AILinkingStage(ScanStage):
     def run(self, context: ScanContext) -> bool:
         if not context.config.use_ai:
             return True
+
+        # NOTE: LanceDBSimilarityEngine still requires a raw lancedb table object
+        # to perform complex queries. Since this stage runs sequentially after
+        # pipeline writing is finished, using context.lancedb_table (which is DB_SERVICE.table)
+        # is acceptable for now, although it bypasses the DB_SERVICE lock.
+        # Future refactor: Move search logic into DB_SERVICE.
         engine = LanceDBSimilarityEngine(context.config, context.state, context.signals, context.lancedb_table)
         links = engine.find_similar_pairs(context.stop_event) or []
 
