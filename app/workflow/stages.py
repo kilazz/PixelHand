@@ -1,10 +1,12 @@
 # app/workflow/stages.py
 """
 Contains individual, encapsulated stages for the duplicate finding process.
-Refactored to use DB_SERVICE and update PipelineManager usage.
+Refactored to include "Size-First" optimization for exact duplicates
+and DB_SERVICE integration.
 """
 
 import logging
+import os
 import threading
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -155,24 +157,53 @@ class FileDiscoveryStage(ScanStage):
 class ExactDuplicateStage(ScanStage):
     @property
     def name(self) -> str:
-        return "Phase 2/7: Finding exact duplicates (xxHash)..."
+        return "Phase 2/7: Fast exact duplicate search..."
 
     def run(self, context: ScanContext) -> bool:
         if not context.files_to_process or not context.config.find_exact_duplicates:
-            for path in context.files_to_process:
-                if path not in context.all_image_fps and (meta := get_image_metadata(path)):
-                    context.all_image_fps[path] = ImageFingerprint(path=path, hashes=np.array([]), **meta)
+            # Even if disabled, we need metadata for AI, so run the lightweight scan
+            self._fill_metadata_only(context)
             return True
 
         total_files = len(context.files_to_process)
-        context.state.update_progress(0, total_files, "Calculating exact file hashes (Multicore)...")
+        context.signals.log_message.emit(f"Pre-filtering {total_files} files by size...", "info")
+
+        # 1. Group by Size (Heuristic Optimization)
+        # Reading os.stat is much faster than reading file content
+        size_map = defaultdict(list)
+        for path in context.files_to_process:
+            if context.stop_event.is_set():
+                return False
+            try:
+                size = os.stat(path).st_size
+                size_map[size].append(path)
+            except OSError:
+                continue
+
+        # Separate files that are unique by size from potential duplicates
+        candidates = []
+        unique_by_size = []
+
+        for size, paths in size_map.items():
+            if len(paths) > 1 and size > 0:
+                candidates.extend(paths)
+            else:
+                unique_by_size.extend(paths)
+
+        # For files that are unique by size, we just need metadata (header read), no full hashing.
+        self._fill_metadata_only(context, unique_by_size)
+
+        if not candidates:
+            return True
+
+        # 2. Hash only candidates (Full Content Read)
+        context.state.update_progress(0, len(candidates), "Hashing candidates...")
         hash_map = defaultdict(list)
 
         with ProcessPoolExecutor(max_workers=context.config.perf.num_workers) as executor:
-            futures = {
-                executor.submit(worker_calculate_hashes_and_meta, path): path for path in context.files_to_process
-            }
-            for completed_count, future in enumerate(as_completed(futures), start=1):
+            futures = {executor.submit(worker_calculate_hashes_and_meta, path): path for path in candidates}
+
+            for i, future in enumerate(as_completed(futures), 1):
                 if context.stop_event.is_set():
                     executor.shutdown(wait=False, cancel_futures=True)
                     return False
@@ -185,21 +216,44 @@ class ExactDuplicateStage(ScanStage):
                         hash_map[fp.xxhash].append(fp.path)
                 except Exception as e:
                     app_logger.warning(f"Hash calculation error: {e}")
-                if completed_count % 100 == 0:
-                    context.state.update_progress(completed_count, total_files)
 
+                if i % 20 == 0:
+                    context.state.update_progress(i, len(candidates))
+
+        # 3. Cluster Exact Matches
+        exact_pairs_count = 0
         for paths in hash_map.values():
-            if not paths:
+            if len(paths) < 2:
                 continue
+
+            # Sort by path length to picking stable "original" (heuristic)
+            paths.sort(key=lambda p: len(str(p)))
             rep_path = paths[0]
+
             for other_path in paths[1:]:
                 node1 = (str(rep_path), None)
                 node2 = (str(other_path), None)
+                # Distance 0.0 means 100% match
                 context.cluster_manager.add_evidence(node1, node2, EvidenceMethod.XXHASH.value, 0.0)
+            exact_pairs_count += len(paths) - 1
 
-        context.files_to_process = [paths[0] for paths in hash_map.values() if paths]
-        app_logger.info(f"ExactDuplicateStage: {len(context.files_to_process)} unique files passed to AI.")
+        context.signals.log_message.emit(f"Found {exact_pairs_count} exact duplicates via hash.", "info")
         return not context.stop_event.is_set()
+
+    def _fill_metadata_only(self, context, files=None):
+        """Helper to read image headers without full content hashing."""
+        target_files = files if files is not None else context.files_to_process
+        if not target_files:
+            return
+
+        # Simple sequential read is usually fine for headers, or could be threaded if needed
+        for path in target_files:
+            if context.stop_event.is_set():
+                return
+            if path not in context.all_image_fps:
+                meta = get_image_metadata(path)
+                if meta:
+                    context.all_image_fps[path] = ImageFingerprint(path=path, hashes=np.array([]), **meta)
 
 
 class ItemGenerationStage(ScanStage):
@@ -212,6 +266,7 @@ class ItemGenerationStage(ScanStage):
         cfg = context.config
         for path in context.files_to_process:
             if path not in context.all_image_fps:
+                # Metadata might be missing if ExactDuplicateStage was skipped entirely or failed
                 if meta := get_image_metadata(path):
                     context.all_image_fps[path] = ImageFingerprint(path=path, hashes=np.array([]), **meta)
                 else:
@@ -264,6 +319,7 @@ class PerceptualDuplicateStage(ScanStage):
                     if result:
                         item_key = AnalysisItem(path=result["path"], analysis_type=result["analysis_type"])
                         item_hashes[item_key] = result
+                        # Update the main fingerprint object with precise meta found during decode
                         if fp := context.all_image_fps.get(result["path"]):
                             fp.dhash = result.get("dhash")
                             fp.phash = result.get("phash")
@@ -294,7 +350,7 @@ class PerceptualDuplicateStage(ScanStage):
             [int("".join(row.astype(int).astype(str)), 2) for row in (h.hash.flatten() for _, h in items_with_hashes)],
             dtype=np.uint64,
         )
-        # Simplified bucketing logic for brevity, same as previous
+        # Simplified BK-Tree-like bucketing for Hamming distance
         num_bands, band_size = 4, 16
         buckets = [defaultdict(list) for _ in range(num_bands)]
         for i, h in enumerate(uint64_hashes):
@@ -333,6 +389,7 @@ class FingerprintGenerationStage(ScanStage):
         if not context.config.use_ai or not context.items_to_process:
             return True
 
+        # PipelineManager handles threaded preprocessing and inference
         manager = PipelineManager(
             config=context.config,
             state=context.state,
@@ -354,6 +411,7 @@ class DatabaseIndexStage(ScanStage):
             return True
         try:
             context.signals.log_message.emit("Indexing vectors...", "info")
+            # Uses the thread-safe DB_SERVICE
             DB_SERVICE.create_index()
         except Exception as e:
             app_logger.error(f"Index creation failed: {e}")
@@ -369,7 +427,7 @@ class AILinkingStage(ScanStage):
         if not context.config.use_ai:
             return True
 
-        # Use the logic moved to DB_SERVICE
+        # Uses the search logic moved to DB_SERVICE
         links = DB_SERVICE.find_similar_pairs(context.config, context.stop_event, context.state.update_progress)
 
         for path1, ch1, path2, ch2, dist in links:
