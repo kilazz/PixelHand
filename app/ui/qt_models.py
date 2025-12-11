@@ -118,7 +118,6 @@ class ResultsTreeModel(QAbstractItemModel):
         self.clear()
         self.beginResetModel()
         self.mode = mode
-        # Note: db_path from payload is no longer stored; we use DB_SERVICE global
 
         lazy_summary = payload.get("lazy_summary")
         full_groups = payload.get("groups_data")
@@ -674,7 +673,6 @@ class ImagePreviewModel(QAbstractListModel):
                 return self.pixmap_cache[ui_key]
             if ui_key not in self.loading_paths:
                 self.loading_paths.add(ui_key)
-                # ImageLoader now manages OOM protection internally via semaphore
                 loader = ImageLoader(
                     item.path, item.mtime, self.target_size, self.tonemap_mode, True, item.channel, ui_key
                 )

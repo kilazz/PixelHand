@@ -18,7 +18,6 @@ from typing import Any
 import numpy as np
 
 from app.ai.hashing import worker_calculate_hashes_and_meta, worker_calculate_perceptual_hashes
-from app.ai.search_engine import LanceDBSimilarityEngine
 from app.domain.data_models import (
     AnalysisItem,
     EvidenceMethod,
@@ -334,7 +333,6 @@ class FingerprintGenerationStage(ScanStage):
         if not context.config.use_ai or not context.items_to_process:
             return True
 
-        # FIX: Remove extra arguments from PipelineManager instantiation
         manager = PipelineManager(
             config=context.config,
             state=context.state,
@@ -356,7 +354,6 @@ class DatabaseIndexStage(ScanStage):
             return True
         try:
             context.signals.log_message.emit("Indexing vectors...", "info")
-            # FIX: Use thread-safe DB_SERVICE method
             DB_SERVICE.create_index()
         except Exception as e:
             app_logger.error(f"Index creation failed: {e}")
@@ -372,13 +369,8 @@ class AILinkingStage(ScanStage):
         if not context.config.use_ai:
             return True
 
-        # NOTE: LanceDBSimilarityEngine still requires a raw lancedb table object
-        # to perform complex queries. Since this stage runs sequentially after
-        # pipeline writing is finished, using context.lancedb_table (which is DB_SERVICE.table)
-        # is acceptable for now, although it bypasses the DB_SERVICE lock.
-        # Future refactor: Move search logic into DB_SERVICE.
-        engine = LanceDBSimilarityEngine(context.config, context.state, context.signals, context.lancedb_table)
-        links = engine.find_similar_pairs(context.stop_event) or []
+        # Use the logic moved to DB_SERVICE
+        links = DB_SERVICE.find_similar_pairs(context.config, context.stop_event, context.state.update_progress)
 
         for path1, ch1, path2, ch2, dist in links:
             if context.stop_event.is_set():
