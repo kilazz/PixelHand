@@ -117,6 +117,12 @@ class ScanConfigBuilder:
             # New QC Flags
             qc_check_compression=self.settings.hashing.qc_check_compression,
             qc_check_block_align=self.settings.hashing.qc_check_block_align,
+            # --- Normal Map QC ---
+            qc_check_normal_maps=self.settings.hashing.qc_check_normal_maps,
+            # Parse comma-separated tags into a list of lowercase strings
+            qc_normal_maps_tags=[
+                t.strip().lower() for t in self.settings.hashing.qc_normal_maps_tags.split(",") if t.strip()
+            ],
         )
 
     def _validate_folder_path(self) -> Path:

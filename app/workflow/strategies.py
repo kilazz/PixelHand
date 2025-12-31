@@ -505,14 +505,50 @@ class FolderComparisonStrategy(ScanStrategy):
             rel_issues = QCRules.check_relative(fp_a, fp_b, self.config)
             issues = abs_issues + rel_issues
 
-            if self.config.qc_check_solid_color and ImageStat:
+            # --- Image Loading for Heavy Checks ---
+            img = None
+            needs_image = False
+
+            # Check 1: Solid Color
+            if self.config.qc_check_solid_color:
+                needs_image = True
+
+            # Check 2: Normal Maps (With optional tag filtering)
+            check_normals = self.config.qc_check_normal_maps
+            if check_normals and self.config.qc_normal_maps_tags:
+                fname = path_b.name.lower()
+                # If tags list is NOT empty and filename contains NO tags -> skip check
+                if not any(t in fname for t in self.config.qc_normal_maps_tags):
+                    check_normals = False
+
+            if check_normals:
+                needs_image = True
+
+            if needs_image:
                 try:
-                    shrink = max(1, min(fp_b.resolution) // 32)
+                    # Smart shrink: Don't shrink too much for Normal Map check (min 512px preferred)
+                    # For solid color we can shrink a lot.
+                    shrink = max(1, min(fp_b.resolution) // 32) if not check_normals else 4
                     img = load_image(path_b, shrink=shrink)
-                    if img and sum(ImageStat.Stat(img).var) < 10.0:
-                        issues.append("Solid Color Detected")
                 except Exception:
                     pass
+
+            if img:
+                # Solid Color Logic
+                if self.config.qc_check_solid_color and ImageStat:
+                    try:
+                        if sum(ImageStat.Stat(img).var) < 10.0:
+                            issues.append("Solid Color Detected")
+                    except Exception:
+                        pass
+
+                # Normal Map Logic
+                if check_normals:
+                    nm_res = QCRules.check_normal_map_integrity(img)
+                    if nm_res:
+                        group_name, detail = nm_res
+                        issues.append(group_name)
+                        fp_b.format_details += f" [NM Err: {detail}]"
 
             area_a = fp_a.resolution[0] * fp_a.resolution[1]
             area_b = fp_b.resolution[0] * fp_b.resolution[1]
@@ -567,14 +603,50 @@ class SingleFolderQCStrategy(ScanStrategy):
             fp = ImageFingerprint(path=path, hashes=np.array([]), **meta)
             issues = QCRules.check_absolute(fp, self.config)
 
-            if self.config.qc_check_solid_color and ImageStat:
+            # --- Image Loading for Heavy Checks ---
+            img = None
+            needs_image = False
+
+            # Check 1: Solid Color
+            if self.config.qc_check_solid_color:
+                needs_image = True
+
+            # Check 2: Normal Maps (With optional tag filtering)
+            check_normals = self.config.qc_check_normal_maps
+            if check_normals and self.config.qc_normal_maps_tags:
+                fname = path.name.lower()
+                # If tags list is NOT empty and filename contains NO tags -> skip check
+                if not any(t in fname for t in self.config.qc_normal_maps_tags):
+                    check_normals = False
+
+            if check_normals:
+                needs_image = True
+
+            if needs_image:
                 try:
-                    shrink = max(1, min(fp.resolution) // 32)
+                    # Smart shrink
+                    shrink = max(1, min(fp.resolution) // 32) if not check_normals else 4
                     img = load_image(path, shrink=shrink)
-                    if img and sum(ImageStat.Stat(img).var) < 10.0:
-                        issues.append("Solid Color Texture")
                 except Exception:
                     pass
+
+            # Apply Checks
+            if img:
+                # Solid Color Logic
+                if self.config.qc_check_solid_color and ImageStat:
+                    try:
+                        if sum(ImageStat.Stat(img).var) < 10.0:
+                            issues.append("Solid Color Texture")
+                    except Exception:
+                        pass
+
+                # Normal Map Logic
+                if check_normals:
+                    nm_res = QCRules.check_normal_map_integrity(img)
+                    if nm_res:
+                        group_name, detail = nm_res
+                        issues.append(group_name)
+                        fp.format_details += f" [NM Err: {detail}]"
 
             if issues:
                 issues.sort()

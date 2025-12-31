@@ -4,7 +4,14 @@ Centralized logic for Quality Control (QC) rules.
 Separates checks into 'Absolute' (single file) and 'Relative' (comparison) categories.
 """
 
+import logging
+
+import numpy as np
+from PIL import Image
+
 from app.domain.data_models import ImageFingerprint, ScanConfig
+
+app_logger = logging.getLogger("PixelHand.workflow.qc_rules")
 
 
 def is_power_of_two(n: int) -> bool:
@@ -16,6 +23,88 @@ class QCRules:
     """
     Static container for QC validation logic.
     """
+
+    @staticmethod
+    def check_normal_map_integrity(pil_image: Image.Image, threshold: float = 0.15) -> tuple[str, str] | None:
+        """
+        Checks if pixels form normalized vectors (length ~ 1.0).
+        Optimized using NumPy. Expects Tangent Space Normal Map.
+
+        Args:
+            pil_image: The loaded PIL image.
+            threshold: Allowed deviation from length 1.0 (default 0.15 for compression tolerance).
+
+        Returns:
+            Tuple (Group Name, Detail String) if validation fails, otherwise None.
+        """
+        try:
+            # Optimization: Work on a smaller copy for speed (errors are usually systemic).
+            # We use NEAREST resampling to preserve specific pixel values rather than
+            # averaging them, which would artificially shorten the vectors.
+            img_proc = pil_image.resize((512, 512), Image.Resampling.NEAREST) if pil_image.width > 512 else pil_image
+
+            if img_proc.mode != "RGB":
+                img_proc = img_proc.convert("RGB")
+
+            # Convert to float array
+            arr = np.array(img_proc, dtype=np.float32)
+
+            # Transform [0, 255] -> [-1.0, 1.0]
+            # Formula: (Value / 255.0) * 2.0 - 1.0
+            # Simplified: Value * (2.0 / 255.0) - 1.0
+            vectors = arr * (2.0 / 255.0) - 1.0
+
+            # --- Detect "Drop Blue" / "White Z" optimization ---
+            # If Blue channel is mostly White (255), the vector length will mathematically be > 1.0
+            # (because Z=1 and X,Y!=0). This is valid for game engines (CryEngine/Unity).
+            mean_z = np.mean(vectors[..., 2])
+
+            if mean_z > 0.98:
+                # "Drop Blue" Mode detected.
+                # Instead of checking total length, we must check if X/Y fit inside the unit circle.
+                # If X^2 + Y^2 > 1.0, then Z cannot be reconstructed (sqrt of negative).
+                len_xy = np.sqrt(vectors[..., 0] ** 2 + vectors[..., 1] ** 2)
+
+                # Check if XY exceeds 1.0 (allowing for compression noise via threshold)
+                diff_xy = np.maximum(0, len_xy - 1.0)
+                bad_pixels_xy = np.mean(diff_xy > threshold)
+
+                if bad_pixels_xy > 0.10:
+                    return (
+                        "Bad Normal Map (XY Clip)",
+                        f"XY > 1.0 ({bad_pixels_xy:.0%})",
+                    )
+
+                # If XY is valid, the file is fine (Drop Blue format)
+                return None
+
+            # --- Standard Normal Map Check ---
+            # Calculate vector magnitude: sqrt(x^2 + y^2 + z^2)
+            # axis=2 because shape is (Height, Width, Channels)
+            norms = np.linalg.norm(vectors, axis=2)
+
+            # Calculate deviation from 1.0
+            diff = np.abs(norms - 1.0)
+
+            # Count bad pixels (deviation > threshold)
+            # Threshold 0.15 accounts for DXT/BC compression artifacts
+            bad_pixels_mean = np.mean(diff > threshold)
+
+            if bad_pixels_mean > 0.10:  # If >10% pixels are bad
+                # Return tuple: (Group Name for UI grouping, Detail string for metadata)
+                return "Bad Normal Map (Integrity)", f"{bad_pixels_mean:.0%}"
+
+            # Optional: Check if it's actually a Normal Map (Z channel should be prominent)
+            # In Tangent space, Blue (Z) is usually facing up (approx 1.0)
+            mean_vec = np.mean(vectors, axis=(0, 1))
+            if mean_vec[2] < 0.2:  # If avg Z is negative or too small, it's likely not a valid NM
+                return "Inverted Z / Not Tangent", "Z-Axis issue"
+
+            return None
+
+        except Exception as e:
+            app_logger.warning(f"Normal map validation failed: {e}")
+            return None
 
     @staticmethod
     def check_absolute(fp: ImageFingerprint, config: ScanConfig) -> list[str]:

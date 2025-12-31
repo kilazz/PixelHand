@@ -89,6 +89,18 @@ class QCPanel(QGroupBox):
         qc_grid.addWidget(self.check_bitdepth_check, 3, 1)
         qc_grid.addWidget(self.check_solid_check, 4, 1)
 
+        # --- Normal Map Validation Widgets ---
+        self.check_normals_check = QCheckBox("Validate Normal Maps")
+        self.check_normals_check.setToolTip("Checks if vectors are normalized (length ~1.0).")
+
+        self.normals_tags_entry = QLineEdit()
+        self.normals_tags_entry.setPlaceholderText("Tags: _norm, _ddn (empty = check all)")
+        self.normals_tags_entry.setToolTip("If empty, checks ALL files. If set, checks only matching files.")
+
+        # Place them side-by-side in row 6
+        qc_grid.addWidget(self.check_normals_check, 6, 0)
+        qc_grid.addWidget(self.normals_tags_entry, 6, 1)
+
         self.relative_widgets = [
             self.hide_same_res_check,
             self.match_stem_check,
@@ -103,6 +115,8 @@ class QCPanel(QGroupBox):
             self.check_align_check,
             self.check_bitdepth_check,
             self.check_solid_check,
+            self.check_normals_check,
+            self.normals_tags_entry,
         ]
 
     def set_mode_context(self, mode_name: str):
@@ -116,7 +130,11 @@ class QCPanel(QGroupBox):
         self.setEnabled(True)
         for w in self.absolute_widgets:
             w.setEnabled(True)
-            w.setStyleSheet("")
+            if isinstance(w, QWidget):  # Ensure it's a widget before styling
+                w.setStyleSheet("")
+
+        # The tags entry is only enabled if the validation check is active
+        self.normals_tags_entry.setEnabled(self.check_normals_check.isChecked())
 
         for w in self.relative_widgets:
             w.setEnabled(is_compare)
@@ -138,6 +156,11 @@ class QCPanel(QGroupBox):
         self.check_compression_check.toggled.connect(self.settings_manager.set_qc_check_compression)
         self.check_align_check.toggled.connect(self.settings_manager.set_qc_check_block_align)
 
+        # Normal Map Signals
+        self.check_normals_check.toggled.connect(self.settings_manager.set_qc_check_normal_maps)
+        self.check_normals_check.toggled.connect(self.normals_tags_entry.setEnabled)
+        self.normals_tags_entry.textChanged.connect(self.settings_manager.set_qc_normal_maps_tags)
+
     def load_settings(self, s: AppSettings):
         self.hide_same_res_check.setChecked(s.hashing.hide_same_resolution_groups)
         self.match_stem_check.setChecked(s.hashing.match_by_stem)
@@ -150,6 +173,11 @@ class QCPanel(QGroupBox):
         self.check_bitdepth_check.setChecked(s.hashing.qc_check_bit_depth)
         self.check_compression_check.setChecked(s.hashing.qc_check_compression)
         self.check_align_check.setChecked(s.hashing.qc_check_block_align)
+
+        # Normal Map Settings
+        self.check_normals_check.setChecked(s.hashing.qc_check_normal_maps)
+        self.normals_tags_entry.setText(s.hashing.qc_normal_maps_tags)
+        self.normals_tags_entry.setEnabled(s.hashing.qc_check_normal_maps)
 
 
 class OptionsPanel(QGroupBox):
@@ -251,11 +279,9 @@ class OptionsPanel(QGroupBox):
         self.file_types_button = QPushButton("File Types...")
         self.clear_scan_cache_button = QPushButton("Clear Scan Cache")
         self.clear_models_cache_button = QPushButton("Clear AI Models")
-        # RESTORED ID
         self.clear_models_cache_button.setObjectName("clear_models_button")
 
         self.clear_all_data_button = QPushButton("Clear All Data")
-        # RESTORED ID
         self.clear_all_data_button.setObjectName("clear_all_data_button")
 
         self.theme_button = QPushButton("🎨")
@@ -269,7 +295,6 @@ class OptionsPanel(QGroupBox):
         main_layout.addLayout(top_action_layout)
 
         self.scan_button = QPushButton("Scan for Duplicates")
-        # RESTORED ID
         self.scan_button.setObjectName("scan_button")
         main_layout.addWidget(self.scan_button)
 

@@ -305,6 +305,10 @@ class ScanConfig:
     qc_check_compression: bool = False
     qc_check_block_align: bool = False
 
+    # Normal Map QC
+    qc_check_normal_maps: bool = False
+    qc_normal_maps_tags: list[str] = field(default_factory=list)
+
 
 @dataclass
 class HashingSettings:
@@ -341,6 +345,10 @@ class HashingSettings:
     # New QC Flags
     qc_check_compression: bool = False
     qc_check_block_align: bool = False
+
+    # Normal Map QC
+    qc_check_normal_maps: bool = False
+    qc_normal_maps_tags: str = ""
 
     # Auto-Cleanup logic
     last_model_name: str = ""

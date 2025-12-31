@@ -235,6 +235,19 @@ class SettingsManager(QObject):
             self._settings.hashing.qc_check_block_align = checked
             self._request_save()
 
+    # --- Normal Map QC Slots ---
+    @Slot(bool)
+    def set_qc_check_normal_maps(self, checked: bool):
+        if self._settings.hashing.qc_check_normal_maps != checked:
+            self._settings.hashing.qc_check_normal_maps = checked
+            self._request_save()
+
+    @Slot(str)
+    def set_qc_normal_maps_tags(self, text: str):
+        if self._settings.hashing.qc_normal_maps_tags != text:
+            self._settings.hashing.qc_normal_maps_tags = text
+            self._request_save()
+
     @Slot(bool)
     def set_lancedb_in_memory(self, checked: bool):
         if self._settings.lancedb_in_memory != checked:
