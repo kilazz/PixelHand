@@ -1,4 +1,4 @@
-# renormalize_tool_v2.py
+# renormalize_tool.py
 """
 Batch Normal Map Renormalizer.
 """
