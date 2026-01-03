@@ -55,6 +55,12 @@ class ScanConfigBuilder:
         hashing_config = self._build_hashing_config()
         output_config = self._build_output_config()
 
+        # Parse Similarity Threshold
+        try:
+            threshold_val = int(self.settings.threshold)
+        except (ValueError, TypeError):
+            threshold_val = 70
+
         # 3. Assemble Root Config
         return ScanConfig(
             folder_path=folder_path,
@@ -69,6 +75,7 @@ class ScanConfigBuilder:
             search_query=self.search_query,
             sample_path=self.sample_path,
             comparison_folder_path=self.comparison_folder_path,
+            similarity_threshold=threshold_val,
         )
 
     def _validate_folder_path(self) -> Path:
@@ -107,7 +114,7 @@ class ScanConfigBuilder:
         """Constructs the AI settings."""
         # Retrieve model metadata from constants
         model_key = self.settings.model_key
-        # Fallback to default if key invalid
+        # Fallback if key invalid
         model_info = SUPPORTED_MODELS.get(model_key, next(iter(SUPPORTED_MODELS.values())))
 
         # Parse Quantization Mode

@@ -89,10 +89,10 @@ class ModelConverter(QRunnable):
             processor = ProcessorClass.from_pretrained(self.hf_model_name)
             model = ModelClass.from_pretrained(self.hf_model_name)
 
+            # Do NOT convert the whole model to half() here globally.
+            # We will handle FP16 conversion specifically for the vision component
+            # during the export phase to avoid LayerNorm errors in the text encoder.
             export_fp16 = self.quant_mode == QuantizationMode.FP16
-            if export_fp16:
-                self.signals.log.emit("Converting model to FP16 precision...", "info")
-                model.half()
 
             use_dynamo = self.model_info.get("use_dynamo", False)
             visual_out_path = target_dir / "visual.onnx"
@@ -142,8 +142,14 @@ class ModelConverter(QRunnable):
         input_size = adapter.get_input_size(processor)
         dummy_input = processor(images=Image.new("RGB", input_size), return_tensors="pt")
         pixel_values = dummy_input["pixel_values"].repeat(2, 1, 1, 1)
+
+        # Apply FP16 only if requested
         if is_fp16:
+            vision_wrapper.half()
             pixel_values = pixel_values.half()
+        else:
+            vision_wrapper.float()
+            pixel_values = pixel_values.float()
 
         torch.onnx.export(
             vision_wrapper,
@@ -161,8 +167,15 @@ class ModelConverter(QRunnable):
         input_size = adapter.get_input_size(processor)
         dummy_input = processor(images=Image.new("RGB", input_size), return_tensors="pt")
         pixel_values = dummy_input["pixel_values"]
+
+        # Apply FP16 ONLY to the Vision Model
         if is_fp16:
+            self.signals.log.emit("Converting Vision component to FP16...", "info")
+            vision_wrapper.half()
             pixel_values = pixel_values.half()
+        else:
+            vision_wrapper.float()
+            pixel_values = pixel_values.float()
 
         torch.onnx.export(
             vision_wrapper,
@@ -176,7 +189,14 @@ class ModelConverter(QRunnable):
         )
 
         if adapter.has_text_model():
+            self.signals.log.emit("Exporting Text component (FP32)...", "info")
             text_wrapper = adapter.get_text_wrapper(model, torch)
+
+            # Ensure Text Model is FP32.
+            # This fixes the LayerNorm type mismatch error in ONNX Runtime
+            # and doesn't significantly impact memory since the text encoder is small.
+            text_wrapper.float()
+
             dummy_text_input = processor.tokenizer(
                 text=["a test query"],
                 return_tensors="pt",

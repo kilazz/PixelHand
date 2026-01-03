@@ -125,6 +125,9 @@ class ScanConfig:
     # Used only when scan_mode is FOLDER_COMPARE
     comparison_folder_path: Path | None = None
 
+    # Threshold for AI Similarity Search (0-100)
+    similarity_threshold: int = 70
+
     @property
     def is_comparison_mode(self) -> bool:
         return self.scan_mode == ScanMode.FOLDER_COMPARE
