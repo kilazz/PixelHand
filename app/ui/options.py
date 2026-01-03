@@ -577,7 +577,7 @@ class ScanOptionsPanel(QGroupBox):
 
         self.visuals_layout = QHBoxLayout()
         self.save_visuals_check = QCheckBox("Save visuals")
-        self.visuals_tonemap_check = QCheckBox("TM HDR")
+        self.visuals_tonemap_check = QCheckBox("HDR")
         self.max_visuals_entry = QLineEdit()
         self.max_visuals_entry.setValidator(QIntValidator(0, 9999))
         self.max_visuals_entry.setFixedWidth(UIConfig.Sizes.MAX_VISUALS_ENTRY_WIDTH)

@@ -1,8 +1,6 @@
 # app/workflow/stages.py
 """
 Contains individual, encapsulated stages for the duplicate finding process.
-Refactored to include "Size-First" optimization for exact duplicates
-and DB_SERVICE integration.
 """
 
 import logging
@@ -15,24 +13,26 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from app.ai.hashing import worker_calculate_hashes_and_meta, worker_calculate_perceptual_hashes
+from app.domain.config import ScanConfig
 from app.domain.data_models import (
     AnalysisItem,
     EvidenceMethod,
     ImageFingerprint,
-    ScanConfig,
     ScanState,
 )
 from app.imaging.image_io import get_image_metadata
-from app.infrastructure.db_service import DB_SERVICE
 from app.shared.signal_bus import SignalBus
 from app.shared.utils import UnionFind, find_best_in_group
 from app.workflow.auxiliary import FileFinder
 from app.workflow.pipeline import PipelineManager
+
+if TYPE_CHECKING:
+    from app.infrastructure.db_service import DatabaseService
 
 app_logger = logging.getLogger("PixelHand.workflow.stages")
 
@@ -119,6 +119,8 @@ class ScanContext:
     scanner_core: Any
     lancedb_db: Any
     lancedb_table: Any
+    # Injected Database Service
+    db_service: "DatabaseService" = field(default=None)
     all_image_fps: dict[Path, ImageFingerprint] = field(default_factory=dict)
     files_to_process: list[Path] = field(default_factory=list)
     items_to_process: list[AnalysisItem] = field(default_factory=list)
@@ -160,7 +162,7 @@ class ExactDuplicateStage(ScanStage):
         return "Phase 2/7: Fast exact duplicate search..."
 
     def run(self, context: ScanContext) -> bool:
-        if not context.files_to_process or not context.config.find_exact_duplicates:
+        if not context.files_to_process or not context.config.hashing.find_exact:
             # Even if disabled, we need metadata for AI, so run the lightweight scan
             self._fill_metadata_only(context)
             return True
@@ -273,12 +275,18 @@ class ItemGenerationStage(ScanStage):
                     context.all_skipped_files.append(str(path))
                     continue
 
-            if cfg.compare_by_channel and (
-                not cfg.channel_split_tags or any(tag in path.name.lower() for tag in cfg.channel_split_tags)
+            # Accessing properties safely via QC/Hashing config objects
+            compare_by_channel = cfg.hashing.compare_by_channel
+            compare_by_luminance = cfg.hashing.compare_by_luminance
+            channel_split_tags = cfg.hashing.channel_split_tags
+            active_channels = cfg.hashing.active_channels
+
+            if compare_by_channel and (
+                not channel_split_tags or any(tag in path.name.lower() for tag in channel_split_tags)
             ):
-                for channel in cfg.active_channels:
+                for channel in active_channels:
                     items.append(AnalysisItem(path=path, analysis_type=channel))
-            elif cfg.compare_by_luminance:
+            elif compare_by_luminance:
                 items.append(AnalysisItem(path=path, analysis_type="Luminance"))
             else:
                 items.append(AnalysisItem(path=path, analysis_type="Composite"))
@@ -293,20 +301,15 @@ class PerceptualDuplicateStage(ScanStage):
         return "Phase 4/7: Finding near-identical items..."
 
     def run(self, context: ScanContext) -> bool:
-        should_run = (
-            context.config.find_simple_duplicates
-            or context.config.find_perceptual_duplicates
-            or context.config.find_structural_duplicates
-        )
+        cfg = context.config.hashing
+        should_run = cfg.find_simple or cfg.find_perceptual or cfg.find_structural
         if not context.items_to_process or not should_run:
             return True
 
         total_items = len(context.items_to_process)
         context.state.update_progress(0, total_items, "Calculating perceptual hashes (Multicore)...")
         item_hashes = {}
-        worker_func = partial(
-            worker_calculate_perceptual_hashes, ignore_solid_channels=context.config.ignore_solid_channels
-        )
+        worker_func = partial(worker_calculate_perceptual_hashes, ignore_solid_channels=cfg.ignore_solid_channels)
 
         with ProcessPoolExecutor(max_workers=context.config.perf.num_workers) as executor:
             futures = {executor.submit(worker_func, item): item for item in context.items_to_process}
@@ -332,12 +335,12 @@ class PerceptualDuplicateStage(ScanStage):
                 if processed_count % 50 == 0:
                     context.state.update_progress(processed_count, total_items)
 
-        if context.config.find_simple_duplicates:
-            self._run_clustering(context, item_hashes, "dhash", EvidenceMethod.DHASH, context.config.dhash_threshold)
-        if context.config.find_perceptual_duplicates:
-            self._run_clustering(context, item_hashes, "phash", EvidenceMethod.PHASH, context.config.phash_threshold)
-        if context.config.find_structural_duplicates:
-            self._run_clustering(context, item_hashes, "whash", EvidenceMethod.WHASH, context.config.whash_threshold)
+        if cfg.find_simple:
+            self._run_clustering(context, item_hashes, "dhash", EvidenceMethod.DHASH, cfg.dhash_threshold)
+        if cfg.find_perceptual:
+            self._run_clustering(context, item_hashes, "phash", EvidenceMethod.PHASH, cfg.phash_threshold)
+        if cfg.find_structural:
+            self._run_clustering(context, item_hashes, "whash", EvidenceMethod.WHASH, cfg.whash_threshold)
 
         return not context.stop_event.is_set()
 
@@ -386,15 +389,17 @@ class FingerprintGenerationStage(ScanStage):
         return "Phase 5/7: Creating AI fingerprints..."
 
     def run(self, context: ScanContext) -> bool:
-        if not context.config.use_ai or not context.items_to_process:
+        if not context.config.ai.use_ai or not context.items_to_process:
             return True
 
         # PipelineManager handles threaded preprocessing and inference
+        # We pass the full Services container via scanner_core
         manager = PipelineManager(
             config=context.config,
             state=context.state,
             signals=context.signals,
             stop_event=context.stop_event,
+            services=context.scanner_core.services,
         )
         success, skipped = manager.run(context)
         context.all_skipped_files.extend(skipped)
@@ -407,12 +412,12 @@ class DatabaseIndexStage(ScanStage):
         return "Phase 6/7: Optimizing database for fast search..."
 
     def run(self, context: ScanContext) -> bool:
-        if not context.config.use_ai:
+        if not context.config.ai.use_ai:
             return True
         try:
             context.signals.log_message.emit("Indexing vectors...", "info")
-            # Uses the thread-safe DB_SERVICE
-            DB_SERVICE.create_index()
+            # Uses the injected service
+            context.db_service.create_index()
         except Exception as e:
             app_logger.error(f"Index creation failed: {e}")
         return True
@@ -424,11 +429,11 @@ class AILinkingStage(ScanStage):
         return "Phase 7/7: Finding similar images (AI)..."
 
     def run(self, context: ScanContext) -> bool:
-        if not context.config.use_ai:
+        if not context.config.ai.use_ai:
             return True
 
-        # Uses the search logic moved to DB_SERVICE
-        links = DB_SERVICE.find_similar_pairs(context.config, context.stop_event, context.state.update_progress)
+        # Uses the injected service
+        links = context.db_service.find_similar_pairs(context.config, context.stop_event, context.state.update_progress)
 
         for path1, ch1, path2, ch2, dist in links:
             if context.stop_event.is_set():

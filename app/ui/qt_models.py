@@ -1,7 +1,6 @@
 # app/ui/qt_models.py
 """
 Contains Qt Item Models for managing and providing data to views.
-Refactored to use the Singleton DB_SERVICE for thread-safe database access.
 """
 
 import logging
@@ -9,6 +8,7 @@ import os
 from collections import OrderedDict
 from dataclasses import fields
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
@@ -27,13 +27,15 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QBrush, QColor, QFont, QPixmap
 
 from app.domain.data_models import GroupNode, ResultNode, ScanMode
-from app.infrastructure.db_service import DB_SERVICE
 from app.shared.constants import (
     BEST_FILE_METHOD_NAME,
     METHOD_DISPLAY_NAMES,
     UIConfig,
 )
 from app.ui.background_tasks import ImageLoader, LanceDBGroupFetcherTask
+
+if TYPE_CHECKING:
+    from app.infrastructure.db_service import DatabaseService
 
 app_logger = logging.getLogger("PixelHand.ui.models")
 
@@ -43,10 +45,7 @@ VfxRole = Qt.ItemDataRole.UserRole + 2
 
 
 def _format_metadata_string(node: ResultNode) -> str:
-    """
-    Helper to create the detailed metadata string.
-    Uses '•' as a separator for consistency with the Grid View.
-    """
+    """Helper to create the detailed metadata string."""
     if node.path == "loading_dummy":
         return ""
 
@@ -80,21 +79,20 @@ class LanceDBBestPathFetcherTask(QRunnable):
     class Signals(QObject):
         finished = Signal(int, str)  # group_id, path
 
-    def __init__(self, group_id: int):
+    def __init__(self, group_id: int, db_service: "DatabaseService"):
         super().__init__()
         self.setAutoDelete(True)
         self.group_id = group_id
+        self.db_service = db_service
         self.signals = self.Signals()
 
     def run(self):
         try:
-            # We use the DB_SERVICE connection directly.
-            # Note: We manually construct the query because DB_SERVICE.get_files_by_group
-            # returns everything, which might be slow for huge groups.
-            if not DB_SERVICE.db or "scan_results" not in DB_SERVICE.db.table_names():
+            # We use the db_service connection directly.
+            if not self.db_service.db or "scan_results" not in self.db_service.db.table_names():
                 return
 
-            tbl = DB_SERVICE.db.open_table("scan_results")
+            tbl = self.db_service.db.open_table("scan_results")
             # We only need the path of the best file
             res = tbl.search().where(f"group_id = {self.group_id} AND is_best = true").limit(1).to_list()
 
@@ -118,8 +116,9 @@ class ResultsTreeModel(QAbstractItemModel):
 
     fetch_completed = Signal(QModelIndex)
 
-    def __init__(self, parent=None):
+    def __init__(self, db_service: "DatabaseService", parent=None):
         super().__init__(parent)
+        self.db_service = db_service
         self.mode: ScanMode | str = ""
         self.groups_data: dict[int, GroupNode] = {}
         self.sorted_group_ids: list[int] = []
@@ -332,7 +331,7 @@ class ResultsTreeModel(QAbstractItemModel):
         group_id = node.group_id
         self.pending_fetches[group_id] = QPersistentModelIndex(parent)
 
-        task = LanceDBGroupFetcherTask(group_id)
+        task = LanceDBGroupFetcherTask(group_id, self.db_service)
         task.signals.finished.connect(self._on_fetch_finished)
         task.signals.error.connect(self._on_fetch_error)
         QThreadPool.globalInstance().start(task)
@@ -629,19 +628,19 @@ class ResultsTreeModel(QAbstractItemModel):
                 return [Path(c.path) for c in node.children]
 
         try:
-            rows = DB_SERVICE.get_files_by_group(group_id)
+            # Use injected service
+            rows = self.db_service.get_files_by_group(group_id)
             return [Path(r["path"]) for r in rows]
         except Exception:
             return []
 
-    # --- MODIFIED METHOD FOR ASYNC BEST PATH FETCHING ---
     def request_best_path(self, group_id: int):
         """Starts a background task to fetch just the best path for a group."""
         if group_id in self.pending_best_path_fetches:
             return
 
         self.pending_best_path_fetches.add(group_id)
-        task = LanceDBBestPathFetcherTask(group_id)
+        task = LanceDBBestPathFetcherTask(group_id, self.db_service)
         task.signals.finished.connect(self._on_best_path_fetched)
         QThreadPool.globalInstance().start(task)
 
@@ -652,26 +651,17 @@ class ResultsTreeModel(QAbstractItemModel):
 
         self.group_id_to_best_path[group_id] = path
 
-        # Trigger repaint of the Grid View
-        # We need to find the index of the group node
         if group_id in self.groups_data:
             try:
                 row = self.sorted_group_ids.index(group_id)
-                # Emit dataChanged for the whole row to be safe
                 idx = self.index(row, 0)
                 self.dataChanged.emit(idx, idx)
             except ValueError:
                 pass
 
     def get_best_path_for_group_lazy(self, group_id: int) -> str | None:
-        """
-        Retrieves the path of the 'best' file in a group.
-        If not cached, it triggers a background fetch and returns None immediately.
-        """
         if group_id in self.group_id_to_best_path:
             return self.group_id_to_best_path[group_id]
-
-        # Trigger automatic background fetch if missing
         self.request_best_path(group_id)
         return None
 

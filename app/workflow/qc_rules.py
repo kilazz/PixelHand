@@ -9,7 +9,8 @@ import logging
 import numpy as np
 from PIL import Image
 
-from app.domain.data_models import ImageFingerprint, ScanConfig
+from app.domain.config import ScanConfig
+from app.domain.data_models import ImageFingerprint
 
 app_logger = logging.getLogger("PixelHand.workflow.qc_rules")
 

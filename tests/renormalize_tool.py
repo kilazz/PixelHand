@@ -127,7 +127,7 @@ def process_file(path: Path):
     spec = inp.spec()
 
     # Detect Bit Depth
-    is_16bit = (spec.format == oiio.UINT16 or spec.format == oiio.USHORT)
+    is_16bit = spec.format == oiio.UINT16 or spec.format == oiio.USHORT
     bit_depth_str = "16-bit" if is_16bit else "8-bit"
 
     # Read as float (0.0 - 1.0)

@@ -14,7 +14,9 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtCore import QObject, QRunnable, Signal
 
-from app.domain.data_models import DuplicateResults, ImageFingerprint, ScanConfig, ScanState
+# FIX: Import ScanConfig from app.domain.config, not data_models
+from app.domain.config import ScanConfig
+from app.domain.data_models import DuplicateResults, ImageFingerprint, ScanState
 from app.imaging.image_io import load_image
 from app.shared.constants import LANCEDB_AVAILABLE, VISUALS_DIR, TonemapMode
 from app.shared.signal_bus import SignalBus

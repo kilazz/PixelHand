@@ -1,11 +1,23 @@
 # app/ui/results.py
+"""
+Results Panel (View).
+"""
 
 import logging
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QItemSelectionModel, QModelIndex, QPoint, Qt, QThreadPool, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QItemSelectionModel,
+    QModelIndex,
+    QPoint,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QAction, QCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -21,6 +33,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSlider,
     QStackedWidget,
     QTreeView,
@@ -29,18 +42,14 @@ from PySide6.QtWidgets import (
 )
 
 from app.domain.data_models import FileOperation, GroupNode, ResultNode, ScanMode
-from app.infrastructure.db_service import DB_SERVICE
-from app.shared.constants import (
-    LANCEDB_AVAILABLE,
-    UIConfig,
-)
+from app.shared.constants import UIConfig
 from app.ui.delegates import GroupGridDelegate
 from app.ui.qt_models import ResultsProxyModel, ResultsTreeModel
 
 if TYPE_CHECKING:
-    from app.infrastructure.filesystem import FileOperationManager
+    from app.ui.controllers import ResultsController
 
-app_logger = logging.getLogger("PixelHand.ui.results")
+logger = logging.getLogger("PixelHand.ui.results")
 
 
 def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
@@ -60,21 +69,26 @@ def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
 
 class ResultsPanel(QGroupBox):
     """
-    Displays scan results in a Tree View (Details) or Grid View (Folders).
-    Provides filtering, sorting, and file operations.
+    Displays scan results and provides controls for file actions.
     """
 
+    # Signal emitted when the visible set of items changes (e.g. filtering)
+    # Used by the ImageViewer to update its thumbnail list.
     visible_results_changed = Signal(list)
 
-    def __init__(self, file_op_manager: "FileOperationManager"):
+    def __init__(self, controller: "ResultsController"):
         super().__init__("Results")
-        self.file_op_manager = file_op_manager
+        self.controller = controller  # Business Logic & Service Access
+
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.setInterval(300)
+
+        # UI State
         self.hardlink_available = False
         self.reflink_available = False
         self.current_operation = FileOperation.NONE
+        self.context_menu_path: Path | None = None
 
         self._init_ui()
         self._setup_models()
@@ -85,18 +99,19 @@ class ResultsPanel(QGroupBox):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
+
+        # 1. Header Controls (Search, View Mode, Filter)
         self._create_header_controls(layout)
 
+        # 2. Main Views (Tree / Grid)
         self.view_stack = QStackedWidget()
 
-        # 1. Tree View (Table/Details)
         self.results_view = QTreeView()
         self.results_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.results_view.setAlternatingRowColors(True)
         self.results_view.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.results_view.setSortingEnabled(True)
 
-        # 2. Grid View (Icons/Folders)
         self.results_grid = QListView()
         self.results_grid.setViewMode(QListView.ViewMode.IconMode)
         self.results_grid.setResizeMode(QListView.ResizeMode.Adjust)
@@ -109,14 +124,16 @@ class ResultsPanel(QGroupBox):
 
         layout.addWidget(self.view_stack)
 
+        # 3. Action Buttons (Select All, Delete, etc.)
         self._create_action_buttons(layout)
 
+        # 4. Bottom Operation Buttons
         bottom_buttons_layout = QHBoxLayout()
         self.hardlink_button = QPushButton("Replace with Hardlink")
         self.reflink_button = QPushButton("Replace with Reflink")
         self.delete_button = QPushButton("Move to Trash")
 
-        # IDs for styling or testing
+        # IDs for styling
         self.hardlink_button.setObjectName("hardlink_button")
         self.reflink_button.setObjectName("reflink_button")
         self.delete_button.setObjectName("delete_button")
@@ -131,22 +148,28 @@ class ResultsPanel(QGroupBox):
         layout.addLayout(bottom_buttons_layout)
 
     def _setup_models(self):
-        self.results_model = ResultsTreeModel(self)
+        # Pass the DB service from the controller's container to the model
+        self.results_model = ResultsTreeModel(self.controller.services.db_service, self)
+
         self.proxy_model = ResultsProxyModel(self)
         self.proxy_model.setSourceModel(self.results_model)
+
         self.results_view.setModel(self.proxy_model)
         self.results_grid.setModel(self.proxy_model)
+
+        # Grid Delegate needs ThreadPool for async thumbnail loading
+        # QThreadPool.globalInstance() is used for UI rendering tasks
         self.grid_delegate = GroupGridDelegate(QThreadPool.globalInstance(), self)
         self.results_grid.setItemDelegate(self.grid_delegate)
 
     def _init_context_menu(self):
-        self.context_menu_path: Path | None = None
         (
             self.context_menu,
             self.open_action,
             self.show_action,
             self.delete_action,
         ) = create_file_context_menu(self)
+
         self.results_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.results_grid.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
@@ -181,15 +204,27 @@ class ResultsPanel(QGroupBox):
         mode_widget.setLayout(mode_btn_layout)
         top_controls_layout.addWidget(mode_widget)
 
+        # --- Grid Size Slider with Label ---
+        self.grid_size_container = QWidget()
+        self.grid_size_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+        grid_size_layout = QHBoxLayout(self.grid_size_container)
+        grid_size_layout.setContentsMargins(0, 0, 0, 0)
+        grid_size_layout.setSpacing(4)
+
+        self.grid_size_label = QLabel("Size:")
         self.grid_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.grid_size_slider.setRange(100, 350)
         self.grid_size_slider.setValue(130)
         self.grid_size_slider.setFixedWidth(80)
         self.grid_size_slider.setToolTip("Grid Card Size")
-        self.grid_size_slider.setVisible(False)
         self.grid_size_slider.valueChanged.connect(self._on_grid_size_changed)
 
-        top_controls_layout.addWidget(self.grid_size_slider)
+        grid_size_layout.addWidget(self.grid_size_label)
+        grid_size_layout.addWidget(self.grid_size_slider)
+
+        self.grid_size_container.setVisible(False)  # Hidden initially (List view default)
+        top_controls_layout.addWidget(self.grid_size_container)
 
         self.expand_button = QPushButton("Expand All")
         self.collapse_button = QPushButton("Collapse All")
@@ -202,6 +237,7 @@ class ResultsPanel(QGroupBox):
 
         layout.addLayout(top_controls_layout)
 
+        # Filter controls (Similarity Slider)
         filter_controls_layout = QHBoxLayout()
         self.similarity_filter_label = QLabel("Min Similarity:")
         self.similarity_filter_slider = QSlider(Qt.Orientation.Horizontal)
@@ -237,30 +273,39 @@ class ResultsPanel(QGroupBox):
         layout.addWidget(self.selection_group_box)
 
     def _connect_signals(self):
+        # View Switching
         self.btn_list_view.clicked.connect(lambda: self._set_results_view_mode(is_grid=False))
         self.btn_grid_view.clicked.connect(lambda: self._set_results_view_mode(is_grid=True))
+
+        # Grid Selection Sync
         self.results_grid.selectionModel().selectionChanged.connect(self._sync_grid_selection_to_tree)
         self.sort_combo.currentTextChanged.connect(self._on_sort_changed)
 
+        # Selection Helpers
         self.select_all_button.clicked.connect(lambda: self.results_model.set_all_checks(Qt.CheckState.Checked))
         self.deselect_all_button.clicked.connect(lambda: self.results_model.set_all_checks(Qt.CheckState.Unchecked))
         self.select_except_best_button.clicked.connect(self.results_model.select_all_except_best)
         self.invert_selection_button.clicked.connect(self.results_model.invert_selection)
 
+        # File Operations -> Controller
         self.delete_button.clicked.connect(self._request_deletion)
         self.hardlink_button.clicked.connect(self._request_hardlink)
         self.reflink_button.clicked.connect(self._request_reflink)
 
+        # Tree Expansions
         self.expand_button.clicked.connect(self.results_view.expandAll)
         self.collapse_button.clicked.connect(self.results_view.collapseAll)
 
+        # Filtering
         self.search_entry.textChanged.connect(self.search_timer.start)
         self.search_timer.timeout.connect(self._on_search_triggered)
         self.similarity_filter_slider.valueChanged.connect(self._on_similarity_filter_changed)
         self.similarity_filter_slider.sliderReleased.connect(self._emit_visible_results)
 
+        # Model Loading
         self.results_model.fetch_completed.connect(self._on_fetch_completed)
 
+        # Context Menus
         self.results_view.customContextMenuRequested.connect(self._show_context_menu_tree)
         self.results_grid.customContextMenuRequested.connect(self._show_context_menu_grid)
 
@@ -273,7 +318,7 @@ class ResultsPanel(QGroupBox):
         self.expand_button.setEnabled(not is_grid)
         self.collapse_button.setEnabled(not is_grid)
         self.selection_group_box.setEnabled(not is_grid)
-        self.grid_size_slider.setVisible(is_grid)
+        self.grid_size_container.setVisible(is_grid)
 
     @Slot(int)
     def _on_grid_size_changed(self, value: int):
@@ -287,7 +332,8 @@ class ResultsPanel(QGroupBox):
             return
         index = selected.indexes()[0]
         self.results_view.selectionModel().select(
-            index, QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows
+            index,
+            QItemSelectionModel.SelectionFlag.ClearAndSelect | QItemSelectionModel.SelectionFlag.Rows,
         )
         self.results_view.scrollTo(index)
 
@@ -295,12 +341,14 @@ class ResultsPanel(QGroupBox):
     def _update_summary(self):
         self.setTitle(f"Results {self.results_model.get_summary_text()}")
 
+    # --- Interaction Handlers ---
+
     def _open_path(self, path: Path | None):
         if path and path.exists():
             try:
                 webbrowser.open(path.resolve().as_uri())
             except Exception as e:
-                app_logger.error(f"Could not open path '{path}': {e}")
+                logger.error(f"Could not open path '{path}': {e}")
 
     @Slot(QPoint)
     def _show_context_menu_tree(self, pos):
@@ -323,6 +371,7 @@ class ResultsPanel(QGroupBox):
             self.context_menu_path = Path(node.path)
             self.context_menu.exec(QCursor.pos())
         elif isinstance(node, GroupNode):
+            # Special menu for groups
             group_menu = QMenu(self)
             del_action = QAction(f"Move Group to Trash ({node.count} files)", self)
             del_action.triggered.connect(lambda: self._context_delete_group(node))
@@ -333,14 +382,18 @@ class ResultsPanel(QGroupBox):
             group_menu.exec(QCursor.pos())
 
     def _context_delete_group(self, node: GroupNode):
+        """Prepares group deletion and delegates to controller."""
         msg = f"Move {node.count} files from group '{node.name}' to trash?"
         if QMessageBox.question(self, "Delete Group", msg) != QMessageBox.StandardButton.Yes:
             return
+
+        # Gather paths synchronously (might trigger fetch if not loaded, handle gracefully)
         paths = self.results_model.get_paths_for_group_sync(node.group_id)
         if not paths:
             QMessageBox.warning(self, "Error", "Could not find files for this group.")
             return
-        self.file_op_manager.request_deletion(paths)
+
+        self.controller.request_deletion(paths)
 
     @Slot()
     def _context_open_file(self):
@@ -354,10 +407,107 @@ class ResultsPanel(QGroupBox):
     def _context_delete_file(self):
         if (
             self.context_menu_path
-            and QMessageBox.question(self, "Confirm Move", f"Move '{self.context_menu_path.name}' to trash?")
+            and QMessageBox.question(
+                self,
+                "Confirm Move",
+                f"Move '{self.context_menu_path.name}' to trash?",
+            )
             == QMessageBox.StandardButton.Yes
         ):
-            self.file_op_manager.request_deletion([self.context_menu_path])
+            self.controller.request_deletion([self.context_menu_path])
+
+    # --- Button Actions -> Controller ---
+
+    def _request_deletion(self):
+        to_move = self.results_model.get_checked_paths()
+        if not to_move:
+            QMessageBox.warning(self, "No Selection", "No files selected to move.")
+            return
+
+        # UI Check: Calculate affected groups for confirmation message
+        affected_group_ids = {self.results_model.path_to_group_id.get(str(p)) for p in to_move}
+        affected_group_ids.discard(None)
+        group_str = "group" if len(affected_group_ids) == 1 else "groups"
+        msg = f"Move {len(to_move)} files from {len(affected_group_ids)} {group_str} to the system trash?"
+
+        if QMessageBox.question(self, "Confirm Move", msg) == QMessageBox.StandardButton.Yes:
+            self.controller.request_deletion(to_move)
+
+    def _request_hardlink(self):
+        to_link = self.results_model.get_checked_paths()
+        if not to_link:
+            QMessageBox.warning(self, "No Selection", "No duplicate files selected to replace.")
+            return
+
+        # Model Logic: Determine Target -> Source mapping based on "Best" file logic
+        link_map = self.results_model.get_link_map_for_paths(to_link)
+        if not link_map:
+            QMessageBox.information(
+                self,
+                "No Action",
+                "Selected files did not contain any duplicates to replace.",
+            )
+            return
+
+        msg = f"This will replace {len(link_map)} duplicate files with hardlinks.\n\n⚠️ Original data is shared. Editing one affects all."
+        if QMessageBox.question(self, "Confirm Hardlink", msg) == QMessageBox.StandardButton.Yes:
+            self.controller.request_linking(link_map, FileOperation.HARDLINKING)
+
+    @Slot()
+    def _request_reflink(self):
+        to_link = self.results_model.get_checked_paths()
+        if not to_link:
+            QMessageBox.warning(self, "No Selection", "No duplicate files selected.")
+            return
+
+        link_map = self.results_model.get_link_map_for_paths(to_link)
+        if not link_map:
+            QMessageBox.information(self, "No Action", "Selected files did not contain duplicates.")
+            return
+
+        msg = f"This will replace {len(link_map)} duplicate files with reflinks (CoW)."
+        if QMessageBox.question(self, "Confirm Reflink", msg) == QMessageBox.StandardButton.Yes:
+            self.controller.request_linking(link_map, FileOperation.REFLINKING)
+
+    # --- Updates from Controller/Model ---
+
+    def update_after_deletion(self, deleted_paths: list[Path]):
+        """
+        Called by MainWindow when Controller finishes a deletion/move.
+        Updates the internal tree model to reflect changes.
+        """
+        expanded = self._get_expanded_group_ids()
+        self.results_model.remove_deleted_paths(deleted_paths)
+
+        # Reset proxy to ensure filtering is re-applied correctly
+        self.proxy_model.sourceModel().beginResetModel()
+        self.proxy_model.sourceModel().endResetModel()
+
+        self._update_summary()
+        self._restore_expanded_group_ids(expanded)
+
+        if self.results_model.rowCount() == 0:
+            self.set_enabled_state(is_enabled=False)
+        self._emit_visible_results()
+
+    def set_operation_in_progress(self, operation: FileOperation):
+        """Updates UI text to show busy state."""
+        self.current_operation = operation
+        if operation == FileOperation.DELETING:
+            self.delete_button.setText("Deleting...")
+        elif operation == FileOperation.HARDLINKING:
+            self.hardlink_button.setText("Linking...")
+        elif operation == FileOperation.REFLINKING:
+            self.reflink_button.setText("Linking...")
+
+    def clear_operation_in_progress(self):
+        """Restores UI text after operation."""
+        self.current_operation = FileOperation.NONE
+        self.delete_button.setText("Move to Trash")
+        self.hardlink_button.setText("Replace with Hardlink")
+        self.reflink_button.setText("Replace with Reflink")
+
+    # --- View Logic Helpers ---
 
     @Slot(QModelIndex)
     def _on_fetch_completed(self, parent_index: QModelIndex):
@@ -371,6 +521,7 @@ class ResultsPanel(QGroupBox):
         visible_items = []
         if self.proxy_model.rowCount() > 0:
             group_proxy_index = self.proxy_model.index(0, 0)
+            # Flatten visible children for the viewer
             for row in range(self.proxy_model.rowCount(group_proxy_index)):
                 child_proxy_index = self.proxy_model.index(row, 0, group_proxy_index)
                 source_index = self.proxy_model.mapToSource(child_proxy_index)
@@ -382,29 +533,16 @@ class ResultsPanel(QGroupBox):
     def _on_similarity_filter_changed(self, value: int):
         self.similarity_filter_value_label.setText(f"{value}%")
         self.proxy_model.set_similarity_filter(value)
+
+        # Update title count
+        visible_count = 0
         if self.proxy_model.rowCount() > 0:
             group_index = self.proxy_model.index(0, 0)
-            visible_count = (
-                self.proxy_model.rowCount(group_index) if group_index.isValid() else self.proxy_model.rowCount()
-            )
+            if group_index.isValid():
+                visible_count = self.proxy_model.rowCount(group_index)
             self.setTitle(f"Results ({visible_count} items shown)")
         else:
             self.setTitle("Results")
-
-    def set_operation_in_progress(self, operation: FileOperation):
-        self.current_operation = operation
-        if operation == FileOperation.DELETING:
-            self.delete_button.setText("Deleting...")
-        elif operation == FileOperation.HARDLINKING:
-            self.hardlink_button.setText("Linking...")
-        elif operation == FileOperation.REFLINKING:
-            self.reflink_button.setText("Linking...")
-
-    def clear_operation_in_progress(self):
-        self.current_operation = FileOperation.NONE
-        self.delete_button.setText("Move to Trash")
-        self.hardlink_button.setText("Replace with Hardlink")
-        self.reflink_button.setText("Replace with Reflink")
 
     @Slot()
     def _on_search_triggered(self):
@@ -415,6 +553,7 @@ class ResultsPanel(QGroupBox):
         self._emit_visible_results()
 
     def set_enabled_state(self, is_enabled: bool):
+        """Enables/Disables controls based on app state (Scanning vs Idle)."""
         has_results = self.results_model.rowCount() > 0
         is_duplicate_mode = self.results_model.mode == ScanMode.DUPLICATES
         enable_general = is_enabled and has_results
@@ -488,73 +627,10 @@ class ResultsPanel(QGroupBox):
         self.set_enabled_state(num_found > 0)
         if is_search_mode and self.proxy_model.rowCount() > 0:
             self.results_view.expandAll()
+            # Sort by Score desc
             QTimer.singleShot(100, lambda: self.results_view.sortByColumn(1, Qt.SortOrder.DescendingOrder))
         else:
             self.visible_results_changed.emit([])
-
-    def _request_deletion(self):
-        to_move = self.results_model.get_checked_paths()
-        if not to_move:
-            QMessageBox.warning(self, "No Selection", "No files selected to move.")
-            return
-        affected_group_ids = {self.results_model.path_to_group_id.get(str(p)) for p in to_move}
-        affected_group_ids.discard(None)
-        group_str = "group" if len(affected_group_ids) == 1 else "groups"
-        msg = f"Move {len(to_move)} files from {len(affected_group_ids)} {group_str} to the system trash?"
-        if QMessageBox.question(self, "Confirm Move", msg) == QMessageBox.StandardButton.Yes:
-            self.file_op_manager.request_deletion(to_move)
-
-    def _request_hardlink(self):
-        to_link = self.results_model.get_checked_paths()
-        if not to_link:
-            QMessageBox.warning(self, "No Selection", "No duplicate files selected to replace.")
-            return
-        link_map = self.results_model.get_link_map_for_paths(to_link)
-        if not link_map:
-            QMessageBox.information(self, "No Action", "Selected files did not contain any duplicates to replace.")
-            return
-        msg = f"This will replace {len(link_map)} duplicate files with hardlinks.\n\n⚠️ Original data is shared. Editing one affects all."
-        if QMessageBox.question(self, "Confirm Hardlink", msg) == QMessageBox.StandardButton.Yes:
-            self.file_op_manager.request_hardlink(link_map)
-
-    @Slot()
-    def _request_reflink(self):
-        to_link = self.results_model.get_checked_paths()
-        if not to_link:
-            QMessageBox.warning(self, "No Selection", "No duplicate files selected.")
-            return
-        link_map = self.results_model.get_link_map_for_paths(to_link)
-        if not link_map:
-            QMessageBox.information(self, "No Action", "Selected files did not contain duplicates.")
-            return
-        msg = f"This will replace {len(link_map)} duplicate files with reflinks (CoW)."
-        if QMessageBox.question(self, "Confirm Reflink", msg) == QMessageBox.StandardButton.Yes:
-            self.file_op_manager.request_reflink(link_map)
-
-    def remove_items_from_results_db(self, paths_to_delete: list[Path]):
-        """
-        Safely removes deleted items from the database index using the global service.
-        """
-        if not paths_to_delete or not LANCEDB_AVAILABLE:
-            return
-
-        try:
-            # FIX: Use DB_SERVICE to remove paths thread-safely
-            paths_str = [str(p) for p in paths_to_delete]
-            DB_SERVICE.delete_paths(paths_str)
-        except Exception as e:
-            app_logger.error(f"Failed to remove items from DB via service: {e}")
-
-    def update_after_deletion(self, deleted_paths: list[Path]):
-        expanded = self._get_expanded_group_ids()
-        self.results_model.remove_deleted_paths(deleted_paths)
-        self.proxy_model.sourceModel().beginResetModel()
-        self.proxy_model.sourceModel().endResetModel()
-        self._update_summary()
-        self._restore_expanded_group_ids(expanded)
-        if self.results_model.rowCount() == 0:
-            self.set_enabled_state(is_enabled=False)
-        self._emit_visible_results()
 
     def _get_expanded_group_ids(self) -> set[int]:
         expanded_ids = set()

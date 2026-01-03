@@ -8,6 +8,7 @@ import io
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import send2trash
 from PIL import Image
@@ -17,7 +18,6 @@ from app.ai.optimizer import optimize_model_post_export
 from app.domain.data_models import FileOperation
 from app.imaging.image_io import get_image_metadata, load_image
 from app.infrastructure.cache import get_thumbnail_cache_key, thumbnail_cache
-from app.infrastructure.db_service import DB_SERVICE
 from app.shared.constants import (
     DEEP_LEARNING_AVAILABLE,
     LANCEDB_AVAILABLE,
@@ -27,6 +27,9 @@ from app.shared.constants import (
     TonemapMode,
 )
 from app.shared.utils import get_model_folder_name
+
+if TYPE_CHECKING:
+    from app.infrastructure.db_service import DatabaseService
 
 app_logger = logging.getLogger("PixelHand.ui.tasks")
 
@@ -374,17 +377,18 @@ class ImageLoader(QRunnable):
 class LanceDBGroupFetcherTask(QRunnable):
     """
     Fetches children items for a specific group ID from the database.
-    Uses the global Singleton DB_SERVICE to avoid connection conflicts.
+    Requires dependency injection of db_service.
     """
 
     class Signals(QObject):
         finished = Signal(list, int)
         error = Signal(str)
 
-    def __init__(self, group_id: int):
+    def __init__(self, group_id: int, db_service: "DatabaseService"):
         super().__init__()
         self.setAutoDelete(True)
         self.group_id = group_id
+        self.db_service = db_service
         self.signals = self.Signals()
 
     def run(self):
@@ -393,8 +397,8 @@ class LanceDBGroupFetcherTask(QRunnable):
             return
 
         try:
-            # Delegate db access to the thread-safe singleton
-            rows = DB_SERVICE.get_files_by_group(self.group_id)
+            # Delegate db access to the injected service
+            rows = self.db_service.get_files_by_group(self.group_id)
             self.signals.finished.emit(rows, self.group_id)
         except Exception as e:
             app_logger.error(f"Background group fetch failed: {e}", exc_info=True)

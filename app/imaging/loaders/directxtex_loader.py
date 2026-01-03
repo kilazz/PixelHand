@@ -50,14 +50,12 @@ class DirectXTexLoader(BaseLoader):
             if pil_image is None:
                 raise TypeError(f"Unhandled NumPy dtype from DirectXTex decoder: {dtype}")
 
-            # --- CRITICAL FIX: FORCE DATA COPY ---
             # Pillow might hold a reference to the numpy array, which holds a reference
             # to C++ memory that might get garbage collected.
             # Calling .load() forces Pillow to copy the data into its own memory buffer.
             pil_image.load()
             # Alternatively, creating a full copy explicitly:
             pil_image = pil_image.copy()
-            # -------------------------------------
 
             ignore_zero_alpha = shrink > 1
 

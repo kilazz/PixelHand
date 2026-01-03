@@ -1,8 +1,6 @@
 # app/domain/data_models.py
 """
-Contains all primary data structures (dataclasses) and enumerations used
-throughout the application. Centralizing these helps to ensure type
-consistency and avoids circular import dependencies.
+Data Models.
 """
 
 import json
@@ -108,9 +106,9 @@ class ImageFingerprint:
     color_space: str | None
 
     xxhash: str | None = field(default=None)
-    dhash: Any | None = field(default=None)
-    phash: Any | None = field(default=None)
-    whash: Any | None = field(default=None)
+    dhash: Any = field(default=None)
+    phash: Any = field(default=None)
+    whash: Any = field(default=None)
     channel: str | None = field(default=None)
 
     def __hash__(self) -> int:
@@ -128,8 +126,12 @@ class ImageFingerprint:
         # Ensure vector is a flat list for LanceDB
         vector_list = self.hashes.tolist() if isinstance(self.hashes, np.ndarray) else self.hashes
 
+        # Deterministic UUID generation
+        unique_str = str(self.path) + (final_channel or "")
+        unique_id = str(uuid.uuid5(uuid.NAMESPACE_URL, unique_str))
+
         data = {
-            "id": str(uuid.uuid5(uuid.NAMESPACE_URL, str(self.path) + (final_channel or ""))),
+            "id": unique_id,
             "vector": vector_list,
             "path": str(self.path),
             "resolution_w": int(self.resolution[0]),
@@ -178,15 +180,16 @@ class ImageFingerprint:
         return fp
 
 
-# Type Aliases
-DuplicateInfo = tuple[ImageFingerprint, int]
-DuplicateGroup = set[DuplicateInfo]
-DuplicateResults = dict[ImageFingerprint, Any]
-SearchResult = list[tuple[ImageFingerprint, float]]
+# Type Aliases for Strategy/Result processing
+DuplicateInfo = tuple[ImageFingerprint, int, str]
+DuplicateGroup = Any  # Complex set structure
+DuplicateResults = dict[ImageFingerprint, Any]  # Map BestFP -> Set of duplicates
 
 
 @dataclass(frozen=True, slots=True)
 class ResultNode:
+    """Represents a leaf node (file) in the UI TreeView."""
+
     path: str
     is_best: bool
     group_id: int
@@ -210,6 +213,7 @@ class ResultNode:
 
     @classmethod
     def from_dict(cls, data: dict) -> "ResultNode":
+        """Safe deserialization from dictionary."""
         class_fields = {f.name for f in fields(cls)}
         # Filter data to prevent TypeError when slots=True (no __dict__)
         filtered_data = {k: v for k, v in data.items() if k in class_fields}
@@ -229,6 +233,8 @@ class ResultNode:
 
 @dataclass(slots=True)
 class GroupNode:
+    """Represents a parent node (group of duplicates) in the UI TreeView."""
+
     name: str
     count: int
     total_size: int
@@ -238,80 +244,13 @@ class GroupNode:
     type: str = "group"
 
 
-# Configuration Dataclasses
-@dataclass
-class PerformanceConfig:
-    num_workers: int = 4
-    run_at_low_priority: bool = True
-    batch_size: int = 256
-
-
-@dataclass
-class ScanConfig:
-    # --- All fields WITHOUT a default value MUST come first ---
-    folder_path: Path
-    similarity_threshold: int
-    save_visuals: bool
-    max_visuals: int
-    excluded_folders: list[str]
-    model_name: str
-    model_dim: int
-    selected_extensions: list[str]
-    perf: PerformanceConfig
-    search_precision: str
-    scan_mode: ScanMode
-    device: str
-    use_ai: bool
-    find_exact_duplicates: bool
-    find_simple_duplicates: bool
-    dhash_threshold: int
-    find_perceptual_duplicates: bool
-    phash_threshold: int
-    find_structural_duplicates: bool
-    whash_threshold: int
-    compare_by_luminance: bool
-    compare_by_channel: bool
-    lancedb_in_memory: bool
-    visuals_columns: int
-    tonemap_visuals: bool
-    tonemap_view: str
-
-    # --- All fields WITH a default value MUST come after ---
-    ignore_solid_channels: bool = True
-
-    # Selected Channels (R, G, B, A)
-    active_channels: list[str] = field(default_factory=lambda: ["R", "G", "B", "A"])
-
-    channel_split_tags: list[str] = field(default_factory=list)
-    model_info: dict = field(default_factory=dict)
-    sample_path: Path | None = None
-    search_query: str | None = None
-
-    # Folder Compare / QC specific
-    comparison_folder_path: Path | None = None
-
-    # QC Flags
-    hide_same_resolution_groups: bool = False
-    qc_check_alpha: bool = False
-    qc_check_npot: bool = False
-    qc_check_mipmaps: bool = False
-    qc_check_size_bloat: bool = False
-    qc_check_solid_color: bool = False
-    qc_check_color_space: bool = False
-    qc_check_bit_depth: bool = False
-    match_by_stem: bool = False
-
-    # New QC Flags
-    qc_check_compression: bool = False
-    qc_check_block_align: bool = False
-
-    # Normal Map QC
-    qc_check_normal_maps: bool = False
-    qc_normal_maps_tags: list[str] = field(default_factory=list)
+# --- SETTINGS CLASSES (For JSON Persistence) ---
 
 
 @dataclass
 class HashingSettings:
+    """Settings related to image hashing and comparison logic."""
+
     use_ai: bool = True
     find_exact: bool = True
     find_simple: bool = True
@@ -356,6 +295,8 @@ class HashingSettings:
 
 @dataclass
 class PerformanceSettings:
+    """Settings related to application performance and hardware."""
+
     num_workers: str = "4"
     batch_size: str = "256"
     low_priority: bool = True
@@ -366,6 +307,8 @@ class PerformanceSettings:
 
 @dataclass
 class VisualsSettings:
+    """Settings for generating visualization reports."""
+
     save: bool = False
     max_count: str = "100"
     columns: int = 6
@@ -374,6 +317,8 @@ class VisualsSettings:
 
 @dataclass
 class ViewerSettings:
+    """Settings for the embedded image viewer."""
+
     preview_size: int = 250
     show_transparency: bool = True
     thumbnail_tonemap_enabled: bool = False
@@ -383,12 +328,17 @@ class ViewerSettings:
 
 @dataclass
 class AppSettings:
+    """
+    Root persistence class.
+    Stores the state of the UI controls to app_settings.json.
+    """
+
     folder_path: str = ""
     threshold: str = "95"
     exclude: str = ""
     model_key: str = "Fastest (OpenCLIP ViT-B/32)"
     selected_extensions: list[str] = field(default_factory=list)
-    lancedb_in_memory: bool = True
+    lancedb_in_memory: bool = True  # Deprecated but kept for compatibility
     theme: str = "Dark"
 
     hashing: HashingSettings = field(default_factory=HashingSettings)
@@ -398,6 +348,7 @@ class AppSettings:
 
     @classmethod
     def load(cls) -> "AppSettings":
+        """Loads settings from JSON file with fallback defaults."""
         if not CONFIG_FILE.exists():
             return cls(selected_extensions=list(ALL_SUPPORTED_EXTENSIONS), folder_path=str(ROOT_DIR))
         try:
@@ -446,8 +397,9 @@ class AppSettings:
             return cls(selected_extensions=list(ALL_SUPPORTED_EXTENSIONS), folder_path=str(ROOT_DIR))
 
     def save(self):
+        """Saves current settings to JSON file."""
         try:
-            # recursive dict conversion for nested dataclasses
+            # Recursive dict conversion for nested dataclasses
             data_to_save = {k: v.__dict__ if hasattr(v, "__dict__") else v for k, v in self.__dict__.items()}
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(data_to_save, f, indent=4)
@@ -456,6 +408,8 @@ class AppSettings:
 
 
 class ScanState:
+    """Thread-safe state tracker for scan progress."""
+
     def __init__(self):
         self.lock = threading.Lock()
         self.phase_name: str = ""

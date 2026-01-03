@@ -1,18 +1,18 @@
 # app/infrastructure/cache.py
 """
 Manages file and fingerprint caching to avoid reprocessing unchanged files.
+Also handles the Thumbnail Cache (LanceDB or Dummy).
 """
 
 import abc
 import hashlib
 import logging
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-# --- Polars integration ---
+# --- Optional Imports ---
 try:
     import polars as pl
 
@@ -20,13 +20,6 @@ try:
 except ImportError:
     pl = None
     POLARS_AVAILABLE = False
-
-# --- LanceDB integration ---
-if TYPE_CHECKING:
-    from lancedb.table import Table
-
-from app.domain.data_models import ImageFingerprint, ScanConfig
-from app.shared.constants import CACHE_DIR, LANCEDB_AVAILABLE
 
 try:
     import imagehash
@@ -36,12 +29,24 @@ except ImportError:
     imagehash = None
     IMAGEHASH_AVAILABLE = False
 
+if TYPE_CHECKING:
+    from lancedb.table import Table
 
-app_logger = logging.getLogger("PixelHand.cache")
+# --- Refactoring: Updated Imports ---
+from app.domain.config import ScanConfig  # Moved here
+from app.domain.data_models import ImageFingerprint
+from app.shared.constants import CACHE_DIR, LANCEDB_AVAILABLE
+
+logger = logging.getLogger("PixelHand.cache")
 
 
 class CacheManager:
-    """Manages a cache using the primary LanceDB Table for all metadata and vectors."""
+    """
+    Manages a cache using the primary LanceDB Table for all metadata and vectors.
+
+    Note: In the new architecture, strategies often interact with DB_SERVICE directly.
+    This class is kept for specific caching logic if needed by legacy components.
+    """
 
     def __init__(self, scanned_folder_path: Path, model_name: str, lancedb_table: Any):
         self.lancedb_table: Table = lancedb_table
@@ -50,13 +55,13 @@ class CacheManager:
         self.is_valid = LANCEDB_AVAILABLE and POLARS_AVAILABLE
 
         if not self.is_valid:
-            app_logger.error("LanceDB or Polars library not found; file caching will be disabled.")
+            logger.error("LanceDB or Polars library not found; file caching will be disabled.")
             return
 
     def get_cached_fingerprints(self, all_file_paths: list[Path]) -> tuple[list[Path], list[ImageFingerprint]]:
         """
         Retrieves cached fingerprints from LanceDB.
-        Now uses batching to query only relevant paths instead of loading the entire DB.
+        Uses batching to query only relevant paths.
         """
         if not self.is_valid or not all_file_paths:
             return all_file_paths, []
@@ -139,7 +144,10 @@ class CacheManager:
                         fp = ImageFingerprint(
                             path=Path(row_dict["path"]),
                             hashes=vector_data,
-                            resolution=(row_dict["resolution_w"], row_dict["resolution_h"]),
+                            resolution=(
+                                row_dict["resolution_w"],
+                                row_dict["resolution_h"],
+                            ),
                             file_size=row_dict["file_size"],
                             mtime=row_dict["mtime"],
                             capture_date=row_dict.get("capture_date"),
@@ -167,7 +175,7 @@ class CacheManager:
             return list(to_process_paths), cached_fps
 
         except Exception as e:
-            app_logger.warning(
+            logger.warning(
                 f"Failed to read from LanceDB cache: {e}. Rebuilding cache.",
                 exc_info=True,
             )
@@ -200,13 +208,15 @@ class CacheManager:
             self.lancedb_table.add(data=arrow_table)
 
         except Exception as e:
-            app_logger.error(f"LanceDB metadata/vector update failed: {e}", exc_info=True)
+            logger.error(f"LanceDB metadata/vector update failed: {e}", exc_info=True)
 
     def close(self):
         pass
 
 
-# --- Simplified Thumbnail Cache System ---
+# --- Thumbnail Cache System ---
+
+
 class AbstractThumbnailCache(abc.ABC):
     @abc.abstractmethod
     def get(self, key: str) -> bytes | None:
@@ -234,8 +244,11 @@ class LanceDBThumbnailCache(AbstractThumbnailCache):
             import pyarrow as pa
 
             db_path = CACHE_DIR / db_name
-            if in_memory and db_path.exists():
-                shutil.rmtree(db_path)
+
+            # Note: For now, we ignore in_memory request to ensure persistence
+            # and stability across large datasets.
+            # if in_memory and db_path.exists():
+            #     shutil.rmtree(db_path)
 
             db_path.mkdir(parents=True, exist_ok=True)
             self.db = lancedb.connect(str(db_path))
@@ -252,7 +265,7 @@ class LanceDBThumbnailCache(AbstractThumbnailCache):
                 self.table = self.db.create_table(db_name, schema=schema)
 
         except Exception as e:
-            app_logger.error(f"Failed to initialize thumbnail cache: {e}")
+            logger.error(f"Failed to initialize thumbnail cache: {e}")
 
     def get(self, key: str) -> bytes | None:
         if not self.table:
@@ -291,6 +304,7 @@ class DummyThumbnailCache(AbstractThumbnailCache):
         pass
 
 
+# Global thumbnail cache instance
 thumbnail_cache: AbstractThumbnailCache = DummyThumbnailCache()
 
 
@@ -310,10 +324,8 @@ def get_thumbnail_cache_key(
 def setup_caches(config: ScanConfig):
     global thumbnail_cache
     thumbnail_cache.close()
-    if LANCEDB_AVAILABLE:
-        thumbnail_cache = LanceDBThumbnailCache(in_memory=config.lancedb_in_memory)
-    else:
-        thumbnail_cache = DummyThumbnailCache()
+
+    thumbnail_cache = LanceDBThumbnailCache(in_memory=False) if LANCEDB_AVAILABLE else DummyThumbnailCache()
 
 
 def teardown_caches():
