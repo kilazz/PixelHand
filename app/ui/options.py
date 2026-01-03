@@ -254,6 +254,7 @@ class OptionsPanel(QGroupBox):
         self.sample_path_label.setStyleSheet("font-style: italic; color: #9E9E9E;")
         self.clear_sample_button = QPushButton("❌")
         self.clear_sample_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
+
         sample_layout = QHBoxLayout()
         sample_layout.setContentsMargins(0, 0, 0, 0)
         sample_layout.addWidget(self.sample_path_label)
@@ -306,8 +307,10 @@ class OptionsPanel(QGroupBox):
         self.browse_folder_button.clicked.connect(self._browse_for_folder)
         self.browse_folder_b_button.clicked.connect(self._browse_for_folder_b)
         self.browse_sample_button.clicked.connect(self._browse_for_sample)
+
+        # Connect clear sample directly to the robust logic
         self.clear_sample_button.clicked.connect(self._clear_sample)
-        self.clear_sample_button.clicked.connect(self._update_scan_context)
+
         self.search_entry.textChanged.connect(self._update_scan_context)
         self.folder_b_entry.textChanged.connect(self._update_scan_context)
         self.scan_button.clicked.connect(self.on_scan_button_clicked)
@@ -377,6 +380,7 @@ class OptionsPanel(QGroupBox):
             self.search_entry.setEnabled(True)
             self.browse_sample_button.setEnabled(True)
             self.clear_sample_button.setVisible(True)
+            self.clear_sample_button.setEnabled(True)  # Ensure it is re-enabled
             self.threshold_spinbox.setEnabled(True)
             self.qc_mode_toggled.emit(False)
         elif is_ai_on and has_text_query and supports_text:
@@ -406,8 +410,9 @@ class OptionsPanel(QGroupBox):
         else:
             self.search_entry.setPlaceholderText("Search disabled in QC mode")
 
-        if not (is_ai_on and supports_image) and not is_qc_mode_checked:
+        if not (is_ai_on and supports_image) and not is_qc_mode_checked and has_sample:
             self._clear_sample()
+
         is_ai_search = self.current_scan_mode in (ScanMode.TEXT_SEARCH, ScanMode.SAMPLE_SEARCH)
         label = self.form_layout.labelForField(self.threshold_spinbox)
         if label:
@@ -470,6 +475,8 @@ class OptionsPanel(QGroupBox):
     def _clear_sample(self):
         self._sample_path = None
         self.sample_path_label.setText("Sample: None")
+        self.search_entry.setEnabled(True)  # Ensure search entry is re-enabled if it was disabled
+        self._update_scan_context()
 
     def set_scan_button_state(self, is_scanning: bool):
         self.scan_button.setText("Cancel Scan" if is_scanning else getattr(self, "scan_button_text", "Scan"))
