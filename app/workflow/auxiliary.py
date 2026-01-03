@@ -14,7 +14,6 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from PySide6.QtCore import QObject, QRunnable, Signal
 
-# FIX: Import ScanConfig from app.domain.config, not data_models
 from app.domain.config import ScanConfig
 from app.domain.data_models import DuplicateResults, ImageFingerprint, ScanState
 from app.imaging.image_io import load_image
@@ -142,7 +141,9 @@ class VisualizationTask(QRunnable):
         VISUALS_DIR.mkdir(parents=True, exist_ok=True)
 
         THUMB, PADDING, TEXT_AREA, MAX_IMGS, IMGS_PER_FILE = 300, 25, 120, 200, 50
-        MAX_COLS = self.config.visuals_columns
+
+        # Access visuals_columns via the output sub-config
+        MAX_COLS = self.config.output.visuals_columns
 
         try:
             font = ImageFont.truetype("verdana.ttf", 14)
@@ -155,11 +156,15 @@ class VisualizationTask(QRunnable):
         sorted_groups = sorted(self.groups.items(), key=lambda item: len(item[1]), reverse=True)
         report_count = 0
 
-        total_groups_to_process = min(len(sorted_groups), self.config.max_visuals)
-        tonemap_mode = TonemapMode.ENABLED.value if self.config.tonemap_visuals else TonemapMode.NONE.value
+        # Access max_visuals via output sub-config
+        total_groups_to_process = min(len(sorted_groups), self.config.output.max_visuals)
+
+        # Access tonemap_visuals via output sub-config
+        tonemap_mode = TonemapMode.ENABLED.value if self.config.output.tonemap_visuals else TonemapMode.NONE.value
 
         for i, (orig_fp, dups) in enumerate(sorted_groups):
-            if report_count >= self.config.max_visuals or not dups:
+            # Check limit
+            if report_count >= self.config.output.max_visuals or not dups:
                 continue
 
             self.signals.progress.emit(f"Processing group {i + 1}...", i + 1, total_groups_to_process)
@@ -169,7 +174,8 @@ class VisualizationTask(QRunnable):
             to_visualize = all_fps[:MAX_IMGS]
 
             for page in range(math.ceil(len(to_visualize) / IMGS_PER_FILE)):
-                if report_count >= self.config.max_visuals:
+                # Check limit inside page loop
+                if report_count >= self.config.output.max_visuals:
                     break
                 page_fps = to_visualize[page * IMGS_PER_FILE : (page + 1) * IMGS_PER_FILE]
                 if not page_fps:
