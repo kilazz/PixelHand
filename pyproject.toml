@@ -13,37 +13,36 @@ authors = [{name = "kilazz"}]
 
 dependencies = [
     # Core Application & GUI
-    "PySide6>=6.10.1",
-    "send2trash>=2.0.0",
+    "PySide6>=6.10.2",
+    "send2trash>=2.1.0",
     # AI & Machine Learning
-    "torch>=2.9.1",
-	"transformers>=5.0.0rc1",
+    "torch>=2.10.0",
+	"transformers>=5.1.0",
+	"torchvision>=0.25.0",
+    "onnx>=1.20.1",
+    "onnxscript>=0.6.2",
     "sentencepiece>=0.2.1",
-    "huggingface_hub[hf_xet]>=1.2.3", #transformers
-    "onnx>=1.20.0",
-    "onnxscript>=0.6.0.dev20251231",
+    "huggingface_hub[hf_xet]>=1.4.1",
     # Data Handling and Vector DB
-    "pylance>=1.0.1",
-    "lancedb>=0.26.1",
-    "numpy>=2.3.5",
-    "numba>=0.63.1",
-    "pyarrow>=22.0.0",
-    "polars>=1.36.1",
+    "lancedb>=0.29.2",
+    "numpy>=2.4.2",
+    "pyarrow>=23.0.0",
+    "polars>=1.38.1",
     "xxhash>=3.6.0",
     "ImageHash>=4.3.2",
     # Image Processing
     "simple-ocio>=0.2.0",
-    "Pillow>=12.1.0",
-    "OpenImageIO>=3.1.9.0",
+    "Pillow>=12.1.1",
+    "OpenImageIO>=3.1.10.0",
     #"directxtex-decoder", #for DDS
 ]
 
 [project.optional-dependencies]
 # ONNX Runtime variants
-cpu      = ["onnxruntime>=1.23.2"]
-cuda     = ["onnxruntime-gpu>=1.23.2"]
-directml = ["onnxruntime-directml>=1.23.0"]
-webgpu   = ["onnxruntime-webgpu>=1.24.0.dev20251031004"]
+cpu      = ["onnxruntime>=1.24.1"]
+cuda     = ["onnxruntime-gpu>=1.24.1"]
+directml = ["onnxruntime-directml>=1.24.1"]
+webgpu   = ["onnxruntime-webgpu>=1.25.0.dev20260210001"]
 
 dev = [
     "ruff",

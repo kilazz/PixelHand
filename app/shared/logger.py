@@ -71,7 +71,6 @@ def setup_logging(ui_signals_emitter: QObject | None = None, force_debug: bool =
     # --- 3rd Party Library Noise Suppression ---
     logging.getLogger("pyvips").setLevel(logging.WARNING)
     logging.getLogger("PIL").setLevel(logging.WARNING)
-    logging.getLogger("numba").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("transformers").setLevel(logging.ERROR)
 

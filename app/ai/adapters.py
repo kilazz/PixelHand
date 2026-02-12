@@ -1,7 +1,7 @@
 # app/ai/adapters.py
 """
 Contains adapters to provide a unified interface for different model architectures
-(CLIP, SigLIP, DINOv2) specifically for the purpose of ONNX export.
+(CLIP, SigLIP, DINOv2) specifically for the purpose of ONNX export via TorchDynamo.
 """
 
 from abc import ABC, abstractmethod
@@ -70,7 +70,12 @@ class ClipAdapter(ModelAdapter):
                 self.model = model
 
             def forward(self, pixel_values):
-                return self.model.get_image_features(pixel_values=pixel_values)
+                # Explicitly unwrap tuple return from vision_model to ensure Dynamo traces
+                # the pooled output path, not the sequence output.
+                # vision_model returns (last_hidden_state, pooler_output, ...)
+                vision_outputs = self.model.vision_model(pixel_values=pixel_values)
+                pooled_output = vision_outputs[1]
+                return self.model.visual_projection(pooled_output)
 
         return VisionModelWrapper(model)
 
@@ -81,6 +86,8 @@ class ClipAdapter(ModelAdapter):
                 self.model = model
 
             def forward(self, input_ids, attention_mask):
+                # Similar explicit unwrap for text model if needed,
+                # though get_text_features usually behaves better.
                 return self.model.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
 
         return TextModelWrapper(model)
@@ -106,7 +113,9 @@ class SiglipAdapter(ModelAdapter):
                 self.model = model
 
             def forward(self, pixel_values):
-                return self.model.get_image_features(pixel_values=pixel_values)
+                # SigLIP returns (last_hidden_state, pooler_output)
+                # The pooler_output IS the embedding (already projected or attention-pooled).
+                return self.model.vision_model(pixel_values=pixel_values)[1]
 
         return VisionModelWrapper(model)
 
@@ -149,6 +158,7 @@ class DinoV2Adapter(ModelAdapter):
 
             def forward(self, pixel_values):
                 outputs = self.model(pixel_values)
+                # DINOv2 CLS token is at index 0 of the last hidden state
                 return outputs.last_hidden_state[:, 0]
 
         return DinoVisionModelWrapper(model)

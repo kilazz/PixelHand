@@ -115,6 +115,9 @@ class OIIOLoader(BaseLoader):
         try:
             buf = oiio.ImageBuf(str(path))
             if buf.has_error:
+                # Explicitly retrieve the error to prevent OIIO destructor from
+                # logging "An ImageBuf was destroyed with a pending error message" to stderr.
+                _ = buf.geterror()
                 return None
 
             spec = buf.spec()

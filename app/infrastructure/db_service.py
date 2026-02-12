@@ -147,9 +147,16 @@ class DatabaseService:
 
         with self._access_lock:
             try:
-                arrow_table = (
-                    pl.DataFrame(prepared_data).to_arrow() if POLARS_AVAILABLE else pa.Table.from_pylist(prepared_data)
-                )
+                # Use explicit schema if available to prevent type mismatch errors (List vs FixedSizeList).
+                # This bypasses the need for LanceDB to guess/cast the type from a generic list.
+                if self.table is not None:
+                    arrow_table = pa.Table.from_pylist(prepared_data, schema=self.table.schema)
+                else:
+                    arrow_table = (
+                        pl.DataFrame(prepared_data).to_arrow()
+                        if POLARS_AVAILABLE
+                        else pa.Table.from_pylist(prepared_data)
+                    )
 
                 self.table.add(data=arrow_table)
             except Exception as e:

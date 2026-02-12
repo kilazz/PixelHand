@@ -74,6 +74,7 @@ class PipelineManager(QObject):
             # so that worker functions can access the model efficiently.
             worker_config = {
                 "model_name": self.config.ai.model_name,
+                "model_dim": self.config.ai.model_dim,
                 "device": self.config.ai.device,
                 "threads_per_worker": self.config.perf.num_workers,
                 "models_dir": self.services.models_dir,
@@ -230,6 +231,10 @@ class PipelineManager(QObject):
             for (path_str, channel), vector in results_map.items():
                 unique_paths_processed.add(path_str)
 
+                # Safety Check: Skip invalid vectors (prevents DB crash)
+                if vector is None or len(vector) == 0:
+                    continue
+
                 # Convert vector to list for JSON/LanceDB compatibility
                 vector_list = vector.tolist() if isinstance(vector, np.ndarray) else vector
 
@@ -254,6 +259,7 @@ class PipelineManager(QObject):
             self.results_queue.task_done()
 
             # Periodic GC to prevent RAM creep
+            # Using the constant defined in constants.py (defaulting to a more aggressive 100 items)
             if processed_count % GC_COLLECT_INTERVAL_ITEMS == 0:
                 gc.collect()
 

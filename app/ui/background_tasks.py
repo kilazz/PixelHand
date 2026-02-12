@@ -3,6 +3,7 @@
 Contains QRunnable tasks for performing background operations without freezing the GUI.
 """
 
+import gc
 import inspect
 import io
 import logging
@@ -81,33 +82,42 @@ class ModelConverter(QRunnable):
                 self.signals.finished.emit(True, "Model already exists.")
                 return
 
-            self.signals.log.emit(f"Downloading model '{self.hf_model_name}'...", "info")
+            self.signals.log_message.emit(f"Downloading model '{self.hf_model_name}'...", "info")
 
             ProcessorClass = adapter.get_processor_class()
             ModelClass = adapter.get_model_class()
 
             processor = ProcessorClass.from_pretrained(self.hf_model_name)
             model = ModelClass.from_pretrained(self.hf_model_name)
+            model.eval()  # Ensure base model is in inference mode
 
             # Do NOT convert the whole model to half() here globally.
             # We will handle FP16 conversion specifically for the vision component
             # during the export phase to avoid LayerNorm errors in the text encoder.
             export_fp16 = self.quant_mode == QuantizationMode.FP16
 
-            use_dynamo = self.model_info.get("use_dynamo", False)
             visual_out_path = target_dir / "visual.onnx"
             text_out_path = target_dir / "text.onnx"
 
-            self.signals.log.emit("Exporting to ONNX...", "info")
+            self.signals.log.emit("Exporting to ONNX (Dynamo Backend)...", "info")
 
-            if use_dynamo:
-                self._export_with_dynamo(model, processor, target_dir, torch, Image, adapter, export_fp16)
-            else:
-                self._export_with_legacy(model, processor, target_dir, torch, Image, adapter, export_fp16)
+            # Perform export
+            self._export_model(model, processor, target_dir, torch, Image, adapter, export_fp16)
+
+            # AGGRESSIVE MEMORY CLEANUP
+            # PyTorch's trace graph is huge. We must free it immediately.
+            self.signals.log.emit("Cleaning up conversion memory...", "info")
+            del model
+            del processor
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
             if self.quant_mode == QuantizationMode.INT8:
                 self.signals.log.emit("Optimizing and Quantizing to INT8...", "info")
                 optimize_model_post_export(visual_out_path, text_out_path, self.quant_mode)
+                # Cleanup again after optimization tools run
+                gc.collect()
 
             self.signals.finished.emit(True, "Model prepared successfully.")
 
@@ -121,6 +131,8 @@ class ModelConverter(QRunnable):
                     del os.environ["HF_HUB_DISABLE_PROGRESS_BARS"]
             else:
                 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = original_progress_bar_setting
+            # Final safety GC
+            gc.collect()
 
     def _setup_directories(self, models_dir: Path, adapter) -> Path:
         target_dir_name = get_model_folder_name(self.onnx_name_base, self.quant_mode)
@@ -131,44 +143,31 @@ class ModelConverter(QRunnable):
         processor.save_pretrained(target_dir)
         return target_dir
 
-    def _export_with_dynamo(self, model, processor, target_dir, torch, Image, adapter, is_fp16):
+    def _export_model(self, model, processor, target_dir, torch, Image, adapter, is_fp16):
+        """
+        Exports the model using TorchDynamo (dynamo=True).
+        This captures the full graph (including pooling/projection) accurately.
+        """
+        # Suppress Dynamo verbosity/errors that don't block export
         import torch._dynamo
+        torch._dynamo.config.suppress_errors = True
         from torch.export import Dim
 
-        torch._dynamo.config.suppress_errors = True
+        # Opset 18 is required for better compatibility with Dynamo optimizations (avoids InlinePass errors)
         opset_version = 18
 
+        # --- 1. Export Vision Model ---
         vision_wrapper = adapter.get_vision_wrapper(model, torch)
+        vision_wrapper.eval() # Ensure wrapper is in eval mode
+
         input_size = adapter.get_input_size(processor)
-        dummy_input = processor(images=Image.new("RGB", input_size), return_tensors="pt")
-        pixel_values = dummy_input["pixel_values"].repeat(2, 1, 1, 1)
 
-        # Apply FP16 only if requested
-        if is_fp16:
-            vision_wrapper.half()
-            pixel_values = pixel_values.half()
-        else:
-            vision_wrapper.float()
-            pixel_values = pixel_values.float()
+        # Use batch size > 1 to help Dynamo identify the batch dimension as dynamic
+        dummy_input = processor(images=[Image.new("RGB", input_size), Image.new("RGB", input_size)], return_tensors="pt")
 
-        torch.onnx.export(
-            vision_wrapper,
-            (pixel_values,),
-            str(target_dir / "visual.onnx"),
-            input_names=["pixel_values"],
-            output_names=["image_embeds"],
-            dynamic_shapes={"pixel_values": {0: Dim("batch_size", min=1)}},
-            opset_version=opset_version,
-        )
-
-    def _export_with_legacy(self, model, processor, target_dir, torch, Image, adapter, is_fp16):
-        opset_version = 18
-        vision_wrapper = adapter.get_vision_wrapper(model, torch)
-        input_size = adapter.get_input_size(processor)
-        dummy_input = processor(images=Image.new("RGB", input_size), return_tensors="pt")
+        # Use simple batch for tracing input
         pixel_values = dummy_input["pixel_values"]
 
-        # Apply FP16 ONLY to the Vision Model
         if is_fp16:
             self.signals.log.emit("Converting Vision component to FP16...", "info")
             vision_wrapper.half()
@@ -177,47 +176,65 @@ class ModelConverter(QRunnable):
             vision_wrapper.float()
             pixel_values = pixel_values.float()
 
+        # Use dynamic_shapes instead of dynamic_axes for Dynamo
+        batch_dim = Dim("batch_size", min=1)
+        dynamic_shapes = {"pixel_values": {0: batch_dim}}
+
         torch.onnx.export(
             vision_wrapper,
-            pixel_values,
+            (pixel_values,),
             str(target_dir / "visual.onnx"),
             input_names=["pixel_values"],
             output_names=["image_embeds"],
-            dynamic_axes={"pixel_values": {0: "batch_size"}, "image_embeds": {0: "batch_size"}},
+            dynamic_shapes=dynamic_shapes,
             opset_version=opset_version,
-            dynamo=False,
+            dynamo=True,  # Force Dynamo backend
         )
 
+        # Free vision wrapper immediately
+        del vision_wrapper
+        del pixel_values
+        del dummy_input
+        gc.collect()
+
+        # --- 2. Export Text Model (if applicable) ---
         if adapter.has_text_model():
             self.signals.log.emit("Exporting Text component (FP32)...", "info")
             text_wrapper = adapter.get_text_wrapper(model, torch)
+            text_wrapper.eval() # Ensure wrapper is in eval mode
 
-            # Ensure Text Model is FP32.
-            # This fixes the LayerNorm type mismatch error in ONNX Runtime
-            # and doesn't significantly impact memory since the text encoder is small.
+            # Keep Text Model FP32 for stability with LayerNorms
             text_wrapper.float()
 
+            # Create text dummy input with batch > 1
             dummy_text_input = processor.tokenizer(
-                text=["a test query"],
+                text=["a test query", "another query"],
                 return_tensors="pt",
                 padding="max_length",
                 truncation=True,
                 max_length=processor.tokenizer.model_max_length,
                 return_attention_mask=True,
             )
+
+            # Prepare inputs based on signature (some models might not use attention_mask in wrapper)
             sig = inspect.signature(text_wrapper.forward)
+
+            # Define dims for text
+            seq_dim = Dim("sequence", min=1)
+
             if "attention_mask" in sig.parameters:
                 onnx_inputs = (dummy_text_input["input_ids"], dummy_text_input["attention_mask"])
                 input_names = ["input_ids", "attention_mask"]
-                dynamic_axes = {
-                    "input_ids": {0: "batch_size", 1: "sequence"},
-                    "attention_mask": {0: "batch_size", 1: "sequence"},
-                    "text_embeds": {0: "batch_size"},
+                text_dynamic_shapes = {
+                    "input_ids": {0: batch_dim, 1: seq_dim},
+                    "attention_mask": {0: batch_dim, 1: seq_dim}
                 }
             else:
-                onnx_inputs = dummy_text_input["input_ids"]
+                onnx_inputs = (dummy_text_input["input_ids"],)
                 input_names = ["input_ids"]
-                dynamic_axes = {"input_ids": {0: "batch_size", 1: "sequence"}, "text_embeds": {0: "batch_size"}}
+                text_dynamic_shapes = {
+                    "input_ids": {0: batch_dim, 1: seq_dim}
+                }
 
             torch.onnx.export(
                 text_wrapper,
@@ -225,10 +242,15 @@ class ModelConverter(QRunnable):
                 str(target_dir / "text.onnx"),
                 input_names=input_names,
                 output_names=["text_embeds"],
-                dynamic_axes=dynamic_axes,
+                dynamic_shapes=text_dynamic_shapes,
                 opset_version=opset_version,
-                dynamo=False,
+                dynamo=True,  # Force Dynamo backend
             )
+
+            # Free text wrapper
+            del text_wrapper
+            del dummy_text_input
+            gc.collect()
 
 
 class ImageLoader(QRunnable):

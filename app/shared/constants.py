@@ -93,17 +93,19 @@ MAX_PIXEL_DIMENSION = 32767
 
 # --- Tuning & Optimization Constants (New) ---
 # Limits the number of concurrent heavy image decodes to prevent OOM errors on large textures (8K+)
-MAX_CONCURRENT_IMAGE_LOADS = 4
+# REDUCED: Was 4, now 2 to save RAM on high-res textures.
+MAX_CONCURRENT_IMAGE_LOADS = 2
 
 # Number of items to accumulate before writing to the database/cache
-# Higher = less disk I/O but more RAM usage.
-DB_WRITE_BATCH_SIZE = 512
+# REDUCED: Was 512, now 128 to ensure RAM is flushed to disk more often.
+DB_WRITE_BATCH_SIZE = 128
 
 # Delay in milliseconds before triggering a search in UI list views
 SEARCH_DEBOUNCE_MS = 300
 
 # Number of processed items in the pipeline after which Python's GC is manually triggered
-GC_COLLECT_INTERVAL_ITEMS = 500
+# REDUCED: Was 500, now 100 for aggressive memory management.
+GC_COLLECT_INTERVAL_ITEMS = 100
 
 # --- Supported File Formats ---
 _main_supported_ext = [
@@ -146,7 +148,6 @@ def _get_default_models() -> dict:
             "dim": 512,
             "supports_text_search": True,
             "supports_image_search": True,
-            "use_dynamo": False,
         },
         "Compact (SigLIP-B)": {
             "hf_name": "google/siglip-base-patch16-384",
@@ -155,7 +156,6 @@ def _get_default_models() -> dict:
             "dim": 768,
             "supports_text_search": True,
             "supports_image_search": True,
-            "use_dynamo": False,
         },
         "Balanced (OpenCLIP-ViT-L/14)": {
             "hf_name": "laion/CLIP-ViT-L-14-laion2B-s32B-b82K",
@@ -164,7 +164,6 @@ def _get_default_models() -> dict:
             "dim": 768,
             "supports_text_search": True,
             "supports_image_search": True,
-            "use_dynamo": False,
         },
         "High Quality (SigLIP-L)": {
             "hf_name": "google/siglip-large-patch16-384",
@@ -173,7 +172,6 @@ def _get_default_models() -> dict:
             "dim": 1024,
             "supports_text_search": True,
             "supports_image_search": True,
-            "use_dynamo": False,
         },
         "Visual Structure (DINOv2-B)": {
             "hf_name": "facebook/dinov2-base",
@@ -182,7 +180,6 @@ def _get_default_models() -> dict:
             "dim": 768,
             "supports_text_search": False,
             "supports_image_search": True,
-            "use_dynamo": False,
         },
     }
 
