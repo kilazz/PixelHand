@@ -108,33 +108,11 @@ SEARCH_DEBOUNCE_MS = 300
 GC_COLLECT_INTERVAL_ITEMS = 100
 
 # --- Supported File Formats ---
-_main_supported_ext = [
-    ".avif",
-    ".bmp",
-    ".cin",
-    ".cur",
-    ".dds",
-    ".dpx",
-    ".exr",
-    ".gif",
-    ".hdr",
-    ".heic",
-    ".heif",
-    ".ico",
-    ".j2k",
-    ".jp2",
-    ".jpeg",
-    ".jpg",
-    ".jxl",
-    ".png",
-    ".psd",
-    ".tga",
-    ".tif",
-    ".tiff",
-    ".webp",
-]
-_all_ext = list(_main_supported_ext)
-ALL_SUPPORTED_EXTENSIONS = sorted(set(_all_ext))
+ALL_SUPPORTED_EXTENSIONS = sorted([
+    ".avif", ".bmp", ".cin", ".cur", ".dds", ".dpx", ".exr", ".gif",
+    ".hdr", ".heic", ".heif", ".ico", ".j2k", ".jp2", ".jpeg", ".jpg",
+    ".jxl", ".png", ".psd", ".tga", ".tif", ".tiff", ".webp",
+])
 
 
 # --- AI Models Configuration ---
