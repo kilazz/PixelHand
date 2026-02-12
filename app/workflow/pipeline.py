@@ -7,7 +7,7 @@ import gc
 import logging
 import queue
 import threading
-from concurrent.futures import wait
+from concurrent.futures import as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -86,9 +86,10 @@ class PipelineManager(QObject):
             # 2. Start Background Threads
 
             # Producer: Reads images, creates tensors (Heavy CPU/IO)
+            # Passes worker_config to ensure processes can init themselves
             monitor_thread = threading.Thread(
                 target=self._producer_preprocessing,
-                args=(items_to_process,),
+                args=(items_to_process, worker_config),
                 daemon=True,
                 name="ProducerThread",
             )
@@ -114,10 +115,10 @@ class PipelineManager(QObject):
             logger.critical(f"Pipeline failed: {e}", exc_info=True)
             return False, [str(item.path) for item in items_to_process]
 
-    def _producer_preprocessing(self, items):
+    def _producer_preprocessing(self, items, worker_config):
         """
         [Thread 1] Iterates over items, submits preprocessing tasks to the
-        unified TaskManager, and pushes results to tensor_queue.
+        unified TaskManager (ProcessPool), collects results, and pushes to tensor_queue.
         """
         # Get input size from the loaded model
         input_size = ai_manager.get_model_input_size()
@@ -127,7 +128,19 @@ class PipelineManager(QObject):
         is_fp16 = FP16_MODEL_SUFFIX in self.config.ai.model_name.lower()
         dtype = np.float16 if is_fp16 else np.float32
 
-        simple_config = {"ignore_solid_channels": self.config.hashing.ignore_solid_channels}
+        # Combine solid channel preference with init config for the worker
+        # This ensures workers spawned in new processes can initialize globals
+        process_config = {
+            "ignore_solid_channels": self.config.hashing.ignore_solid_channels,
+            "init_config": {
+                "model_name": worker_config["model_name"],
+                "model_dim": worker_config["model_dim"],
+                "device": worker_config["device"],
+                "threads_per_worker": 1,  # Force single thread inside the worker process
+                "models_dir": str(worker_config["models_dir"]),  # Convert to string for pickling
+            },
+        }
+
         futures = []
 
         try:
@@ -137,25 +150,30 @@ class PipelineManager(QObject):
 
                 batch = items[i : i + batch_size]
 
-                # Submit task to the unified CPU pool.
-                # The worker will put the result into output_queue (self.tensor_queue).
+                # Submit task to the unified CPU pool (ProcessPoolExecutor).
+                # Returns a Future object.
                 future = self.services.task_manager.submit_cpu_bound(
-                    ai_manager.worker_preprocess_threaded,
+                    ai_manager.worker_preprocess_task,
                     items=batch,
                     input_size=input_size,
                     dtype=dtype,
-                    simple_config=simple_config,
-                    output_queue=self.tensor_queue,
+                    simple_config=process_config,
                 )
                 futures.append(future)
 
+            # Wait for results and push them to the queue as they complete
+            for future in as_completed(futures):
+                if self.stop_event.is_set():
+                    break
+                try:
+                    result = future.result()
+                    if result:
+                        self.tensor_queue.put(result)
+                except Exception as e:
+                    logger.error(f"Preprocessing task failed: {e}")
+
         except Exception as e:
             logger.error(f"Producer thread crashed: {e}")
-
-        # Wait for all preprocessing tasks to finish filling the queue
-        # before sending the termination signal.
-        if futures:
-            wait(futures)
 
         # Signal End of Stream
         self.tensor_queue.put(None)

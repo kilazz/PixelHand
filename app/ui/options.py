@@ -7,7 +7,7 @@ from pathlib import Path
 
 import onnxruntime
 from PySide6.QtCore import QPoint, Qt, Signal, Slot
-from PySide6.QtGui import QAction, QActionGroup, QIntValidator
+from PySide6.QtGui import QAction, QActionGroup, QDragEnterEvent, QDropEvent, QIntValidator
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -42,6 +42,48 @@ from app.shared.constants import (
 from app.ui.dialogs import FileTypesDialog
 
 app_logger = logging.getLogger("PixelHand.ui.options")
+
+
+class DragDropLineEdit(QLineEdit):
+    """A QLineEdit that accepts file/folder drops."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path:
+                self.setText(path)
+                event.acceptProposedAction()
+
+
+class DragDropLabel(QLabel):
+    """A QLabel that accepts image file drops for sample search."""
+
+    file_dropped = Signal(str)
+
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path:
+                self.file_dropped.emit(path)
+                event.acceptProposedAction()
 
 
 class QCPanel(QGroupBox):
@@ -216,7 +258,8 @@ class OptionsPanel(QGroupBox):
         self._create_action_buttons(main_layout)
 
     def _create_path_widgets(self):
-        self.folder_path_entry = QLineEdit()
+        # Use custom DragDropLineEdit for folder paths
+        self.folder_path_entry = DragDropLineEdit()
         self.browse_folder_button = QPushButton("...")
         self.browse_folder_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
         folder_layout = QHBoxLayout()
@@ -225,7 +268,7 @@ class OptionsPanel(QGroupBox):
         folder_layout.addWidget(self.browse_folder_button)
         self.form_layout.addRow("Folder A:", folder_layout)
 
-        self.folder_b_entry = QLineEdit()
+        self.folder_b_entry = DragDropLineEdit()
         self.folder_b_entry.setPlaceholderText("Select second folder to compare resolutions...")
         self.browse_folder_b_button = QPushButton("...")
         self.browse_folder_b_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
@@ -250,8 +293,11 @@ class OptionsPanel(QGroupBox):
         search_layout.addWidget(self.search_entry)
         search_layout.addWidget(self.browse_sample_button)
         self.form_layout.addRow("Find:", search_layout)
-        self.sample_path_label = QLabel("Sample: None")
+
+        # Use DragDropLabel for the sample image area
+        self.sample_path_label = DragDropLabel("Sample: None")
         self.sample_path_label.setStyleSheet("font-style: italic; color: #9E9E9E;")
+
         self.clear_sample_button = QPushButton("❌")
         self.clear_sample_button.setFixedWidth(UIConfig.Sizes.BROWSE_BUTTON_WIDTH)
 
@@ -307,6 +353,9 @@ class OptionsPanel(QGroupBox):
         self.browse_folder_button.clicked.connect(self._browse_for_folder)
         self.browse_folder_b_button.clicked.connect(self._browse_for_folder_b)
         self.browse_sample_button.clicked.connect(self._browse_for_sample)
+
+        # Handle drop on sample label
+        self.sample_path_label.file_dropped.connect(self._on_sample_dropped)
 
         # Connect clear sample directly to the robust logic
         self.clear_sample_button.clicked.connect(self._clear_sample)
@@ -465,11 +514,18 @@ class OptionsPanel(QGroupBox):
                 options=QFileDialog.Option.DontUseNativeDialog,
             )
         if path_str:
-            self._sample_path = Path(path_str)
-            self.search_entry.clear()
-            self.folder_b_entry.clear()
-            self.sample_path_label.setText(f"Sample: {self._sample_path.name}")
-            self._update_scan_context()
+            self._set_sample(path_str)
+
+    @Slot(str)
+    def _on_sample_dropped(self, path: str):
+        self._set_sample(path)
+
+    def _set_sample(self, path_str: str):
+        self._sample_path = Path(path_str)
+        self.search_entry.clear()
+        self.folder_b_entry.clear()
+        self.sample_path_label.setText(f"Sample: {self._sample_path.name}")
+        self._update_scan_context()
 
     @Slot()
     def _clear_sample(self):

@@ -32,6 +32,7 @@ from app.shared.constants import (
     METHOD_DISPLAY_NAMES,
     UIConfig,
 )
+from app.shared.utils import format_result_metadata
 from app.ui.background_tasks import ImageLoader, LanceDBGroupFetcherTask
 
 if TYPE_CHECKING:
@@ -42,31 +43,6 @@ app_logger = logging.getLogger("PixelHand.ui.models")
 # Custom roles
 SortRole = Qt.ItemDataRole.UserRole + 1
 VfxRole = Qt.ItemDataRole.UserRole + 2
-
-
-def _format_metadata_string(node: ResultNode) -> str:
-    """Helper to create the detailed metadata string."""
-    if node.path == "loading_dummy":
-        return ""
-
-    res = f"{node.resolution_w}x{node.resolution_h}"
-    size_mb = (node.file_size or 0) / (1024**2)
-    size_str = f"{size_mb:.2f} MB"
-    bit_depth_str = f"{node.bit_depth}-bit"
-
-    parts = [
-        res,
-        size_str,
-        node.format_str,
-        node.compression_format,
-        node.color_space,
-        bit_depth_str,
-        node.format_details,
-        node.texture_type,
-        f"Mips: {node.mipmap_count}",
-    ]
-
-    return " • ".join(filter(None, parts))
 
 
 # --- NEW TASK CLASS ---
@@ -470,7 +446,7 @@ class ResultsTreeModel(QAbstractItemModel):
         elif col == 2:
             return str(path.parent)
         elif col == 3:
-            return _format_metadata_string(node)
+            return format_result_metadata(node)
         return ""
 
     def setData(self, index, value, role):

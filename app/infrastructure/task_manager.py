@@ -5,7 +5,7 @@ Unified Task Manager for concurrency handling.
 
 import logging
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
@@ -66,10 +66,12 @@ class TaskManager:
             # Reserve one thread for the main GUI loop interactions if needed
             self._qt_pool.setMaxThreadCount(max(2, max_workers + 2))
 
-        # 2. Standard Thread Pool (For CPU-bound tasks needing Futures/wait())
-        # We keep this even in GUI mode because QThreadPool doesn't return Futures,
-        # which makes it hard to use in logic that needs `as_completed()`.
-        self._std_pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="PixelHand_Worker")
+        # 2. Standard Thread Pool (For I/O-bound tasks needing Futures)
+        self._std_pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="PixelHand_IO")
+
+        # 3. Process Pool (For CPU-bound tasks to bypass GIL)
+        # Used for image preprocessing/hashing
+        self._cpu_pool = ProcessPoolExecutor(max_workers=max_workers)
 
         logger.info(f"TaskManager initialized (Headless: {headless}, Workers: {max_workers})")
 
@@ -120,19 +122,20 @@ class TaskManager:
 
     def submit_cpu_bound(self, func: Callable, *args, **kwargs) -> Future:
         """
-        Submits a task and returns a Future object.
-        Used for heavy calculations where the caller needs to wait() or use as_completed().
+        Submits a task to the ProcessPoolExecutor and returns a Future.
+        Used for heavy calculations (Preprocessing, Hashing) to bypass the GIL.
         """
-        return self._std_pool.submit(func, *args, **kwargs)
+        return self._cpu_pool.submit(func, *args, **kwargs)
 
     def shutdown(self):
         """
-        Cleanly shuts down all thread pools.
+        Cleanly shuts down all thread/process pools.
         """
         logger.info("Stopping TaskManager...")
 
         # Shutdown standard pool
         self._std_pool.shutdown(wait=True)
+        self._cpu_pool.shutdown(wait=True)
 
         # QThreadPool (Global Instance) usually cleans itself up,
         # but we can wait if we want to ensure tasks finish.

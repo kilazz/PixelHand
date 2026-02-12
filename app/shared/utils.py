@@ -8,11 +8,9 @@ import errno
 import logging
 import os
 import shutil
-import threading
 import uuid
-from collections import OrderedDict
-from functools import wraps
 from pathlib import Path
+from typing import Any
 
 from app.shared.constants import (
     APP_DATA_DIR,
@@ -63,38 +61,37 @@ class UnionFind:
         return groups
 
 
-class SizeLimitedLRUCache:
-    """A thread-safe, size-limited LRU cache for function results based on memory footprint."""
+def format_result_metadata(node: Any) -> str:
+    """
+    Helper to create the detailed metadata string from a ResultNode-like object.
+    Used in UI Delegates and Models.
+    """
+    if getattr(node, "path", "") == "loading_dummy":
+        return ""
 
-    def __init__(self, max_size_mb: int):
-        self.max_size = max_size_mb * 1024 * 1024
-        self.current_size = 0
-        self.cache = OrderedDict()
-        self.lock = threading.Lock()
+    res_w = getattr(node, "resolution_w", 0)
+    res_h = getattr(node, "resolution_h", 0)
+    res = f"{res_w}x{res_h}"
 
-    def __call__(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            key = str(args) + str(kwargs)
-            with self.lock:
-                if key in self.cache:
-                    self.cache.move_to_end(key)
-                    return self.cache[key][0]
+    size_mb = (getattr(node, "file_size", 0) or 0) / (1024**2)
+    size_str = f"{size_mb:.2f} MB"
 
-            result = func(*args, **kwargs)
+    bit_depth = getattr(node, "bit_depth", 0)
+    bit_depth_str = f"{bit_depth}-bit" if bit_depth else ""
 
-            if result and hasattr(result, "width") and hasattr(result, "height"):
-                item_size = result.width * result.height * len(result.getbands())
-                with self.lock:
-                    while self.current_size + item_size > self.max_size and self.cache:
-                        _, (_, evicted_size) = self.cache.popitem(last=False)
-                        self.current_size -= evicted_size
-                    if self.current_size + item_size <= self.max_size:
-                        self.cache[key] = (result, item_size)
-                        self.current_size += item_size
-            return result
+    parts = [
+        res,
+        size_str,
+        getattr(node, "format_str", ""),
+        getattr(node, "compression_format", ""),
+        getattr(node, "color_space", ""),
+        bit_depth_str,
+        getattr(node, "format_details", ""),
+        getattr(node, "texture_type", ""),
+        f"Mips: {getattr(node, 'mipmap_count', 0)}",
+    ]
 
-        return wrapper
+    return " • ".join(filter(None, parts))
 
 
 def find_best_in_group(group: list) -> any:

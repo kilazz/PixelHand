@@ -288,16 +288,25 @@ def get_model_input_size() -> tuple[int, int]:
     return (224, 224)
 
 
-def worker_preprocess_threaded(
-    items: list["AnalysisItem"], input_size: tuple[int, int], dtype: np.dtype, simple_config: dict, output_queue: Any
+def worker_preprocess_task(
+    items: list["AnalysisItem"], input_size: tuple[int, int], dtype: np.dtype, simple_config: dict
 ):
     """
-    Worker task: loads images via Preprocessor, creates numpy tensors, puts into queue.
+    Worker task: loads images via Preprocessor, creates numpy tensors.
+    Returns (pixel_values, success_paths, skipped_items).
+    This function is picklable and suitable for ProcessPoolExecutor.
     """
     global _WORKER_PREPROCESSOR
+
+    # Self-initialization for multiprocessing workers
+    if not _WORKER_PREPROCESSOR and "init_config" in simple_config:
+        try:
+            init_worker(simple_config["init_config"])
+        except Exception as e:
+            return None, [], [(str(i.path), f"Worker Init Failed: {e}") for i in items]
+
     if not _WORKER_PREPROCESSOR:
-        output_queue.put((None, [], [(str(i.path), "Model not initialized in worker") for i in items]))
-        return
+        return None, [], [(str(i.path), "Model not initialized in worker") for i in items]
 
     # Use extracted preprocessing logic
     images, success_paths, skipped = ImageBatchPreprocessor.prepare_batch(
@@ -305,26 +314,28 @@ def worker_preprocess_threaded(
     )
 
     if not images:
-        output_queue.put((None, [], skipped))
-        return
+        return None, [], skipped
 
     try:
         # Request PyTorch tensors first ("pt"), then convert to NumPy.
-        # This avoids the "Only returning PyTorch tensors is currently supported" error
-        # present in some Transformers versions when "np" is requested directly.
         batch_dict = _WORKER_PREPROCESSOR(images=images, return_tensors="pt")
 
-        # Detach from graph (if any), move to CPU, convert to numpy, then cast to target dtype (FP32/FP16)
+        # Detach from graph (if any), move to CPU, convert to numpy, then cast to target dtype
         pixel_values = batch_dict.pixel_values.detach().cpu().numpy().astype(dtype)
 
         # Cleanup PIL images to free RAM
         del images
         gc.collect()
 
-        output_queue.put((pixel_values, success_paths, skipped))
+        return pixel_values, success_paths, skipped
     except Exception as e:
         _log_worker_crash(e, "worker_preprocess")
-        output_queue.put((None, [], [(str(i.path), f"Preproc: {e}") for i in items]))
+        return None, [], [(str(i.path), f"Preproc: {e}") for i in items]
+
+
+# Kept for backward compatibility if any non-MP code calls it, though unused in new pipeline
+def _read_and_process_batch_for_ai(items, input_size, config):
+    return ImageBatchPreprocessor.prepare_batch(items, input_size)
 
 
 def run_inference_direct(pixel_values: np.ndarray, paths_with_channels: list) -> tuple[dict, list]:

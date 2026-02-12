@@ -229,6 +229,7 @@ class CompareMode(Enum):
     WIPE = "Wipe"
     OVERLAY = "Overlay"
     DIFF = "Difference"
+    HEATMAP = "Heatmap"
 
 
 class QuantizationMode(Enum):

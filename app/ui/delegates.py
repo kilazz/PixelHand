@@ -14,37 +14,12 @@ from PySide6.QtWidgets import QAbstractItemView, QStyle, QStyledItemDelegate
 
 from app.domain.data_models import GroupNode, ResultNode
 from app.shared.constants import BEST_FILE_METHOD_NAME, METHOD_DISPLAY_NAMES, UIConfig
+from app.shared.utils import format_result_metadata
 from app.ui.background_tasks import ImageLoader
 from app.ui.qt_models import VfxRole
 from app.ui.widgets import PaintUtilsMixin
 
 app_logger = logging.getLogger("PixelHand.ui.delegates")
-
-
-def _format_metadata_string(node: ResultNode) -> str:
-    """Helper to create the detailed metadata string."""
-    if node.path == "loading_dummy":
-        return ""
-
-    res = f"{node.resolution_w}x{node.resolution_h}"
-    size_mb = (node.file_size or 0) / (1024**2)
-    size_str = f"{size_mb:.2f} MB"
-    bit_depth_str = f"{node.bit_depth}-bit"
-
-    parts = [
-        res,
-        size_str,
-        node.format_str,
-        node.compression_format,
-        node.color_space,
-        bit_depth_str,
-        node.format_details,
-        node.texture_type,
-        f"Mips: {node.mipmap_count}",
-    ]
-
-    # CHANGED: Use dot instead of pipe
-    return " • ".join(filter(None, parts))
 
 
 class GroupGridDelegate(QStyledItemDelegate):
@@ -387,7 +362,7 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         )
 
         # Use common metadata logic with dots
-        meta_text = _format_metadata_string(item_data)
+        meta_text = format_result_metadata(item_data)
 
         if self.is_grid_mode:
             padding = 4

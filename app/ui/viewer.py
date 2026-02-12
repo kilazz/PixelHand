@@ -8,7 +8,7 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageChops
+from PIL import Image, ImageChops, ImageOps
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
     QModelIndex,
@@ -317,7 +317,8 @@ class ImageViewerPanel(QGroupBox):
         # 2. Compare Widget (Wipe/Overlay)
         self.compare_widget = ImageCompareWidget()
 
-        # 3. Difference View
+        # 3. Difference View / Heatmap View
+        # Both use a single widget to display the resulting image
         self.diff_view = AlphaBackgroundWidget()
 
         self.compare_stack.addWidget(sbs_view)
@@ -663,7 +664,7 @@ class ImageViewerPanel(QGroupBox):
     def _on_compare_mode_change(self, text: str):
         mode = CompareMode(text)
         is_overlay = mode == CompareMode.OVERLAY
-        is_diff = mode == CompareMode.DIFF
+        is_diff = mode == CompareMode.DIFF or mode == CompareMode.HEATMAP
 
         self.compare_stack.setCurrentIndex(
             2 if is_diff else (1 if mode in [CompareMode.WIPE, CompareMode.OVERLAY] else 0)
@@ -772,7 +773,10 @@ class ImageViewerPanel(QGroupBox):
 
         current_mode = CompareMode(self.compare_type_combo.currentText())
         if current_mode == CompareMode.DIFF:
-            self.diff_view.setPixmap(self._calculate_diff_pixmap())
+            self.diff_view.setPixmap(self._calculate_diff_pixmap(heatmap=False))
+            return
+        elif current_mode == CompareMode.HEATMAP:
+            self.diff_view.setPixmap(self._calculate_diff_pixmap(heatmap=True))
             return
 
         p1 = get_processed_pixmap(images[0])
@@ -798,7 +802,7 @@ class ImageViewerPanel(QGroupBox):
                 activity[name] = False
         return activity
 
-    def _calculate_diff_pixmap(self) -> QPixmap | None:
+    def _calculate_diff_pixmap(self, heatmap: bool = False) -> QPixmap | None:
         images = self.state.get_pil_images()
         if len(images) != 2:
             return None
@@ -821,9 +825,24 @@ class ImageViewerPanel(QGroupBox):
         r_diff = ImageChops.difference(r1, r2) if self.channel_states["R"] else Image.new("L", img1.size, 0)
         g_diff = ImageChops.difference(g1, g2) if self.channel_states["G"] else Image.new("L", img1.size, 0)
         b_diff = ImageChops.difference(b1, b2) if self.channel_states["B"] else Image.new("L", img1.size, 0)
-        a_diff = ImageChops.difference(a1, a2) if self.channel_states["A"] else Image.new("L", img1.size, 255)
+        a_diff = ImageChops.difference(a1, a2) if self.channel_states["A"] else Image.new("L", img1.size, 0)
 
-        return QPixmap.fromImage(ImageQt(Image.merge("RGBA", (r_diff, g_diff, b_diff, a_diff))))
+        if heatmap:
+            # Heatmap Logic: Merge absolute differences into a single intensity channel
+            # We add differences from all active channels
+            diff_sum = ImageChops.add(r_diff, g_diff)
+            diff_sum = ImageChops.add(diff_sum, b_diff)
+            # Alpha diff usually handled separately, but we include it for visual check
+            diff_sum = ImageChops.add(diff_sum, a_diff)
+
+            # Colorize: Black -> Blue (Safe), White -> Red (Diff)
+            # Fix: Use keyword arguments to avoid TypeError
+            return QPixmap.fromImage(ImageQt(ImageOps.colorize(diff_sum, black="blue", white="red")))
+
+        else:
+            # Standard Difference View (Grayscale per channel)
+            # Force Alpha to 255 for the output diff image so it's visible
+            return QPixmap.fromImage(ImageQt(Image.merge("RGBA", (r_diff, g_diff, b_diff, Image.new("L", img1.size, 255)))))
 
     # --- Zoom & Pan Sync ---
 
