@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
-from app.imaging.processing import tonemap_float_array
+from app.imaging.processing import is_vfx_transparent_texture, tonemap_float_array
 from app.shared.constants import DIRECTXTEX_AVAILABLE, TonemapMode
 
 from .base_loader import BaseLoader
@@ -101,11 +101,7 @@ class DirectXTexLoader(BaseLoader):
 
     def _handle_alpha_logic(self, pil_image: Image.Image, ignore_zero_alpha: bool) -> Image.Image:
         """
-        Smart Alpha Handling:
-        1. If Alpha is fully opaque (255), discard it to save memory.
-        2. If Alpha is fully transparent (0), but RGB has data:
-           - If ignore_zero_alpha=True (Thumbnails): Discard Alpha to show content.
-           - If ignore_zero_alpha=False (Analysis): Keep Alpha 0 (Authentic data).
+        Smart Alpha Handling using centralized logic.
         """
         if pil_image.mode != "RGBA":
             return pil_image
@@ -114,27 +110,21 @@ class DirectXTexLoader(BaseLoader):
             extrema = pil_image.getextrema()
             # RGBA extrema: [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
             if len(extrema) >= 4:
-                alpha_min, alpha_max = extrema[3]
+                alpha_min, _ = extrema[3]
 
                 # Case 1: Alpha is fully opaque (255). Safe to drop.
                 if alpha_min >= 255:
                     return pil_image.convert("RGB")
 
-                # Case 2: Alpha is fully transparent (0).
-                if alpha_max <= 0:
-                    r_max = extrema[0][1]
-                    g_max = extrema[1][1]
-                    b_max = extrema[2][1]
-
-                    # If RGB contains data (VFX/Emission)
-                    if r_max > 0 or g_max > 0 or b_max > 0:
-                        if ignore_zero_alpha:
-                            # Thumbnail Mode: Drop alpha so user sees the color data.
-                            return pil_image.convert("RGB")
-                        else:
-                            # Compare Mode: Keep transparency.
-                            # The viewer_panel logic will force opacity for display.
-                            return pil_image
+                # Case 2: Use centralized logic to check for VFX textures
+                if is_vfx_transparent_texture(pil_image):
+                    if ignore_zero_alpha:
+                        # Thumbnail Mode: Drop alpha so user sees the color data.
+                        return pil_image.convert("RGB")
+                    else:
+                        # Compare Mode: Keep transparency.
+                        # The viewer_panel logic will force opacity for display if needed.
+                        return pil_image
 
         except Exception:
             pass

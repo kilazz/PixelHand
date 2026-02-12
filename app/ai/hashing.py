@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import xxhash
 
 from app.imaging.image_io import get_image_metadata, load_image
+from app.imaging.processing import is_vfx_transparent_texture
 
 if TYPE_CHECKING:
     from app.domain.data_models import AnalysisItem
@@ -114,21 +115,8 @@ def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channe
                 return None
         else:  # "Composite" (Default)
             if original_pil_img.mode == "RGBA":
-                is_vfx = False
-                try:
-                    # VFX Check: Alpha is 0 (transparent), but RGB contains data (Emission/Roughness maps)
-                    extrema = original_pil_img.getextrema()
-                    if (
-                        len(extrema) >= 4
-                        and extrema[3][1] == 0  # Max Alpha is 0
-                        and (extrema[0][1] > 0 or extrema[1][1] > 0 or extrema[2][1] > 0)  # RGB has data
-                    ):
-                        is_vfx = True
-                except Exception:
-                    pass
-
-                if is_vfx:
-                    # If VFX, ignore alpha and hash the RGB data
+                if is_vfx_transparent_texture(original_pil_img):
+                    # If VFX (Alpha=0 but data in RGB), ignore alpha and hash the RGB data
                     image_for_hashing = original_pil_img.convert("RGB")
                 else:
                     # Standard compositing: Paste onto black background

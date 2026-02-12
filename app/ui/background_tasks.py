@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, QRunnable, QSemaphore, Signal
 from app.ai.optimizer import optimize_model_post_export
 from app.domain.data_models import FileOperation
 from app.imaging.image_io import get_image_metadata, load_image
+from app.imaging.processing import is_vfx_transparent_texture
 from app.infrastructure.cache import get_thumbnail_cache_key, thumbnail_cache
 from app.shared.constants import (
     DEEP_LEARNING_AVAILABLE,
@@ -365,19 +366,8 @@ class ImageLoader(QRunnable):
                         else:
                             pil_img = pil_img.convert("RGBA")
 
-                        # VFX Fix
-                        is_vfx = False
-                        if pil_img.mode == "RGBA":
-                            try:
-                                ext = pil_img.getextrema()
-                                if (
-                                    len(ext) >= 4
-                                    and ext[3][1] == 0
-                                    and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0)
-                                ):
-                                    is_vfx = True
-                            except Exception:
-                                pass
+                        # VFX Fix: Detect if Alpha=0 but RGB has data
+                        is_vfx = is_vfx_transparent_texture(pil_img)
                         pil_img.info["is_vfx"] = is_vfx
 
                         if self.target_size:
@@ -397,13 +387,9 @@ class ImageLoader(QRunnable):
                     return
 
                 if pil_img:
+                    # Safety check if info was lost (e.g. during resize if not propagated)
                     if "is_vfx" not in pil_img.info and pil_img.mode == "RGBA":
-                        try:
-                            ext = pil_img.getextrema()
-                            if ext[3][1] == 0 and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0):
-                                pil_img.info["is_vfx"] = True
-                        except Exception:
-                            pass
+                        pil_img.info["is_vfx"] = is_vfx_transparent_texture(pil_img)
                     self.signals.result.emit(self.ui_key, pil_img)
                 else:
                     self.signals.error.emit(self.ui_key, "Image loader returned None")
@@ -470,7 +456,7 @@ class FileOperationTask(QRunnable):
             method = "reflink" if self.operation == FileOperation.REFLINKING else "hardlink"
             self._link_worker(self.link_map, method)
         else:
-            self.signals.log.emit(f"Unknown mode: {self.operation.name}", "error")
+            self.signals.log_message.emit(f"Unknown mode: {self.operation.name}", "error")
 
     def _delete_worker(self, paths: list[Path]):
         moved, failed = [], 0

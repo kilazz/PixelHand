@@ -6,6 +6,7 @@ Contains shared image processing utility functions to avoid circular dependencie
 import logging
 
 import numpy as np
+from PIL import Image
 
 from app.shared.constants import OCIO_AVAILABLE
 
@@ -61,3 +62,35 @@ def tonemap_float_array(float_array: np.ndarray) -> np.ndarray:
         if final_rgb.ndim == 3:
             return np.concatenate([final_rgb, final_alpha], axis=-1)
     return final_rgb
+
+
+def is_vfx_transparent_texture(pil_image: Image.Image) -> bool:
+    """
+    Detects if an image has a fully transparent alpha channel (Max Alpha <= 0),
+    but contains valid visual data in the RGB channels (Max RGB > 0).
+    Common in GameDev/VFX for packed textures (e.g. Emission/Roughness in RGB).
+    """
+    if pil_image.mode != "RGBA":
+        return False
+
+    try:
+        # getextrema returns [(Rmin, Rmax), (Gmin, Gmax), (Bmin, Bmax), (Amin, Amax)]
+        extrema = pil_image.getextrema()
+        if len(extrema) < 4:
+            return False
+
+        alpha_max = extrema[3][1]
+
+        # If Alpha has any opacity, it's a standard image, not a "hidden data" texture.
+        if alpha_max > 0:
+            return False
+
+        # Alpha is fully transparent. Check if RGB has any data.
+        r_max = extrema[0][1]
+        g_max = extrema[1][1]
+        b_max = extrema[2][1]
+
+        return r_max > 0 or g_max > 0 or b_max > 0
+
+    except Exception:
+        return False

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from PIL import Image
 
 from app.imaging.image_io import load_image
+from app.imaging.processing import is_vfx_transparent_texture
 
 if TYPE_CHECKING:
     from app.domain.data_models import AnalysisItem
@@ -112,10 +113,8 @@ class ImageBatchPreprocessor:
         # 3. Composite (Standard) Analysis
         else:
             if pil_image.mode == "RGBA":
-                # VFX Fix: Check if Alpha=0 but RGB has data (Emission/Roughness maps)
-                ext = pil_image.getextrema()
-                # ext[3] is Alpha min/max. If max alpha is 0 (transparent) AND RGB has data...
-                if ext[3][1] == 0 and (ext[0][1] > 0 or ext[1][1] > 0 or ext[2][1] > 0):
+                if is_vfx_transparent_texture(pil_image):
+                    # Keep RGB data if alpha is 0
                     return pil_image.convert("RGB"), None
 
                 # Standard compositing onto black background

@@ -29,7 +29,7 @@ from app.shared.constants import (
     QuantizationMode,
 )
 from app.shared.utils import get_model_folder_name
-from app.workflow.scanner import ScannerCore
+from app.workflow.core import ScannerCore
 
 # --- Setup Logging ---
 logging.basicConfig(
