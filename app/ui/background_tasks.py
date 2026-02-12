@@ -82,7 +82,7 @@ class ModelConverter(QRunnable):
                 self.signals.finished.emit(True, "Model already exists.")
                 return
 
-            self.signals.log_message.emit(f"Downloading model '{self.hf_model_name}'...", "info")
+            self.signals.log.emit(f"Downloading model '{self.hf_model_name}'...", "info")
 
             ProcessorClass = adapter.get_processor_class()
             ModelClass = adapter.get_model_class()
