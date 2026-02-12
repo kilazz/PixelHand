@@ -74,6 +74,15 @@ def setup_logging(ui_signals_emitter: QObject | None = None, force_debug: bool =
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("transformers").setLevel(logging.ERROR)
 
+    # Silence HTTP requests and model download noise
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("huggingface_hub").setLevel(logging.WARNING)
+
+    # Silence ONNX conversion and optimization noise
+    logging.getLogger("onnxscript").setLevel(logging.WARNING)
+    logging.getLogger("onnx_ir").setLevel(logging.WARNING)
+    logging.getLogger("torch.onnx").setLevel(logging.WARNING)
+
     # --- Console Handler ---
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(verbose_formatter)
