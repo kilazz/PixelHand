@@ -13,6 +13,8 @@ from typing import Any
 
 import numpy as np
 
+from app.ai.preprocessing import ImageBatchPreprocessor
+
 # Infrastructure & Domain
 from app.domain.config import ScanConfig
 from app.domain.data_models import (
@@ -450,13 +452,14 @@ class SearchStrategy(ScanStrategy):
                     f"Generating vector for sample: {self.config.sample_path.name}",
                     "info",
                 )
-                # For image sample, we need to preprocess it just like in the worker
-                # But since we are in the main process/Scanner thread, we can use the loaded engine
-                from app.ai.manager import _read_and_process_batch_for_ai
+                # For image sample, we need to preprocess it.
+                # Use the shared preprocessing logic directly.
 
                 # Mock analysis item
                 items = [AnalysisItem(path=self.config.sample_path, analysis_type="Composite")]
-                images, _, _ = _read_and_process_batch_for_ai(items, engine.input_size, {})
+
+                # Directly call static method to prepare batch (avoids import of deprecated manager func)
+                images, _, _ = ImageBatchPreprocessor.prepare_batch(items, engine.input_size)
 
                 if images:
                     px = engine.processor(images=images, return_tensors="np").pixel_values

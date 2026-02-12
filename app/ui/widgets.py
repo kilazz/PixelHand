@@ -8,10 +8,25 @@ from collections import OrderedDict
 from typing import ClassVar
 
 from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QListView, QSizePolicy, QWidget
+from PySide6.QtGui import QAction, QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
+from PySide6.QtWidgets import QListView, QMenu, QSizePolicy, QWidget
 
 from app.shared.constants import CompareMode, UIConfig
+
+
+def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
+    """Creates a standardized context menu for file operations."""
+    context_menu = QMenu(parent)
+    open_action = QAction("Open File", parent)
+    show_action = QAction("Show in Explorer", parent)
+    delete_action = QAction("Move to Trash", parent)
+
+    context_menu.addAction(open_action)
+    context_menu.addAction(show_action)
+    context_menu.addSeparator()
+    context_menu.addAction(delete_action)
+
+    return context_menu, open_action, show_action, delete_action
 
 
 class PaintUtilsMixin:

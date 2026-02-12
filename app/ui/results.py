@@ -45,26 +45,12 @@ from app.domain.data_models import FileOperation, GroupNode, ResultNode, ScanMod
 from app.shared.constants import UIConfig
 from app.ui.delegates import GroupGridDelegate
 from app.ui.qt_models import ResultsProxyModel, ResultsTreeModel
+from app.ui.widgets import create_file_context_menu
 
 if TYPE_CHECKING:
     from app.ui.controllers import ResultsController
 
 logger = logging.getLogger("PixelHand.ui.results")
-
-
-def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
-    """Creates a standardized context menu for file operations."""
-    context_menu = QMenu(parent)
-    open_action = QAction("Open File", parent)
-    show_action = QAction("Show in Explorer", parent)
-    delete_action = QAction("Move to Trash", parent)
-
-    context_menu.addAction(open_action)
-    context_menu.addAction(show_action)
-    context_menu.addSeparator()
-    context_menu.addAction(delete_action)
-
-    return context_menu, open_action, show_action, delete_action
 
 
 class ResultsPanel(QGroupBox):

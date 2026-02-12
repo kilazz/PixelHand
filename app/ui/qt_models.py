@@ -15,9 +15,7 @@ from PySide6.QtCore import (
     QAbstractItemModel,
     QAbstractListModel,
     QModelIndex,
-    QObject,
     QPersistentModelIndex,
-    QRunnable,
     QSortFilterProxyModel,
     Qt,
     QThreadPool,
@@ -33,7 +31,11 @@ from app.shared.constants import (
     UIConfig,
 )
 from app.shared.utils import format_result_metadata
-from app.ui.background_tasks import ImageLoader, LanceDBGroupFetcherTask
+from app.ui.background_tasks import (
+    ImageLoader,
+    LanceDBBestPathFetcherTask,
+    LanceDBGroupFetcherTask,
+)
 
 if TYPE_CHECKING:
     from app.infrastructure.db_service import DatabaseService
@@ -43,45 +45,6 @@ app_logger = logging.getLogger("PixelHand.ui.models")
 # Custom roles
 SortRole = Qt.ItemDataRole.UserRole + 1
 VfxRole = Qt.ItemDataRole.UserRole + 2
-
-
-# --- NEW TASK CLASS ---
-class LanceDBBestPathFetcherTask(QRunnable):
-    """
-    Background task to fetch ONLY the 'best' file path for a given group ID.
-    Used for Grid View thumbnails to avoid loading entire groups.
-    """
-
-    class Signals(QObject):
-        finished = Signal(int, str)  # group_id, path
-
-    def __init__(self, group_id: int, db_service: "DatabaseService"):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.group_id = group_id
-        self.db_service = db_service
-        self.signals = self.Signals()
-
-    def run(self):
-        try:
-            # We use the db_service connection directly.
-            if not self.db_service.db or "scan_results" not in self.db_service.db.table_names():
-                return
-
-            tbl = self.db_service.db.open_table("scan_results")
-            # We only need the path of the best file
-            res = tbl.search().where(f"group_id = {self.group_id} AND is_best = true").limit(1).to_list()
-
-            if res:
-                self.signals.finished.emit(self.group_id, str(res[0]["path"]))
-            else:
-                # Fallback: if no 'best' flagged (rare), take the first one
-                res_fallback = tbl.search().where(f"group_id = {self.group_id}").limit(1).to_list()
-                if res_fallback:
-                    self.signals.finished.emit(self.group_id, str(res_fallback[0]["path"]))
-
-        except Exception as e:
-            app_logger.error(f"Best path fetch failed for group {self.group_id}: {e}")
 
 
 class ResultsTreeModel(QAbstractItemModel):

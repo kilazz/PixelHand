@@ -333,11 +333,6 @@ def worker_preprocess_task(
         return None, [], [(str(i.path), f"Preproc: {e}") for i in items]
 
 
-# Kept for backward compatibility if any non-MP code calls it, though unused in new pipeline
-def _read_and_process_batch_for_ai(items, input_size, config):
-    return ImageBatchPreprocessor.prepare_batch(items, input_size)
-
-
 def run_inference_direct(pixel_values: np.ndarray, paths_with_channels: list) -> tuple[dict, list]:
     """
     Runs inference on pre-calculated pixel_values using the worker's engine.

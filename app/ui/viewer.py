@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     Signal,
     Slot,
 )
-from PySide6.QtGui import QAction, QCursor, QPixmap
+from PySide6.QtGui import QCursor, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListView,
-    QMenu,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -46,25 +45,12 @@ from app.infrastructure.settings import SettingsManager
 from app.shared.constants import CompareMode, TonemapMode, UIConfig
 from app.ui.delegates import ImageItemDelegate
 from app.ui.qt_models import ImagePreviewModel
-from app.ui.widgets import AlphaBackgroundWidget, ImageCompareWidget, ResizedListView
+from app.ui.widgets import AlphaBackgroundWidget, ImageCompareWidget, ResizedListView, create_file_context_menu
 
 if TYPE_CHECKING:
     from app.ui.controllers import ResultsController
 
 logger = logging.getLogger("PixelHand.ui.viewer")
-
-
-def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
-    """Creates a standard context menu for file operations."""
-    context_menu = QMenu(parent)
-    open_action = QAction("Open File", parent)
-    show_action = QAction("Show in Explorer", parent)
-    delete_action = QAction("Move to Trash", parent)
-    context_menu.addAction(open_action)
-    context_menu.addAction(show_action)
-    context_menu.addSeparator()
-    context_menu.addAction(delete_action)
-    return context_menu, open_action, show_action, delete_action
 
 
 class ImageViewerPanel(QGroupBox):
