@@ -114,21 +114,22 @@ class QCRules:
         """
         issues = []
         w, h = fp.resolution
+        qc = config.qc
 
         # 1. Non-Power-Of-Two (NPOT) Check
-        if config.qc_check_npot and not (is_power_of_two(w) and is_power_of_two(h)):
+        if qc.check_npot and not (is_power_of_two(w) and is_power_of_two(h)):
             issues.append("Non-Power-Of-Two (NPOT)")
 
         # 2. Block Alignment Check (DXT/BC)
-        if config.qc_check_block_align and (w > 0 and h > 0 and (w % 4 != 0 or h % 4 != 0)):
+        if qc.check_block_align and (w > 0 and h > 0 and (w % 4 != 0 or h % 4 != 0)):
             issues.append("Bad Alignment (Not divisible by 4)")
 
         # 3. Mipmaps Check
-        if config.qc_check_mipmaps and min(w, h) >= 64 and fp.mipmap_count <= 1:
+        if qc.check_mipmaps and min(w, h) >= 64 and fp.mipmap_count <= 1:
             issues.append("Missing Mipmaps")
 
         # 4. Bit Depth Check
-        if config.qc_check_bit_depth and fp.bit_depth > 8:
+        if qc.check_bit_depth and fp.bit_depth > 8:
             issues.append(f"High Bit Depth ({fp.bit_depth}-bit)")
 
         return issues
@@ -143,6 +144,7 @@ class QCRules:
         Runs checks that compare a Source file against a Target file (Folder Compare).
         """
         issues = []
+        qc = config.qc
 
         # 1. Resolution Downgrade Check
         area_a = fp_source.resolution[0] * fp_source.resolution[1]
@@ -151,25 +153,25 @@ class QCRules:
             issues.append("Resolution Downgrade")
 
         # 2. Size Bloat Check
-        if config.qc_check_size_bloat and fp_target.file_size > (fp_source.file_size * 1.5):
+        if qc.check_size_bloat and fp_target.file_size > (fp_source.file_size * 1.5):
             issues.append("Size Bloat (>1.5x)")
 
         # 3. Alpha Channel Mismatch
-        if config.qc_check_alpha:
+        if qc.check_alpha:
             if fp_source.has_alpha and not fp_target.has_alpha:
                 issues.append("Lost Alpha Channel")
             elif not fp_source.has_alpha and fp_target.has_alpha:
                 issues.append("Added Empty Alpha")
 
         # 4. Color Space Mismatch
-        if config.qc_check_color_space:
+        if qc.check_color_space:
             cs_a = fp_source.color_space or "Unknown"
             cs_b = fp_target.color_space or "Unknown"
             if cs_a != cs_b and cs_a != "Unknown" and cs_b != "Unknown":
                 issues.append(f"Color Space Diff ({cs_a}->{cs_b})")
 
         # 5. Compression / Format Change
-        if config.qc_check_compression:
+        if qc.check_compression:
             fmt_a = str(fp_source.compression_format).upper()
             fmt_b = str(fp_target.compression_format).upper()
             lossless_formats = ["PNG", "TGA", "BMP", "PSD", "TIFF", "TIF"]
