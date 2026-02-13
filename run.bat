@@ -1,27 +1,11 @@
 @echo off
 setlocal EnableDelayedExpansion
-title PixelHand Portable Launcher (CPU)
+title PixelHand Portable Launcher
 
 :: --- 1. Path Configuration ---
 cd /d "%~dp0"
 set "TOOLS_DIR=%~dp0.tools"
 set "UV_EXE=%TOOLS_DIR%\uv.exe"
-
-set "UV_CACHE_DIR=%TOOLS_DIR%\uv-cache"
-set "UV_PYTHON_INSTALL_DIR=%TOOLS_DIR%\uv-python"
-set "UV_TOOL_DIR=%TOOLS_DIR%\uv-tools"
-set "UV_SYSTEM_PYTHON=0"
-
-:: === ENVIRONMENT ISOLATION ===
-set "UV_PROJECT_ENVIRONMENT=%~dp0.venv-cpu"
-
-echo =======================================================
-echo      PixelHand Portable Launcher via UV [CPU]
-echo =======================================================
-echo.
-echo [INFO] Tools Dir: .tools
-echo [INFO] Venv Dir:  .venv-cpu
-echo.
 
 :: --- 2. Check and Install UV Locally ---
 if not exist "%UV_EXE%" (
@@ -40,11 +24,40 @@ if not exist "%UV_EXE%" (
     echo [OK] uv installed successfully.
 )
 
-:: --- 3. Launch Application ---
-echo [INFO] Syncing dependencies for CPU...
+:: --- 3. Select Mode ---
+set "MODE=%~1"
+if "%MODE%"=="" (
+    echo =======================================================
+    echo      PixelHand Portable Launcher
+    echo =======================================================
+    echo Select Execution Provider:
+    echo 1. CPU
+    echo 2. CUDA
+    echo 3. DirectML
+    echo 4. WebGPU
+    echo.
+    set /p "CHOICE=Enter number (1-4): "
+    if "!CHOICE!"=="1" set "MODE=cpu"
+    if "!CHOICE!"=="2" set "MODE=cuda"
+    if "!CHOICE!"=="3" set "MODE=directml"
+    if "!CHOICE!"=="4" set "MODE=webgpu"
+)
+
+:: Default fallback
+if "%MODE%"=="" set "MODE=cpu"
+
+:: Map mode to venv and extra
+set "VENV_DIR=.venv-%MODE%"
+set "UV_PROJECT_ENVIRONMENT=%~dp0%VENV_DIR%"
+
+echo.
+echo [INFO] Mode: %MODE%
+echo [INFO] Venv: %VENV_DIR%
 echo.
 
-"%UV_EXE%" run --extra cpu main.py %*
+:: --- 4. Launch ---
+echo [INFO] Syncing dependencies...
+"%UV_EXE%" run --extra %MODE% main.py %*
 
 if errorlevel 1 (
     echo.

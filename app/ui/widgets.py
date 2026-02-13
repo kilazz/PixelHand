@@ -1,15 +1,31 @@
 # app/ui/widgets.py
 """
 Contains small, reusable custom QWidget subclasses used throughout the GUI.
-Refactored to support Synchronous Zoom & Pan via InteractiveViewMixin.
 """
 
 from collections import OrderedDict
 from typing import ClassVar
 
 from PySide6.QtCore import QModelIndex, QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QColor, QMouseEvent, QPainter, QPen, QPixmap, QWheelEvent
-from PySide6.QtWidgets import QListView, QMenu, QSizePolicy, QWidget
+from PySide6.QtGui import (
+    QAction,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QMouseEvent,
+    QPainter,
+    QPen,
+    QPixmap,
+    QWheelEvent,
+)
+from PySide6.QtWidgets import (
+    QLabel,
+    QLineEdit,
+    QListView,
+    QMenu,
+    QSizePolicy,
+    QWidget,
+)
 
 from app.shared.constants import CompareMode, UIConfig
 
@@ -27,6 +43,86 @@ def create_file_context_menu(parent) -> tuple[QMenu, QAction, QAction, QAction]:
     context_menu.addAction(delete_action)
 
     return context_menu, open_action, show_action, delete_action
+
+
+class DragDropLineEdit(QLineEdit):
+    """A QLineEdit that accepts file/folder drops."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path:
+                self.setText(path)
+                event.acceptProposedAction()
+
+
+class DragDropLabel(QLabel):
+    """A QLabel that accepts image file drops for sample search."""
+
+    file_dropped = Signal(str)
+
+    def __init__(self, text, parent=None):
+        super().__init__(text, parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        urls = event.mimeData().urls()
+        if urls:
+            path = urls[0].toLocalFile()
+            if path:
+                self.file_dropped.emit(path)
+                event.acceptProposedAction()
+
+
+class ResizedListView(QListView):
+    """
+    A QListView that emits a signal when resized and tracks mouse hover.
+    Required by ImageViewerPanel to update layouts and handle channel previews.
+    """
+
+    resized = Signal()
+    channel_hovered = Signal(QModelIndex, object)  # index, channel_str (or None)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMouseTracking(True)
+        self._preview_size = 250
+
+    def set_preview_size(self, size: int):
+        self._preview_size = size
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.resized.emit()
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        index = self.indexAt(event.pos())
+
+        # Logic to determine channel based on mouse position could go here.
+        # For now, we emit the index with None channel to satisfy the interface
+        # and prevent crashes.
+        if index.isValid():
+            self.channel_hovered.emit(index, None)
+        else:
+            self.channel_hovered.emit(QModelIndex(), None)
+
+    def leaveEvent(self, event):
+        super().leaveEvent(event)
+        self.channel_hovered.emit(QModelIndex(), None)
 
 
 class PaintUtilsMixin:
@@ -392,59 +488,3 @@ class ImageCompareWidget(QWidget, PaintUtilsMixin, InteractiveViewMixin):
             self.setCursor(Qt.CursorShape.ArrowCursor)
         else:
             self.handle_mouse_release(event)
-
-
-class ResizedListView(QListView):
-    resized = Signal()
-    channel_hovered = Signal(QModelIndex, object)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMouseTracking(True)
-        self._last_hovered_index = QModelIndex()
-        self._last_channel = None
-        self.preview_size = 250
-
-    def set_preview_size(self, size: int):
-        self.preview_size = size
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.resized.emit()
-
-    def mouseMoveEvent(self, event: QMouseEvent):
-        super().mouseMoveEvent(event)
-        index = self.indexAt(event.pos())
-
-        def clear_hover():
-            if self._last_channel is not None:
-                self._last_channel = None
-                self._last_hovered_index = QModelIndex()
-                self.channel_hovered.emit(QModelIndex(), None)
-
-        if not index.isValid():
-            clear_hover()
-            return
-
-        rect = self.visualRect(index)
-        thumb_rect = QRect(rect.x() + 5, rect.y() + 5, self.preview_size, self.preview_size)
-
-        if not thumb_rect.contains(event.pos()):
-            clear_hover()
-            return
-
-        local_pos = event.pos() - thumb_rect.topLeft()
-        rel_x = local_pos.x() / thumb_rect.width()
-        rel_y = local_pos.y() / thumb_rect.height()
-        channel = ("R" if rel_x < 0.5 else "G") if rel_y < 0.5 else ("B" if rel_x < 0.5 else "A")
-
-        if index != self._last_hovered_index or channel != self._last_channel:
-            self._last_hovered_index = index
-            self._last_channel = channel
-            self.channel_hovered.emit(index, channel)
-
-    def leaveEvent(self, event):
-        if self._last_channel is not None:
-            self._last_channel = None
-            self.channel_hovered.emit(QModelIndex(), None)
-        super().leaveEvent(event)

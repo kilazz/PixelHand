@@ -8,7 +8,7 @@ import os
 from collections import OrderedDict
 from dataclasses import fields
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
@@ -45,6 +45,12 @@ app_logger = logging.getLogger("PixelHand.ui.models")
 # Custom roles
 SortRole = Qt.ItemDataRole.UserRole + 1
 VfxRole = Qt.ItemDataRole.UserRole + 2
+
+
+class ScanResultPayload(TypedDict):
+    db_path: str | None
+    groups_data: dict | None
+    lazy_summary: list[dict] | None
 
 
 class ResultsTreeModel(QAbstractItemModel):
@@ -109,7 +115,7 @@ class ResultsTreeModel(QAbstractItemModel):
             found_by="Loading...",
         )
 
-    def load_data(self, payload: dict, mode: ScanMode):
+    def load_data(self, payload: ScanResultPayload, mode: ScanMode):
         self.clear()
         self.beginResetModel()
         self.mode = mode

@@ -50,7 +50,7 @@ from app.ui.dialogs import (
 )
 
 # Panels
-from app.ui.options import (
+from app.ui.panels import (
     OptionsPanel,
     PerformancePanel,
     QCPanel,
