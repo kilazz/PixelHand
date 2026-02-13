@@ -446,9 +446,9 @@ class SearchStrategy(ScanStrategy):
                 images, _, _ = ImageBatchPreprocessor.prepare_batch(items, engine.input_size)
 
                 if images:
-                    px = engine.processor(images=images, return_tensors="np").pixel_values
-                    if engine.is_fp16:
-                        px = px.astype(np.float16)
+                    # Use the robust method from engine to safely convert to numpy (Fixes WebGPU crash)
+                    px = engine.preprocess_images(images)
+
                     io = engine.visual_session.io_binding()
                     io.bind_cpu_input("pixel_values", px)
                     io.bind_output("image_embeds")

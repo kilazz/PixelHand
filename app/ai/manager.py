@@ -157,6 +157,25 @@ class InferenceEngine:
         self.device = device
         logger.info(f"ONNX Loaded. Device: {device}, FP16: {self.is_fp16}, Input: {self.input_size}")
 
+    def preprocess_images(self, images: list) -> np.ndarray:
+        """
+        Preprocesses PIL images into NumPy pixel values suitable for the ONNX model.
+        Uses PyTorch intermediate tensors to ensure compatibility with all Transformers versions.
+        """
+        # Request PyTorch tensors first ("pt") because "np" can be unstable/unsupported
+        # in some environment configurations (e.g. specific transformers versions + WebGPU).
+        batch_dict = self.processor(images=images, return_tensors="pt")
+
+        # Detach from graph (if any), move to CPU, convert to numpy
+        pixel_values = batch_dict.pixel_values.detach().cpu().numpy()
+
+        # Cast to correct precision
+        target_dtype = np.float16 if self.is_fp16 else np.float32
+        if pixel_values.dtype != target_dtype:
+            pixel_values = pixel_values.astype(target_dtype)
+
+        return pixel_values
+
     def encode_visual_batch(self, pixel_values: np.ndarray) -> np.ndarray:
         """
         Runs the visual model on a batch of pixel values.
@@ -314,7 +333,7 @@ def worker_preprocess_task(
         except Exception as e:
             return None, [], [(str(i.path), f"Worker Init Failed: {e}") for i in items]
 
-    if not _WORKER_PREPROCESSOR:
+    if not _WORKER_PREPROCESSOR or not _WORKER_ENGINE:
         return None, [], [(str(i.path), "Model not initialized in worker") for i in items]
 
     # Use extracted preprocessing logic
@@ -326,11 +345,12 @@ def worker_preprocess_task(
         return None, [], skipped
 
     try:
-        # Request PyTorch tensors first ("pt"), then convert to NumPy.
-        batch_dict = _WORKER_PREPROCESSOR(images=images, return_tensors="pt")
+        # Refactored to use the engine's robust method
+        pixel_values = _WORKER_ENGINE.preprocess_images(images)
 
-        # Detach from graph (if any), move to CPU, convert to numpy, then cast to target dtype
-        pixel_values = batch_dict.pixel_values.detach().cpu().numpy().astype(dtype)
+        # Ensure correct dtype if not already handled
+        if pixel_values.dtype != dtype:
+            pixel_values = pixel_values.astype(dtype)
 
         # Cleanup PIL images to free RAM
         del images
