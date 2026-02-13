@@ -4,6 +4,7 @@ Unified Task Manager for concurrency handling.
 """
 
 import logging
+import threading
 from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from typing import Any
@@ -54,23 +55,22 @@ class TaskManager:
     def __init__(self, headless: bool = False, max_workers: int = 4):
         """
         Args:
-            headless: If True, disables QThreadPool and uses standard Python threads.
+            headless: If True, disables QThreadPool usage logic (though QObject can still exist).
             max_workers: Number of workers for the CPU-bound executor.
         """
         self.headless = headless
+        self._active_threads: list[threading.Thread] = []
 
         # 1. GUI Thread Pool (Fire-and-forget, Signal support)
         self._qt_pool: QThreadPool | None = None
         if not headless:
             self._qt_pool = QThreadPool.globalInstance()
-            # Reserve one thread for the main GUI loop interactions if needed
             self._qt_pool.setMaxThreadCount(max(2, max_workers + 2))
 
         # 2. Standard Thread Pool (For I/O-bound tasks needing Futures)
         self._std_pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="PixelHand_IO")
 
         # 3. Process Pool (For CPU-bound tasks to bypass GIL)
-        # Used for image preprocessing/hashing
         self._cpu_pool = ProcessPoolExecutor(max_workers=max_workers)
 
         logger.info(f"TaskManager initialized (Headless: {headless}, Workers: {max_workers})")
@@ -84,16 +84,10 @@ class TaskManager:
         **kwargs,
     ):
         """
-        Starts a fire-and-forget background task. Ideal for File I/O or UI updates.
-
-        Args:
-            func: The function to run.
-            on_finish: Callback receiving the result (optional).
-            on_error: Callback receiving an exception (optional).
-            *args, **kwargs: Arguments passed to func.
+        Starts a fire-and-forget background task.
         """
         if self.headless:
-            # CLI Mode: Use standard executor and handle callbacks synchronously after completion
+            # CLI Mode: Use standard executor
             future = self._std_pool.submit(func, *args, **kwargs)
 
             def _callback_wrapper(fut: Future):
@@ -123,9 +117,20 @@ class TaskManager:
     def submit_cpu_bound(self, func: Callable, *args, **kwargs) -> Future:
         """
         Submits a task to the ProcessPoolExecutor and returns a Future.
-        Used for heavy calculations (Preprocessing, Hashing) to bypass the GIL.
         """
         return self._cpu_pool.submit(func, *args, **kwargs)
+
+    def start_thread(self, target: Callable, name: str, args: tuple = (), daemon: bool = True) -> threading.Thread:
+        """
+        Starts a standard python thread and tracks it.
+        Used for long-running producer/consumer loops that don't fit into a thread pool.
+        """
+        t = threading.Thread(target=target, name=name, args=args, daemon=daemon)
+        t.start()
+        self._active_threads.append(t)
+        # Cleanup finished threads from list
+        self._active_threads = [t for t in self._active_threads if t.is_alive()]
+        return t
 
     def shutdown(self):
         """
@@ -133,11 +138,13 @@ class TaskManager:
         """
         logger.info("Stopping TaskManager...")
 
-        # Shutdown standard pool
         self._std_pool.shutdown(wait=True)
         self._cpu_pool.shutdown(wait=True)
 
-        # QThreadPool (Global Instance) usually cleans itself up,
-        # but we can wait if we want to ensure tasks finish.
         if self._qt_pool:
             self._qt_pool.waitForDone()
+
+        # Join explicit threads
+        for t in self._active_threads:
+            if t.is_alive():
+                t.join(timeout=1.0)

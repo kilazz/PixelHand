@@ -7,15 +7,12 @@ import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 # Import Core Services
 from app.ai.manager import ModelManager
 from app.infrastructure.db_service import DatabaseService
 from app.infrastructure.task_manager import TaskManager
-
-if TYPE_CHECKING:
-    from app.shared.events import EventBusProtocol
+from app.shared.signal_bus import APP_SIGNAL_BUS, SignalBus
 
 logger = logging.getLogger("PixelHand.container")
 
@@ -30,7 +27,7 @@ class ServiceContainer:
     db_service: DatabaseService
     model_manager: ModelManager
     task_manager: TaskManager
-    event_bus: "EventBusProtocol"
+    event_bus: SignalBus
 
     # Context Paths
     app_data_dir: Path
@@ -45,9 +42,8 @@ class ServiceContainer:
 
         Args:
             app_data_dir: Root directory for application data.
-            headless: If True, uses native Python threads/events (CLI mode).
-                      If False, uses Qt threads/signals (GUI mode).
-            max_workers: Number of worker threads for the TaskManager.
+            headless: Mode flag (Used for logging/task manager config).
+            max_workers: Number of workers for the TaskManager.
         """
         # 1. Define and Create Directories
         app_data_dir = app_data_dir.resolve()
@@ -63,7 +59,7 @@ class ServiceContainer:
 
         # 2. Initialize Infrastructure Services
 
-        # Task Manager: Handles threading abstraction (Qt vs Native)
+        # Task Manager: Handles threading abstraction
         task_manager = TaskManager(headless=headless, max_workers=max_workers)
 
         # Database Service: Handles Vector DB connection
@@ -72,16 +68,8 @@ class ServiceContainer:
         # Model Manager: Handles AI Model loading and inference context
         model_manager = ModelManager(models_dir=models_dir)
 
-        # Event Bus: Handles communication between components
-        # Use NativeEventBus for CLI to avoid hanging on missing Qt Event Loop
-        if headless:
-            from app.shared.events import NativeEventBus
-
-            event_bus = NativeEventBus()
-        else:
-            from app.shared.signal_bus import APP_SIGNAL_BUS
-
-            event_bus = APP_SIGNAL_BUS
+        # Event Bus: Always use the unified SignalBus (requires QCoreApplication in CLI)
+        event_bus = APP_SIGNAL_BUS
 
         # 3. Return the populated container
         return cls(

@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QImage, QPainter, QPen, Q
 from PySide6.QtWidgets import QAbstractItemView, QStyle, QStyledItemDelegate
 
 from app.domain.data_models import GroupNode, ResultNode
+from app.imaging.processing import extract_channel_as_rgb
 from app.shared.constants import BEST_FILE_METHOD_NAME, METHOD_DISPLAY_NAMES, UIConfig
 from app.shared.utils import format_result_metadata
 from app.ui.background_tasks import ImageLoader
@@ -270,6 +271,7 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         is_hovered = id(item_data) == self._hover_index_key
 
         if is_hovered and self._hover_channel:
+            # Special VFX Handling for Alpha hover
             if self._hover_channel == "A" and is_vfx and raw_pixmap:
                 key = f"{item_data.path}_BLACK_PLACEHOLDER"
                 if key in self._channel_cache:
@@ -284,10 +286,12 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
                 if key in self._channel_cache:
                     pixmap_to_draw = self._channel_cache[key]
                 else:
-                    pixmap_to_draw = self._generate_channel_pixmap(raw_pixmap, self._hover_channel)
-                    self._channel_cache[key] = pixmap_to_draw
-                    if len(self._channel_cache) > self._CACHE_SIZE:
-                        self._channel_cache.popitem()
+                    # REFACTOR: Use centralized logic from processing.py
+                    pixmap_to_draw = self._generate_channel_pixmap_safe(raw_pixmap, self._hover_channel)
+                    if pixmap_to_draw:
+                        self._channel_cache[key] = pixmap_to_draw
+                        if len(self._channel_cache) > self._CACHE_SIZE:
+                            self._channel_cache.popitem()
 
         error_msg = None
         if self.parent() and hasattr(self.parent(), "model"):
@@ -301,8 +305,10 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
             x = thumb_rect.x() + (thumb_rect.width() - scaled.width()) // 2
             y = thumb_rect.y() + (thumb_rect.height() - scaled.height()) // 2
             painter.drawPixmap(x, y, scaled)
+
+            # Draw channel label in the correct corner
             if is_hovered and self._hover_channel:
-                self._draw_channel_label(painter, thumb_rect.x(), thumb_rect.y(), self._hover_channel)
+                self._draw_channel_label(painter, thumb_rect, self._hover_channel)
         elif error_msg:
             painter.save()
             painter.setPen(QColor(UIConfig.Colors.ERROR))
@@ -311,27 +317,51 @@ class ImageItemDelegate(QStyledItemDelegate, PaintUtilsMixin):
         else:
             painter.drawText(thumb_rect, Qt.AlignmentFlag.AlignCenter, "Loading...")
 
-    def _generate_channel_pixmap(self, px, ch):
+    def _generate_channel_pixmap_safe(self, qpixmap, channel):
+        """Helper to safely bridge QPixmap -> PIL -> Logic -> QPixmap."""
         try:
-            from PIL import Image
             from PIL.ImageQt import ImageQt, fromqimage
+            qimg = qpixmap.toImage()
+            if qimg.format() != QImage.Format.Format_RGBA8888:
+                qimg = qimg.convertToFormat(QImage.Format.Format_RGBA8888)
 
-            q = px.toImage()
-            if q.format() != QImage.Format.Format_RGBA8888:
-                q = q.convertToFormat(QImage.Format.Format_RGBA8888)
-            p = fromqimage(q)
-            b = p.split()
-            m = {"R": 0, "G": 1, "B": 2, "A": 3}
-            if ch in m and m[ch] < len(b):
-                band = b[m[ch]]
-                return QPixmap.fromImage(ImageQt(Image.merge("RGB", (band, band, band))))
+            pil_img = fromqimage(qimg)
+
+            # Use centralized logic
+            processed_pil = extract_channel_as_rgb(pil_img, channel)
+
+            if processed_pil:
+                return QPixmap.fromImage(ImageQt(processed_pil))
         except Exception:
             pass
-        return px
+        return qpixmap
 
-    def _draw_channel_label(self, painter, x, y, ch):
+    def _draw_channel_label(self, painter, thumb_rect, ch):
         c = {"R": "#F55", "G": "#5F5", "B": "#5AF", "A": "#FFF"}.get(ch, "#CCC")
-        r = QRect(x + 5, y + 5, 20, 20)
+
+        # Determine position based on channel logic (Corners)
+        size = 20
+        padding = 5
+
+        if ch == "R":
+            x = thumb_rect.left() + padding
+            y = thumb_rect.top() + padding
+        elif ch == "G":
+            x = thumb_rect.right() - size - padding
+            y = thumb_rect.top() + padding
+        elif ch == "B":
+            x = thumb_rect.left() + padding
+            y = thumb_rect.bottom() - size - padding
+        elif ch == "A":
+            x = thumb_rect.right() - size - padding
+            y = thumb_rect.bottom() - size - padding
+        else:
+            # Fallback to Top-Left
+            x = thumb_rect.left() + padding
+            y = thumb_rect.top() + padding
+
+        r = QRect(x, y, size, size)
+
         painter.save()
         painter.setBrush(QColor(c))
         painter.setPen(Qt.PenStyle.NoPen)

@@ -4,18 +4,80 @@ Contains View-Model classes that manage UI state and logic, separating it from t
 """
 
 from collections import OrderedDict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QObject, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QPoint, QThreadPool, Signal, Slot
 from PySide6.QtGui import QPixmap
 
 from app.domain.data_models import ResultNode
 
 if TYPE_CHECKING:
     from app.ui.background_tasks import ImageLoader
+
+
+@dataclass
+class ViewerStateData:
+    """Dataclass holding purely the state of the viewer settings."""
+    zoom: float = 1.0
+    pan_offset: QPoint = field(default_factory=lambda: QPoint(0, 0))
+    channels: dict[str, bool] = field(default_factory=lambda: {"R": True, "G": True, "B": True, "A": True})
+    current_group_id: int | None = None
+    transparency_enabled: bool = True
+    bg_alpha: int = 255
+
+
+class ViewerState(QObject):
+    """
+    Manages the state for the ImageViewerPanel (Channels, Zoom, Group ID).
+    """
+    state_changed = Signal()  # Generic signal when state updates
+
+    def __init__(self):
+        super().__init__()
+        self._data = ViewerStateData()
+
+    @property
+    def channels(self) -> dict[str, bool]:
+        return self._data.channels
+
+    def set_channel(self, channel: str, enabled: bool):
+        if self._data.channels.get(channel) != enabled:
+            self._data.channels[channel] = enabled
+            self.state_changed.emit()
+
+    def set_all_channels(self, enabled: bool):
+        changed = False
+        for k in self._data.channels:
+            if self._data.channels[k] != enabled:
+                self._data.channels[k] = enabled
+                changed = True
+        if changed:
+            self.state_changed.emit()
+
+    @property
+    def current_group_id(self) -> int | None:
+        return self._data.current_group_id
+
+    @current_group_id.setter
+    def current_group_id(self, value: int | None):
+        if self._data.current_group_id != value:
+            self._data.current_group_id = value
+            # Reset zoom/pan on group change usually handled by view,
+            # but we can reset state here too
+            self.reset_transform()
+            self.state_changed.emit()
+
+    def reset_transform(self):
+        self._data.zoom = 1.0
+        self._data.pan_offset = QPoint(0, 0)
+
+    # Note: Zoom/Pan are often updated continuously by the widget events,
+    # so we might not emit a signal for every micro-change if performance is key,
+    # but the state object serves as a source of truth.
 
 
 class ImageComparerState(QObject):
@@ -38,14 +100,10 @@ class ImageComparerState(QObject):
         self.thread_pool = thread_pool
         self._candidates: OrderedDict[ResultNode, None] = OrderedDict()
         self._pil_images: dict[str, Image.Image] = {}
-
-        # Fixed F821: Use string forward reference for the type hint
         self._active_loaders: dict[str, ImageLoader] = {}
 
     def toggle_candidate(self, item_data: ResultNode):
-        """Adds or removes an item from the comparison candidates list.
-        Maintains a maximum of two candidates and emits signals for UI updates.
-        """
+        """Adds or removes an item from the comparison candidates list."""
         is_currently_candidate = item_data in self._candidates
 
         added_node, removed_node = None, None
@@ -57,26 +115,21 @@ class ImageComparerState(QObject):
             self._candidates[item_data] = None
             added_node = item_data
             if len(self._candidates) > 2:
-                # If we've added a 3rd, remove the oldest one (FIFO)
                 removed_node, _ = self._candidates.popitem(last=False)
 
         self.candidates_changed.emit(len(self._candidates))
 
-        # The view listens to this signal to know which rows to redraw.
         added_path = str(added_node.path) if added_node else ""
         removed_path = str(removed_node.path) if removed_node else ""
         self.candidate_updated.emit(added_path, removed_path)
 
     def is_candidate(self, item_data: ResultNode) -> bool:
-        """Checks if a given ResultNode is currently a comparison candidate."""
         return item_data in self._candidates
 
     def get_candidates(self) -> list[ResultNode]:
-        """Returns the list of current comparison candidates."""
         return list(self._candidates.keys())
 
     def clear_candidates(self):
-        """Clears the list of comparison candidates and notifies the UI."""
         if not self._candidates:
             return
 
@@ -84,12 +137,10 @@ class ImageComparerState(QObject):
         self._candidates.clear()
         self.candidates_changed.emit(0)
 
-        # Notify UI to update all previously selected items
         for node in removed_nodes:
             self.candidate_updated.emit("", str(node.path))
 
     def load_full_res_images(self, tonemap_mode: str):
-        """Starts loading full-resolution, full-color images for the selected candidates."""
         self.stop_loaders()
         self._pil_images.clear()
 
@@ -98,47 +149,31 @@ class ImageComparerState(QObject):
             return
 
         self.images_loading.emit()
-
-        # Local import to avoid circular dependency (Domain -> UI)
         from app.ui.background_tasks import ImageLoader
 
         for node in candidates:
             path_str = str(node.path)
-
-            # Create Loader without 'receiver' to use Signals instead (prevents QImage conversion issues)
             loader = ImageLoader(
                 path_str=path_str,
                 mtime=node.mtime,
-                target_size=None,  # Load full resolution
+                target_size=None,
                 tonemap_mode=tonemap_mode,
-                use_cache=False,  # Always reload full-res to apply new settings
-                channel_to_load=None,  # This ensures the original color image is loaded
+                use_cache=False,
+                channel_to_load=None,
             )
-
-            # Connect signals to slots
             loader.signals.result.connect(self._on_image_loaded)
             loader.signals.error.connect(self._on_load_error)
-
             self._active_loaders[path_str] = loader
             self.thread_pool.start(loader)
 
     @Slot(str, object)
     def _on_image_loaded(self, path_str: str, pil_img: object):
-        """
-        Handles a successfully loaded image from a worker task.
-        Receives a raw PIL object to preserve data integrity (Alpha=0 vs RGB data).
-        """
         if path_str not in self._active_loaders:
             return
-
         del self._active_loaders[path_str]
 
         if pil_img:
-            # Store the raw PIL image directly.
-            # This allows subsequent processing (like getextrema) to see the real data.
             self._pil_images[path_str] = pil_img
-
-            # Generate QPixmap for the UI immediately on the main thread
             try:
                 q_img = ImageQt(pil_img)
                 pixmap = QPixmap.fromImage(q_img)
@@ -151,23 +186,18 @@ class ImageComparerState(QObject):
 
     @Slot(str, str)
     def _on_load_error(self, path_str: str, error_msg: str):
-        """Handles an error during image loading."""
         if path_str in self._active_loaders:
             del self._active_loaders[path_str]
-
         self.load_error.emit(f"Failed to load {Path(path_str).name}", error_msg)
-
         if not self._active_loaders:
             self.load_complete.emit()
 
     def get_pil_images(self) -> list[Image.Image]:
-        """Returns the loaded PIL images for processing, ensuring correct selection order."""
         return [
             self._pil_images[str(node.path)] for node in self.get_candidates() if str(node.path) in self._pil_images
         ]
 
     def stop_loaders(self):
-        """Cancels all currently active image loading tasks."""
         for loader in self._active_loaders.values():
             loader.cancel()
         self._active_loaders.clear()

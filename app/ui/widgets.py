@@ -112,13 +112,53 @@ class ResizedListView(QListView):
         super().mouseMoveEvent(event)
         index = self.indexAt(event.pos())
 
-        # Logic to determine channel based on mouse position could go here.
-        # For now, we emit the index with None channel to satisfy the interface
-        # and prevent crashes.
-        if index.isValid():
-            self.channel_hovered.emit(index, None)
-        else:
+        if not index.isValid():
             self.channel_hovered.emit(QModelIndex(), None)
+            return
+
+        # Calculate if mouse is over a channel "hotspot" (corners)
+        channel = None
+
+        # Get the visual rectangle of the item in the view
+        rect = self.visualRect(index)
+        local_pos = event.pos() - rect.topLeft()
+
+        # Define the thumbnail area based on View Mode
+        # Matches logic in ImageItemDelegate.paint
+        thumb_size = self._preview_size
+        thumb_rect = QRect()
+
+        if self.viewMode() == QListView.ViewMode.IconMode: # Grid View
+            # In Grid, thumb is centered horizontally, padded 5px from top
+            x = (rect.width() - thumb_size) // 2
+            y = 5
+            thumb_rect = QRect(x, y, thumb_size, thumb_size)
+        else: # List View
+            # In List, thumb is left-aligned with padding
+            thumb_rect = QRect(5, 5, thumb_size, thumb_size)
+
+        # Check corners if mouse is inside the thumbnail area
+        if thumb_rect.contains(local_pos):
+            CORNER_SIZE = 50 # Size of the hotspot in pixels
+            rel_x = local_pos.x() - thumb_rect.x()
+            rel_y = local_pos.y() - thumb_rect.y()
+
+            w, h = thumb_rect.width(), thumb_rect.height()
+
+            # Top-Left = Red
+            if rel_x < CORNER_SIZE and rel_y < CORNER_SIZE:
+                channel = "R"
+            # Top-Right = Green
+            elif rel_x > w - CORNER_SIZE and rel_y < CORNER_SIZE:
+                channel = "G"
+            # Bottom-Left = Blue
+            elif rel_x < CORNER_SIZE and rel_y > h - CORNER_SIZE:
+                channel = "B"
+            # Bottom-Right = Alpha
+            elif rel_x > w - CORNER_SIZE and rel_y > h - CORNER_SIZE:
+                channel = "A"
+
+        self.channel_hovered.emit(index, channel)
 
     def leaveEvent(self, event):
         super().leaveEvent(event)

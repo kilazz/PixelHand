@@ -8,7 +8,7 @@ import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageChops, ImageOps
+from PIL import Image
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import (
     QModelIndex,
@@ -39,8 +39,8 @@ from PySide6.QtWidgets import (
 )
 
 from app.domain.data_models import AppSettings
-from app.domain.view_models import ImageComparerState
-from app.imaging.processing import TONE_MAPPER, set_active_tonemap_view
+from app.domain.view_models import ImageComparerState, ViewerState
+from app.imaging.processing import TONE_MAPPER, calculate_diff_image, process_image_channels, set_active_tonemap_view
 from app.infrastructure.settings import SettingsManager
 from app.shared.constants import CompareMode, TonemapMode, UIConfig
 from app.ui.delegates import ImageItemDelegate
@@ -58,7 +58,6 @@ class ImageViewerPanel(QGroupBox):
     The right-hand panel for viewing and comparing images.
     """
 
-    # Signals
     log_message = Signal(str, str)
     group_became_empty = Signal(int)
     file_missing_detected = Signal(Path)
@@ -72,27 +71,25 @@ class ImageViewerPanel(QGroupBox):
         super().__init__("Image Viewer")
         self.settings_manager = settings_manager
         self.thread_pool = thread_pool
-        self.controller = controller  # Replaces FileOperationManager
+        self.controller = controller
 
-        # Internal State
+        # View Models & State
         self.state = ImageComparerState(thread_pool)
+        self.view_state = ViewerState()
+
         self.is_transparency_enabled = settings_manager.settings.viewer.show_transparency
         self.update_timer = QTimer(self)
         self.update_timer.setSingleShot(True)
         self.update_timer.setInterval(150)
 
-        self._init_state()
+        self.channel_buttons: dict[str, QPushButton] = {}
+
         self._init_ui()
         self._init_context_menu()
         self._connect_signals()
 
         self.load_settings(settings_manager.settings)
         self.clear_viewer()
-
-    def _init_state(self):
-        self.current_group_id: int | None = None
-        self.channel_buttons: dict[str, QPushButton] = {}
-        self.channel_states = {"R": True, "G": True, "B": True, "A": True}
 
     def _init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -119,18 +116,15 @@ class ImageViewerPanel(QGroupBox):
         top_bar.setContentsMargins(0, 0, 0, 0)
         top_bar.setSpacing(4)
 
-        # View Mode Buttons
         self.viewer_mode_group = QButtonGroup(self)
         self.btn_view_list = QPushButton("☰")
         self.btn_view_list.setCheckable(True)
         self.btn_view_list.setChecked(True)
         self.btn_view_list.setFixedSize(30, 26)
-        self.btn_view_list.setToolTip("List View")
 
         self.btn_view_grid = QPushButton("⊞")
         self.btn_view_grid.setCheckable(True)
         self.btn_view_grid.setFixedSize(30, 26)
-        self.btn_view_grid.setToolTip("Grid View")
 
         self.viewer_mode_group.addButton(self.btn_view_list)
         self.viewer_mode_group.addButton(self.btn_view_grid)
@@ -138,24 +132,20 @@ class ImageViewerPanel(QGroupBox):
         top_bar.addWidget(self.btn_view_list)
         top_bar.addWidget(self.btn_view_grid)
 
-        # Separator
         line = QFrame()
         line.setFrameShape(QFrame.Shape.VLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
         line.setFixedHeight(16)
         top_bar.addWidget(line)
 
-        # Size Slider
         top_bar.addWidget(QLabel("Size:"))
         self.preview_size_slider = QSlider(Qt.Orientation.Horizontal)
         self.preview_size_slider.setRange(UIConfig.Sizes.PREVIEW_MIN_SIZE, UIConfig.Sizes.PREVIEW_MAX_SIZE)
         self.preview_size_slider.setFixedWidth(120)
         top_bar.addWidget(self.preview_size_slider)
 
-        # Spacer
         top_bar.addSpacing(10)
 
-        # Background Controls
         self.bg_alpha_check = QCheckBox("BG:")
         top_bar.addWidget(self.bg_alpha_check)
 
@@ -169,7 +159,6 @@ class ImageViewerPanel(QGroupBox):
         self.alpha_label.setFixedWidth(28)
         top_bar.addWidget(self.alpha_label)
 
-        # HDR Controls
         top_bar.addSpacing(10)
         self.thumbnail_tonemap_check = QCheckBox("HDR")
         top_bar.addWidget(self.thumbnail_tonemap_check)
@@ -185,11 +174,9 @@ class ImageViewerPanel(QGroupBox):
         top_bar.addStretch(1)
         parent_layout.addLayout(top_bar)
 
-        # Compare Button
         self.compare_button = QPushButton("Compare (0)")
         parent_layout.addWidget(self.compare_button)
 
-        # List View Setup
         self.model = ImagePreviewModel(self.thread_pool, self)
         self.model.file_missing.connect(self.file_missing_detected.emit)
 
@@ -207,14 +194,12 @@ class ImageViewerPanel(QGroupBox):
         parent_layout.addWidget(self.list_view)
 
     def _create_compare_view_controls(self, parent_layout):
-        # Top Bar
         top_controls = QHBoxLayout()
         self.back_button = QPushButton("< Back to List")
         self.compare_type_combo = QComboBox()
         self.compare_type_combo.addItems([e.value for e in CompareMode])
 
         self.reset_view_button = QPushButton("Fit / Reset")
-        self.reset_view_button.setToolTip("Reset Zoom and Pan")
         self.reset_view_button.clicked.connect(self._reset_compare_views)
 
         top_controls.addWidget(self.back_button)
@@ -225,13 +210,9 @@ class ImageViewerPanel(QGroupBox):
         top_controls.addWidget(self.tiling_check)
         top_controls.addStretch()
 
-        # --- HDR & Channel Controls ---
-
-        # 1. HDR Checkbox (Moved before View dropdown)
         self.compare_tonemap_check = QCheckBox("HDR")
         top_controls.addWidget(self.compare_tonemap_check)
 
-        # 2. View Label & Combo
         self.tonemap_view_label = QLabel("View:")
         self.tonemap_view_combo = QComboBox()
         if TONE_MAPPER and TONE_MAPPER.available_views:
@@ -243,7 +224,6 @@ class ImageViewerPanel(QGroupBox):
         top_controls.addWidget(self.tonemap_view_label)
         top_controls.addWidget(self.tonemap_view_combo)
 
-        # 3. Channels
         channel_layout = QHBoxLayout()
         channel_layout.setSpacing(2)
         for channel in ["R", "G", "B", "A"]:
@@ -259,13 +239,9 @@ class ImageViewerPanel(QGroupBox):
 
         parent_layout.addLayout(top_controls)
 
-        # Bottom Controls
         bottom_controls = QHBoxLayout()
         overlay_widget, bg_widget = QWidget(), QWidget()
-        overlay_layout, bg_layout = (
-            QHBoxLayout(overlay_widget),
-            QHBoxLayout(bg_widget),
-        )
+        overlay_layout, bg_layout = QHBoxLayout(overlay_widget), QHBoxLayout(bg_widget)
 
         self.overlay_alpha_label = QLabel("Overlay Alpha:")
         self.overlay_alpha_slider = QSlider(Qt.Orientation.Horizontal)
@@ -285,26 +261,17 @@ class ImageViewerPanel(QGroupBox):
         bottom_controls.addWidget(bg_widget)
         parent_layout.addLayout(bottom_controls)
 
-        # Comparison Stack
         self.compare_stack = QStackedWidget()
 
-        # 1. Side-by-Side
         sbs_view = QWidget()
         sbs_layout = QHBoxLayout(sbs_view)
         sbs_layout.setContentsMargins(0, 0, 0, 0)
         sbs_layout.setSpacing(1)
-        self.compare_view_1, self.compare_view_2 = (
-            AlphaBackgroundWidget(),
-            AlphaBackgroundWidget(),
-        )
+        self.compare_view_1, self.compare_view_2 = AlphaBackgroundWidget(), AlphaBackgroundWidget()
         sbs_layout.addWidget(self.compare_view_1, 1)
         sbs_layout.addWidget(self.compare_view_2, 1)
 
-        # 2. Compare Widget (Wipe/Overlay)
         self.compare_widget = ImageCompareWidget()
-
-        # 3. Difference View / Heatmap View
-        # Both use a single widget to display the resulting image
         self.diff_view = AlphaBackgroundWidget()
 
         self.compare_stack.addWidget(sbs_view)
@@ -313,7 +280,6 @@ class ImageViewerPanel(QGroupBox):
 
         parent_layout.addWidget(self.compare_stack, 1)
 
-        # Connect Synchronous Zoom
         self.compare_view_1.view_changed.connect(self._sync_views)
         self.compare_view_2.view_changed.connect(self._sync_views)
         self.compare_widget.view_changed.connect(self._sync_views)
@@ -327,62 +293,41 @@ class ImageViewerPanel(QGroupBox):
             self.show_action,
             self.delete_action,
         ) = create_file_context_menu(self)
-
         self.list_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
 
     def _connect_signals(self):
-        # Modes
         self.btn_view_list.clicked.connect(lambda: self._set_viewer_mode(is_grid=False))
         self.btn_view_grid.clicked.connect(lambda: self._set_viewer_mode(is_grid=True))
-
-        # Controls
         self.alpha_slider.valueChanged.connect(self._on_alpha_change)
-
-        # --- PREVIEW SIZE SLIDER PERFORMANCE FIX ---
-        # 1. While sliding: Update visuals only (Fast)
         self.preview_size_slider.valueChanged.connect(self._on_preview_size_sliding)
-        # 2. On Release: Reload data (Slow, clears cache)
         self.preview_size_slider.sliderReleased.connect(self._on_preview_size_confirmed)
-
         self.bg_alpha_check.toggled.connect(self._on_transparency_toggled)
         self.compare_bg_alpha_check.toggled.connect(self._on_transparency_toggled)
-
-        # HDR
         self.thumbnail_tonemap_check.toggled.connect(self.settings_manager.set_thumbnail_tonemap_enabled)
         self.thumbnail_tonemap_check.toggled.connect(self._on_thumbnail_tonemap_toggled)
         self.thumbnail_tonemap_combo.currentTextChanged.connect(self._on_thumbnail_view_changed)
-
-        # List View Events
         self.list_view.verticalScrollBar().valueChanged.connect(self.update_timer.start)
         self.list_view.resized.connect(self.update_timer.start)
         self.update_timer.timeout.connect(self._update_visible_previews)
         self.list_view.clicked.connect(self._on_item_clicked)
-
-        # Context Menu
         self.list_view.customContextMenuRequested.connect(self._show_context_menu)
         self.open_action.triggered.connect(self._context_open_file)
         self.show_action.triggered.connect(self._context_show_in_explorer)
         self.delete_action.triggered.connect(self._context_delete_file)
-
-        # Comparison Logic Signals (State Pattern)
         self.compare_button.clicked.connect(self._show_comparison_view)
         self.back_button.clicked.connect(self._back_to_list_view)
         self.compare_type_combo.currentTextChanged.connect(self._on_compare_mode_change)
         self.overlay_alpha_slider.valueChanged.connect(self._on_overlay_alpha_change)
         self.compare_bg_alpha_slider.valueChanged.connect(self._on_alpha_change)
-
         self.state.candidates_changed.connect(self._update_compare_button)
         self.state.candidate_updated.connect(self._on_candidate_updated)
         self.state.image_loaded.connect(self._on_full_res_image_loaded)
         self.state.load_complete.connect(self._on_load_complete)
         self.state.load_error.connect(self.log_message.emit)
-
         self.compare_tonemap_check.toggled.connect(self.settings_manager.set_compare_tonemap_enabled)
         self.compare_tonemap_check.toggled.connect(self._on_compare_tonemap_changed)
-
         self.tonemap_view_combo.currentTextChanged.connect(self.settings_manager.set_tonemap_view)
         self.tonemap_view_combo.currentTextChanged.connect(self._on_tonemap_view_changed)
-
         self.tiling_check.toggled.connect(self._on_tiling_toggled)
 
     def _set_viewer_mode(self, is_grid: bool):
@@ -423,7 +368,6 @@ class ImageViewerPanel(QGroupBox):
 
     @Slot()
     def _context_delete_file(self):
-        """Delegates deletion to the ResultsController."""
         if (
             self.context_menu_path
             and QMessageBox.question(
@@ -433,7 +377,6 @@ class ImageViewerPanel(QGroupBox):
             )
             == QMessageBox.StandardButton.Yes
         ):
-            # Using Controller instead of direct file op manager
             self.controller.request_deletion([self.context_menu_path])
 
     @Slot(list)
@@ -441,8 +384,6 @@ class ImageViewerPanel(QGroupBox):
         self.model.set_items_from_list(items)
         self._back_to_list_view()
         QTimer.singleShot(50, self.update_timer.start)
-
-    # --- Tonemapping Logic ---
 
     @Slot(bool)
     def _on_thumbnail_tonemap_toggled(self, checked: bool):
@@ -471,8 +412,6 @@ class ImageViewerPanel(QGroupBox):
             if self.compare_container.isVisible():
                 self._show_comparison_view()
 
-    # --- Load/Save Settings ---
-
     def load_settings(self, settings: AppSettings):
         self.preview_size_slider.setValue(settings.viewer.preview_size)
         self.bg_alpha_check.setChecked(settings.viewer.show_transparency)
@@ -496,33 +435,29 @@ class ImageViewerPanel(QGroupBox):
     def clear_viewer(self):
         self.update_timer.stop()
         self.model.set_items_from_list([])
-        self.current_group_id = None
+        self.view_state.current_group_id = None
         self._back_to_list_view()
-
-    # --- Core Logic ---
 
     @Slot(list, int, object)
     def show_image_group(self, items: list, group_id: int, scroll_to_path: Path | None):
-        if self.current_group_id == group_id and not scroll_to_path:
+        if self.view_state.current_group_id == group_id and not scroll_to_path:
             return
 
         self._back_to_list_view()
-        self.current_group_id = group_id
+        self.view_state.current_group_id = group_id
         self.state.clear_candidates()
         self.model.set_items_from_list(items)
         self.model.group_id = group_id
 
-        if self.model.rowCount() == 0 and self.current_group_id is not None:
-            self.group_became_empty.emit(self.current_group_id)
-            self.current_group_id = None
+        if self.model.rowCount() == 0 and self.view_state.current_group_id is not None:
+            self.group_became_empty.emit(self.view_state.current_group_id)
+            self.view_state.current_group_id = None
             return
 
         if self.model.rowCount() > 0:
             self.list_view.scrollToTop()
-            # Force size update to current slider value
             self.delegate.set_preview_size(self.preview_size_slider.value())
             self.list_view.set_preview_size(self.preview_size_slider.value())
-
             self._on_thumbnail_tonemap_toggled(self.thumbnail_tonemap_check.isChecked())
             QTimer.singleShot(50, self.update_timer.start)
             if scroll_to_path:
@@ -537,27 +472,15 @@ class ImageViewerPanel(QGroupBox):
 
     @Slot(int)
     def _on_preview_size_sliding(self, value: int):
-        """
-        Visual Update Only (Fast).
-        Called continuously while dragging the slider.
-        """
-        # Updates the paint delegate (rendering size)
         self.delegate.set_preview_size(value)
-        # Updates the list view grid size hints
         self.list_view.set_preview_size(value)
-        # Forces re-layout of the grid without reloading data
         self.list_view.doItemsLayout()
         self.list_view.viewport().update()
 
     @Slot()
     def _on_preview_size_confirmed(self):
-        """
-        Data Reload (Slow).
-        Called when slider is released.
-        """
         new_size = self.preview_size_slider.value()
         self.settings_manager.set_preview_size(new_size)
-        # This triggers clear_cache() inside the model
         self.model.set_target_size(new_size)
         self.list_view.viewport().update()
 
@@ -583,8 +506,6 @@ class ImageViewerPanel(QGroupBox):
         self.compare_button.setText(f"Compare ({count})")
         self.compare_button.setEnabled(count == 2)
 
-    # --- Comparison Logic ---
-
     def _show_comparison_view(self):
         if len(self.state.get_candidates()) != 2:
             return
@@ -604,7 +525,6 @@ class ImageViewerPanel(QGroupBox):
             self.compare_view_1.setPixmap(pixmap)
         elif path_str == paths[1]:
             self.compare_view_2.setPixmap(pixmap)
-
         self.compare_widget.setPixmaps(self.compare_view_1.pixmap, self.compare_view_2.pixmap)
 
     @Slot()
@@ -618,7 +538,6 @@ class ImageViewerPanel(QGroupBox):
             return
         act1 = self._get_channel_activity(images[0])
         act2 = self._get_channel_activity(images[1])
-
         for channel, button in self.channel_buttons.items():
             is_active = act1.get(channel, False) or act2.get(channel, False)
             button.setEnabled(is_active)
@@ -630,14 +549,11 @@ class ImageViewerPanel(QGroupBox):
             button.setEnabled(True)
             button.setChecked(True)
             self._update_channel_button_style(button, True)
-
         self.state.stop_loaders()
         self.tiling_check.setChecked(False)
-
         self._reset_compare_views()
         self._set_view_mode(is_list=True)
         self.list_view.viewport().update()
-
         if self.model.rowCount() > 0:
             self.update_timer.start()
 
@@ -651,7 +567,6 @@ class ImageViewerPanel(QGroupBox):
         mode = CompareMode(text)
         is_overlay = mode == CompareMode.OVERLAY
         is_diff = mode == CompareMode.DIFF or mode == CompareMode.HEATMAP
-
         self.compare_stack.setCurrentIndex(
             2 if is_diff else (1 if mode in [CompareMode.WIPE, CompareMode.OVERLAY] else 0)
         )
@@ -672,16 +587,9 @@ class ImageViewerPanel(QGroupBox):
         self.compare_bg_alpha_check.setChecked(state)
         for w in [self.alpha_slider, self.alpha_label, self.compare_bg_alpha_slider]:
             w.setEnabled(state)
-
         self.delegate.set_transparency_enabled(state)
-        for view in [
-            self.compare_view_1,
-            self.compare_view_2,
-            self.compare_widget,
-            self.diff_view,
-        ]:
+        for view in [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]:
             view.set_transparency_enabled(state)
-
         self.settings_manager.set_show_transparency(state)
         self.list_view.viewport().update()
         self.compare_container.update()
@@ -693,13 +601,7 @@ class ImageViewerPanel(QGroupBox):
         self.compare_bg_alpha_slider.setValue(value)
         self.delegate.set_bg_alpha(value)
         self.list_view.viewport().update()
-
-        for view in [
-            self.compare_view_1,
-            self.compare_view_2,
-            self.compare_widget,
-            self.diff_view,
-        ]:
+        for view in [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]:
             view.set_alpha(value)
 
     @Slot(int)
@@ -709,7 +611,7 @@ class ImageViewerPanel(QGroupBox):
     @Slot(bool)
     def _on_channel_toggled(self, is_checked):
         if sender := self.sender():
-            self.channel_states[sender.text()] = is_checked
+            self.view_state.set_channel(sender.text(), is_checked)
             self._update_channel_button_style(sender, is_checked)
             self._update_compare_views()
 
@@ -730,32 +632,10 @@ class ImageViewerPanel(QGroupBox):
         if len(images) != 2:
             return
 
-        active_channels = [ch for ch, is_active in self.channel_states.items() if is_active]
-        num_active = len(active_channels)
-
         def get_processed_pixmap(pil_image: Image.Image) -> QPixmap:
-            if pil_image.mode != "RGBA":
-                pil_image = pil_image.convert("RGBA")
-            if num_active == 1:
-                ch = pil_image.getchannel(active_channels[0])
-                gray = Image.merge("RGB", (ch, ch, ch))
-                gray.putalpha(Image.new("L", gray.size, 255))
-                return QPixmap.fromImage(ImageQt(gray))
-            else:
-                r, g, b, a = pil_image.split()
-                # If only RGB is selected and Alpha is 0 but has RGB data, force full alpha for view
-                # (Simplified check)
-
-                if not self.channel_states["R"]:
-                    r = r.point(lambda _: 0)
-                if not self.channel_states["G"]:
-                    g = g.point(lambda _: 0)
-                if not self.channel_states["B"]:
-                    b = b.point(lambda _: 0)
-                if not self.channel_states["A"]:
-                    a = a.point(lambda _: 255)
-
-                return QPixmap.fromImage(ImageQt(Image.merge("RGBA", (r, g, b, a))))
+            # REFACTOR: Use centralized logic
+            processed = process_image_channels(pil_image, self.view_state.channels)
+            return QPixmap.fromImage(ImageQt(processed))
 
         current_mode = CompareMode(self.compare_type_combo.currentText())
         if current_mode == CompareMode.DIFF:
@@ -778,7 +658,6 @@ class ImageViewerPanel(QGroupBox):
         if img.mode != "RGBA":
             img = img.convert("RGBA")
         activity = {}
-        # Channel Indices: 0=R, 1=G, 2=B, 3=A
         names = ["R", "G", "B", "A"]
         for i, name in enumerate(names):
             try:
@@ -792,66 +671,20 @@ class ImageViewerPanel(QGroupBox):
         images = self.state.get_pil_images()
         if len(images) != 2:
             return None
-        img1, img2 = images[0], images[1]
 
-        # Resize largest
-        if img1.size != img2.size:
-            ts = (max(img1.width, img2.width), max(img1.height, img2.height))
-            img1 = img1.resize(ts, Image.Resampling.LANCZOS)
-            img2 = img2.resize(ts, Image.Resampling.LANCZOS)
-
-        if img1.mode != "RGBA":
-            img1 = img1.convert("RGBA")
-        if img2.mode != "RGBA":
-            img2 = img2.convert("RGBA")
-
-        r1, g1, b1, a1 = img1.split()
-        r2, g2, b2, a2 = img2.split()
-
-        r_diff = ImageChops.difference(r1, r2) if self.channel_states["R"] else Image.new("L", img1.size, 0)
-        g_diff = ImageChops.difference(g1, g2) if self.channel_states["G"] else Image.new("L", img1.size, 0)
-        b_diff = ImageChops.difference(b1, b2) if self.channel_states["B"] else Image.new("L", img1.size, 0)
-        a_diff = ImageChops.difference(a1, a2) if self.channel_states["A"] else Image.new("L", img1.size, 0)
-
-        if heatmap:
-            # Heatmap Logic: Merge absolute differences into a single intensity channel
-            # We add differences from all active channels
-            diff_sum = ImageChops.add(r_diff, g_diff)
-            diff_sum = ImageChops.add(diff_sum, b_diff)
-            # Alpha diff usually handled separately, but we include it for visual check
-            diff_sum = ImageChops.add(diff_sum, a_diff)
-
-            # Colorize: Black -> Blue (Safe), White -> Red (Diff)
-            # Fix: Use keyword arguments to avoid TypeError
-            return QPixmap.fromImage(ImageQt(ImageOps.colorize(diff_sum, black="blue", white="red")))
-
-        else:
-            # Standard Difference View (Grayscale per channel)
-            # Force Alpha to 255 for the output diff image so it's visible
-            return QPixmap.fromImage(ImageQt(Image.merge("RGBA", (r_diff, g_diff, b_diff, Image.new("L", img1.size, 255)))))
-
-    # --- Zoom & Pan Sync ---
+        # REFACTOR: Use centralized logic
+        result_img = calculate_diff_image(images[0], images[1], self.view_state.channels, heatmap)
+        return QPixmap.fromImage(ImageQt(result_img))
 
     @Slot(bool)
     def _on_tiling_toggled(self, checked: bool):
-        for v in [
-            self.compare_view_1,
-            self.compare_view_2,
-            self.compare_widget,
-            self.diff_view,
-        ]:
+        for v in [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]:
             v.set_tiling_enabled(checked)
 
     @Slot(float, QPoint)
     def _sync_views(self, zoom: float, offset: QPoint):
-        """Synchronizes zoom/pan across all compare widgets."""
         sender = self.sender()
-        widgets = [
-            self.compare_view_1,
-            self.compare_view_2,
-            self.compare_widget,
-            self.diff_view,
-        ]
+        widgets = [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]
         for w in widgets:
             if w != sender:
                 w.blockSignals(True)
@@ -860,13 +693,7 @@ class ImageViewerPanel(QGroupBox):
 
     @Slot()
     def _reset_compare_views(self):
-        """Resets zoom and pan to default (Fit)."""
-        widgets = [
-            self.compare_view_1,
-            self.compare_view_2,
-            self.compare_widget,
-            self.diff_view,
-        ]
+        widgets = [self.compare_view_1, self.compare_view_2, self.compare_widget, self.diff_view]
         for w in widgets:
             w.blockSignals(True)
             w.reset_view()
