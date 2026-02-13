@@ -134,15 +134,17 @@ class DatabaseService:
         if not self.is_ready or not data_dicts:
             return
 
-        # Ensure IDs are unique
         prepared_data = []
         for d in data_dicts:
-            # Create deterministic ID based on path + channel
-            unique_str = str(d["path"]) + (d.get("channel") or "")
-            uid = str(uuid.uuid5(uuid.NAMESPACE_URL, unique_str))
-
             item = d.copy()
-            item["id"] = uid
+
+            # Optimization: Only generate UUID if not provided by Domain layer.
+            # The Pipeline usually pre-calculates this via ImageFingerprint.to_lancedb_dict()
+            if "id" not in item or not item["id"]:
+                # Create deterministic ID based on path + channel
+                unique_str = str(d["path"]) + (d.get("channel") or "")
+                item["id"] = str(uuid.uuid5(uuid.NAMESPACE_URL, unique_str))
+
             prepared_data.append(item)
 
         with self._access_lock:

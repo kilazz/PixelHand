@@ -2,7 +2,11 @@
 import logging
 import multiprocessing
 
-import onnxruntime
+try:
+    import onnxruntime
+except ImportError:
+    onnxruntime = None
+
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QComboBox,
@@ -62,7 +66,7 @@ class PerformancePanel(QGroupBox):
 
     def _detect_and_setup_devices(self):
         self.device_combo.clear()
-        if not DEEP_LEARNING_AVAILABLE:
+        if not DEEP_LEARNING_AVAILABLE or onnxruntime is None:
             self.device_combo.addItem("CPUExecutionProvider", "CPUExecutionProvider")
             return
         try:

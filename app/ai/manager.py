@@ -70,6 +70,7 @@ class InferenceEngine:
         if not DEEP_LEARNING_AVAILABLE:
             raise ImportError("Required deep learning libraries not found.")
 
+        self.model_name = model_name  # Store name for state validation
         self.model_dir = models_dir / model_name
         self.device = device
         self.model_dim = model_dim
@@ -296,12 +297,20 @@ def worker_preprocess_task(
     Returns (pixel_values, success_paths, skipped_items).
     This function is picklable and suitable for ProcessPoolExecutor.
     """
-    global _WORKER_PREPROCESSOR
+    global _WORKER_PREPROCESSOR, _WORKER_ENGINE
 
-    # Self-initialization for multiprocessing workers
-    if not _WORKER_PREPROCESSOR and "init_config" in simple_config:
+    req_config = simple_config.get("init_config")
+
+    # State Validation:
+    # Ensure worker has initialized, AND that it is initialized with the CORRECT model.
+    # ProcessPool workers persist across scans, so we must detect model switches.
+    needs_init = False
+    if not _WORKER_PREPROCESSOR or (_WORKER_ENGINE and req_config and _WORKER_ENGINE.model_name != req_config["model_name"]):
+        needs_init = True
+
+    if needs_init and req_config:
         try:
-            init_worker(simple_config["init_config"])
+            init_worker(req_config)
         except Exception as e:
             return None, [], [(str(i.path), f"Worker Init Failed: {e}") for i in items]
 
@@ -352,41 +361,6 @@ def run_inference_direct(pixel_values: np.ndarray, paths_with_channels: list) ->
     except Exception as e:
         _log_worker_crash(e, "inference")
         return {}, [(p, f"Infer Error: {e}") for p, _ in paths_with_channels]
-
-
-def worker_get_single_vector(image_path_str: str) -> np.ndarray | None:
-    """Runs a single image inference (used for Sample Search)."""
-    global _WORKER_ENGINE, _WORKER_PREPROCESSOR
-    if not _WORKER_ENGINE or not _WORKER_PREPROCESSOR:
-        return None
-    try:
-        from app.domain.data_models import AnalysisItem
-
-        items = [AnalysisItem(path=Path(image_path_str), analysis_type="Composite")]
-        images, _, _ = ImageBatchPreprocessor.prepare_batch(items, _WORKER_ENGINE.input_size)
-
-        if images:
-            # Same fix applied here for single vector
-            px_pt = _WORKER_PREPROCESSOR(images=images, return_tensors="pt").pixel_values
-            px = px_pt.detach().cpu().numpy()
-
-            if _WORKER_ENGINE.is_fp16:
-                px = px.astype(np.float16)
-
-            # Use IO Binding manually here or just calling standard run via engine
-            # Calling engine's method is cleaner but requires batch format
-            return _WORKER_ENGINE.encode_visual_batch(px).flatten()
-    except Exception:
-        pass
-    return None
-
-
-def worker_get_text_vector(text: str) -> np.ndarray | None:
-    """Runs text inference (used for Text Search)."""
-    global _WORKER_ENGINE
-    if _WORKER_ENGINE:
-        return _WORKER_ENGINE.get_text_features(text)
-    return None
 
 
 def _log_worker_crash(e: Exception, context: str):
