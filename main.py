@@ -8,7 +8,6 @@ import ctypes
 import faulthandler
 import logging
 import multiprocessing
-import os
 import sys
 import traceback
 from datetime import UTC, datetime
@@ -23,9 +22,6 @@ except NameError:
 sys.path.insert(0, str(script_dir))
 
 # --- ENVIRONMENT CONFIGURATION ---
-# Fix for OpenCV IO issues with EXR files if used by dependencies
-os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
-
 # We must import constants BEFORE any other app module.
 # This ensures os.environ["HF_HOME"] is set to the portable path
 # before 'transformers' is imported by ModelManager/Container.

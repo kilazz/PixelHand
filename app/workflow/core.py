@@ -10,7 +10,6 @@ import time
 
 from app.domain.config import ScanConfig
 from app.domain.data_models import ScanMode, ScanState
-from app.infrastructure.cache import setup_caches, teardown_caches
 from app.infrastructure.container import ServiceContainer
 
 # Strategies
@@ -48,15 +47,12 @@ class ScannerCore:
         self.all_skipped_files.clear()
 
         try:
-            # 1. Setup lightweight caches (thumbnails)
-            setup_caches(self.config)
-
-            # 2. Initialize Database Service via Container
+            # 1. Initialize Database Service via Container
             if not self.services.db_service.initialize(self.config):
                 self.services.event_bus.scan_error.emit("Failed to initialize Database Service.")
                 return
 
-            # 3. Select Strategy
+            # 2. Select Strategy
             strategy_map = {
                 ScanMode.DUPLICATES: FindDuplicatesStrategy,
                 ScanMode.TEXT_SEARCH: SearchStrategy,
@@ -89,9 +85,6 @@ class ScannerCore:
                 logger.critical(f"Critical scan error: {e}", exc_info=True)
                 self.services.event_bus.scan_error.emit(f"Scan aborted: {e}")
         finally:
-            # 4. Cleanup
-            teardown_caches()
-
             total_duration = time.time() - start_time
             logger.info(f"Scan logic finished in {total_duration:.2f}s")
 

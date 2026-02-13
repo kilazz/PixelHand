@@ -38,6 +38,7 @@ from app.ui.background_tasks import (
 )
 
 if TYPE_CHECKING:
+    from app.infrastructure.cache import AbstractThumbnailCache
     from app.infrastructure.db_service import DatabaseService
 
 app_logger = logging.getLogger("PixelHand.ui.models")
@@ -614,7 +615,7 @@ class ResultsTreeModel(QAbstractItemModel):
 class ImagePreviewModel(QAbstractListModel):
     file_missing = Signal(Path)
 
-    def __init__(self, thread_pool: QThreadPool, parent=None):
+    def __init__(self, thread_pool: QThreadPool, cache_provider: "AbstractThumbnailCache", parent=None):
         super().__init__(parent)
         self.group_id = -1
         self.items = []
@@ -622,6 +623,7 @@ class ImagePreviewModel(QAbstractListModel):
         self.vfx_flags = {}
         self.CACHE_SIZE_LIMIT = 200
         self.thread_pool = thread_pool
+        self.cache_provider = cache_provider
         self.loading_paths = set()
         self.active_tasks = {}
         self.tonemap_mode = "none"
@@ -687,7 +689,14 @@ class ImagePreviewModel(QAbstractListModel):
             if ui_key not in self.loading_paths:
                 self.loading_paths.add(ui_key)
                 loader = ImageLoader(
-                    item.path, item.mtime, self.target_size, self.tonemap_mode, True, item.channel, ui_key
+                    item.path,
+                    item.mtime,
+                    self.target_size,
+                    self.cache_provider,
+                    self.tonemap_mode,
+                    True,
+                    item.channel,
+                    ui_key,
                 )
                 loader.signals.result.connect(self._on_image_loaded)
                 loader.signals.error.connect(self._on_image_error)

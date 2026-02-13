@@ -16,6 +16,7 @@ from PySide6.QtGui import QPixmap
 from app.domain.data_models import ResultNode
 
 if TYPE_CHECKING:
+    from app.infrastructure.cache import AbstractThumbnailCache
     from app.ui.background_tasks import ImageLoader
 
 
@@ -75,10 +76,6 @@ class ViewerState(QObject):
         self._data.zoom = 1.0
         self._data.pan_offset = QPoint(0, 0)
 
-    # Note: Zoom/Pan are often updated continuously by the widget events,
-    # so we might not emit a signal for every micro-change if performance is key,
-    # but the state object serves as a source of truth.
-
 
 class ImageComparerState(QObject):
     """Manages the state and logic for the image comparison view."""
@@ -90,14 +87,16 @@ class ImageComparerState(QObject):
     load_complete = Signal()
     load_error = Signal(str, str)
 
-    def __init__(self, thread_pool: QThreadPool):
+    def __init__(self, thread_pool: QThreadPool, cache_provider: "AbstractThumbnailCache"):
         """Initializes the state manager.
 
         Args:
-            thread_pool: The shared QThreadPool from the main application to run background tasks.
+            thread_pool: The shared QThreadPool.
+            cache_provider: Injected cache service.
         """
         super().__init__()
         self.thread_pool = thread_pool
+        self.cache_provider = cache_provider
         self._candidates: OrderedDict[ResultNode, None] = OrderedDict()
         self._pil_images: dict[str, Image.Image] = {}
         self._active_loaders: dict[str, ImageLoader] = {}
@@ -157,6 +156,7 @@ class ImageComparerState(QObject):
                 path_str=path_str,
                 mtime=node.mtime,
                 target_size=None,
+                cache_provider=self.cache_provider,
                 tonemap_mode=tonemap_mode,
                 use_cache=False,
                 channel_to_load=None,

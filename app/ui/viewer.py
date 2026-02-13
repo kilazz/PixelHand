@@ -74,7 +74,8 @@ class ImageViewerPanel(QGroupBox):
         self.controller = controller
 
         # View Models & State
-        self.state = ImageComparerState(thread_pool)
+        # Pass injected cache service from the controller's services container
+        self.state = ImageComparerState(thread_pool, self.controller.services.thumbnail_cache)
         self.view_state = ViewerState()
 
         self.is_transparency_enabled = settings_manager.settings.viewer.show_transparency
@@ -177,7 +178,8 @@ class ImageViewerPanel(QGroupBox):
         self.compare_button = QPushButton("Compare (0)")
         parent_layout.addWidget(self.compare_button)
 
-        self.model = ImagePreviewModel(self.thread_pool, self)
+        # Inject cache service here
+        self.model = ImagePreviewModel(self.thread_pool, self.controller.services.thumbnail_cache, self)
         self.model.file_missing.connect(self.file_missing_detected.emit)
 
         self.delegate = ImageItemDelegate(self.settings_manager.settings.viewer.preview_size, self.state, self)

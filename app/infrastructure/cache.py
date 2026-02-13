@@ -7,8 +7,6 @@ import abc
 import hashlib
 import logging
 
-# --- Refactoring: Updated Imports ---
-from app.domain.config import ScanConfig
 from app.shared.constants import CACHE_DIR, LANCEDB_AVAILABLE
 
 logger = logging.getLogger("PixelHand.cache")
@@ -44,12 +42,6 @@ class LanceDBThumbnailCache(AbstractThumbnailCache):
             import pyarrow as pa
 
             db_path = CACHE_DIR / db_name
-
-            # Note: For now, we ignore in_memory request to ensure persistence
-            # and stability across large datasets.
-            # if in_memory and db_path.exists():
-            #     shutil.rmtree(db_path)
-
             db_path.mkdir(parents=True, exist_ok=True)
             self.db = lancedb.connect(str(db_path))
 
@@ -104,10 +96,6 @@ class DummyThumbnailCache(AbstractThumbnailCache):
         pass
 
 
-# Global thumbnail cache instance
-thumbnail_cache: AbstractThumbnailCache = DummyThumbnailCache()
-
-
 def get_thumbnail_cache_key(
     path_str: str,
     mtime: float,
@@ -119,16 +107,3 @@ def get_thumbnail_cache_key(
     size_str = str(target_size) if target_size is not None else "full"
     key_str = f"{path_str}|{mtime}|{size_str}|{tonemap_mode}|{channel_to_load or 'full'}"
     return hashlib.sha1(key_str.encode()).hexdigest()
-
-
-def setup_caches(config: ScanConfig):
-    global thumbnail_cache
-    thumbnail_cache.close()
-
-    thumbnail_cache = LanceDBThumbnailCache(in_memory=False) if LANCEDB_AVAILABLE else DummyThumbnailCache()
-
-
-def teardown_caches():
-    global thumbnail_cache
-    thumbnail_cache.close()
-    thumbnail_cache = DummyThumbnailCache()

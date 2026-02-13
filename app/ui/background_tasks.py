@@ -11,15 +11,13 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import send2trash
 from PIL import Image
 from PySide6.QtCore import QObject, QRunnable, QSemaphore, Signal
 
 from app.ai.optimizer import optimize_model_post_export
-from app.domain.data_models import FileOperation
 from app.imaging.image_io import get_image_metadata, load_image
 from app.imaging.processing import is_vfx_transparent_texture
-from app.infrastructure.cache import get_thumbnail_cache_key, thumbnail_cache
+from app.infrastructure.cache import AbstractThumbnailCache, get_thumbnail_cache_key
 from app.shared.constants import (
     DEEP_LEARNING_AVAILABLE,
     LANCEDB_AVAILABLE,
@@ -271,6 +269,7 @@ class ImageLoader(QRunnable):
         path_str: str,
         mtime: float,
         target_size: int | None,
+        cache_provider: AbstractThumbnailCache,
         tonemap_mode: str = TonemapMode.ENABLED.value,
         use_cache: bool = True,
         channel_to_load: str | None = None,
@@ -281,6 +280,7 @@ class ImageLoader(QRunnable):
         self.path_str = path_str
         self.mtime = mtime
         self.target_size = target_size
+        self.cache_provider = cache_provider
         self.tonemap_mode = tonemap_mode
         self.use_cache = use_cache
         self._is_cancelled = False
@@ -311,7 +311,7 @@ class ImageLoader(QRunnable):
 
             # 1. Check Cache (Fast, does not require semaphore)
             if self.use_cache and self.target_size and not self.is_cancelled:
-                cached_data = thumbnail_cache.get(cache_key)
+                cached_data = self.cache_provider.get(cache_key)
                 if cached_data:
                     try:
                         pil_img = Image.open(io.BytesIO(cached_data))
@@ -379,7 +379,7 @@ class ImageLoader(QRunnable):
                                 try:
                                     buffer = io.BytesIO()
                                     pil_img.save(buffer, "PNG")
-                                    thumbnail_cache.put(cache_key, buffer.getvalue())
+                                    self.cache_provider.put(cache_key, buffer.getvalue())
                                 except Exception:
                                     pass
 
@@ -469,71 +469,3 @@ class LanceDBBestPathFetcherTask(QRunnable):
 
         except Exception as e:
             app_logger.error(f"Best path fetch failed for group {self.group_id}: {e}")
-
-
-class FileOperationTask(QRunnable):
-    class Signals(QObject):
-        finished = Signal(list, int, int)
-        log = Signal(str, str)
-        progress_updated = Signal(str, int, int)
-
-    def __init__(
-        self, operation: FileOperation, paths: list[Path] | None = None, link_map: dict[Path, Path] | None = None
-    ):
-        super().__init__()
-        self.setAutoDelete(True)
-        self.operation = operation
-        self.paths = paths or []
-        self.link_map = link_map or {}
-        self.signals = self.Signals()
-
-    def run(self):
-        if self.operation == FileOperation.DELETING:
-            self._delete_worker(self.paths)
-        elif self.operation in [FileOperation.HARDLINKING, FileOperation.REFLINKING]:
-            method = "reflink" if self.operation == FileOperation.REFLINKING else "hardlink"
-            self._link_worker(self.link_map, method)
-        else:
-            self.signals.log_message.emit(f"Unknown mode: {self.operation.name}", "error")
-
-    def _delete_worker(self, paths: list[Path]):
-        moved, failed = [], 0
-        total = len(paths)
-        for i, path in enumerate(paths, 1):
-            self.signals.progress_updated.emit(f"Deleting: {path.name}", i, total)
-            try:
-                if path.exists():
-                    send2trash.send2trash(str(path))
-                    moved.append(path)
-                else:
-                    moved.append(path)
-            except Exception:
-                failed += 1
-        self.signals.finished.emit(moved, len(moved), failed)
-
-    def _link_worker(self, link_map: dict[Path, Path], method: str):
-        replaced, failed, failed_list = 0, 0, []
-        affected = list(link_map.keys())
-        total = len(affected)
-        can_reflink = hasattr(os, "reflink")
-
-        for i, (link_path, source_path) in enumerate(link_map.items(), 1):
-            self.signals.progress_updated.emit(f"Linking: {link_path.name}", i, total)
-            try:
-                if not (link_path.exists() and source_path.exists()):
-                    raise FileNotFoundError(f"Source or dest missing for {link_path.name}")
-                if os.name == "nt" and link_path.drive.lower() != source_path.drive.lower():
-                    raise OSError("Cross-drive link not supported")
-                os.remove(link_path)
-                if method == "reflink" and can_reflink:
-                    os.reflink(source_path, link_path)
-                else:
-                    os.link(source_path, link_path)
-                replaced += 1
-            except Exception as e:
-                failed += 1
-                failed_list.append(f"{link_path.name} ({type(e).__name__})")
-
-        if failed_list:
-            self.signals.log.emit(f"Failed to link: {', '.join(failed_list)}", "error")
-        self.signals.finished.emit(affected, replaced, failed)

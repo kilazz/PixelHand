@@ -145,7 +145,11 @@ class ResultsPanel(QGroupBox):
 
         # Grid Delegate needs ThreadPool for async thumbnail loading
         # QThreadPool.globalInstance() is used for UI rendering tasks
-        self.grid_delegate = GroupGridDelegate(QThreadPool.globalInstance(), self)
+        self.grid_delegate = GroupGridDelegate(
+            QThreadPool.globalInstance(),
+            self.controller.services.thumbnail_cache,
+            self,
+        )
         self.results_grid.setItemDelegate(self.grid_delegate)
 
     def _init_context_menu(self):

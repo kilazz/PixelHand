@@ -6,6 +6,7 @@ Handles custom painting for Group Grid View and Image Viewer (List/Grid).
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QModelIndex, QRect, QSize, Qt, Slot
@@ -20,6 +21,9 @@ from app.ui.background_tasks import ImageLoader
 from app.ui.qt_models import VfxRole
 from app.ui.widgets import PaintUtilsMixin
 
+if TYPE_CHECKING:
+    from app.infrastructure.cache import AbstractThumbnailCache
+
 app_logger = logging.getLogger("PixelHand.ui.delegates")
 
 
@@ -29,9 +33,10 @@ class GroupGridDelegate(QStyledItemDelegate):
     Displays the best file's thumbnail, group name, and item count.
     """
 
-    def __init__(self, thread_pool, parent=None):
+    def __init__(self, thread_pool, cache_provider: "AbstractThumbnailCache", parent=None):
         super().__init__(parent)
         self.thread_pool = thread_pool
+        self.cache_provider = cache_provider
         self.padding = 10
         self.text_height = 60
         self.set_base_size(130)
@@ -146,6 +151,7 @@ class GroupGridDelegate(QStyledItemDelegate):
             path_str=path_str,
             mtime=0,
             target_size=250,
+            cache_provider=self.cache_provider,
             tonemap_mode="none",
             use_cache=True,
             ui_key=path_str,

@@ -8,23 +8,15 @@ ThreadPoolExecutor (I/O-bound).
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import imagehash
 import xxhash
+from PIL import Image, ImageStat
 
 from app.imaging.image_io import get_image_metadata, load_image
 from app.imaging.processing import is_vfx_transparent_texture
 
 if TYPE_CHECKING:
     from app.domain.data_models import AnalysisItem
-
-try:
-    import imagehash
-    from PIL import Image, ImageStat
-
-    IMAGEHASH_AVAILABLE = True
-except ImportError:
-    imagehash = None
-    Image = None
-    IMAGEHASH_AVAILABLE = False
 
 
 def worker_calculate_hashes_and_meta(path: Path) -> dict[str, Any] | None:
@@ -57,7 +49,6 @@ def worker_calculate_hashes_and_meta(path: Path) -> dict[str, Any] | None:
         return None
     except Exception:
         # Catch-all for corrupt files or library errors to prevent worker crash.
-        # We avoid printing stack traces to keep the console clean in production.
         return None
 
 
@@ -67,9 +58,6 @@ def worker_calculate_perceptual_hashes(item: "AnalysisItem", ignore_solid_channe
     """
     path = item.path
     analysis_type = item.analysis_type
-
-    if not IMAGEHASH_AVAILABLE:
-        return None
 
     try:
         # Optimization: We don't need full resolution for perceptual hashing.

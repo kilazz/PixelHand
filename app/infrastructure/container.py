@@ -10,8 +10,14 @@ from pathlib import Path
 
 # Import Core Services
 from app.ai.manager import ModelManager
+from app.infrastructure.cache import (
+    AbstractThumbnailCache,
+    DummyThumbnailCache,
+    LanceDBThumbnailCache,
+)
 from app.infrastructure.db_service import DatabaseService
 from app.infrastructure.task_manager import TaskManager
+from app.shared.constants import LANCEDB_AVAILABLE
 from app.shared.signal_bus import APP_SIGNAL_BUS, SignalBus
 
 logger = logging.getLogger("PixelHand.container")
@@ -27,6 +33,7 @@ class ServiceContainer:
     db_service: DatabaseService
     model_manager: ModelManager
     task_manager: TaskManager
+    thumbnail_cache: AbstractThumbnailCache
     event_bus: SignalBus
 
     # Context Paths
@@ -59,6 +66,12 @@ class ServiceContainer:
 
         # 2. Initialize Infrastructure Services
 
+        # Init UI Thumbnail Cache
+        if headless:
+            thumbnail_cache = DummyThumbnailCache()
+        else:
+            thumbnail_cache = LanceDBThumbnailCache(in_memory=False) if LANCEDB_AVAILABLE else DummyThumbnailCache()
+
         # Task Manager: Handles threading abstraction
         task_manager = TaskManager(headless=headless, max_workers=max_workers)
 
@@ -76,6 +89,7 @@ class ServiceContainer:
             db_service=db_service,
             model_manager=model_manager,
             task_manager=task_manager,
+            thumbnail_cache=thumbnail_cache,
             event_bus=event_bus,
             app_data_dir=app_data_dir,
             cache_dir=cache_dir,
@@ -107,7 +121,14 @@ class ServiceContainer:
         if self.task_manager:
             self.task_manager.shutdown()
 
-        # 4. Clean Temp Directory (Optional)
+        # 4. Close Thumbnail Cache
+        if self.thumbnail_cache:
+            try:
+                self.thumbnail_cache.close()
+            except Exception as e:
+                logger.error(f"Error closing cache: {e}")
+
+        # 5. Clean Temp Directory (Optional)
         try:
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
