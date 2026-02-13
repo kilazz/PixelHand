@@ -22,7 +22,7 @@
 #include <objbase.h>
 
 #include "DirectXTex.h"
-// Include needed for XMConvertHalfToFloat
+// Include needed for XMConvertHalfToFloatStream
 #include <DirectXPackedVector.h>
 
 namespace py = pybind11;
@@ -171,13 +171,13 @@ namespace LegacyUtils {
     bool IsXbox360Format(uint32_t fourCC) {
         switch (fourCC) {
             case MAKEFOURCC('1','T','X','D'):
-			case MAKEFOURCC('3','T','X','D'):
-			case MAKEFOURCC('5','T','X','D'):
+            case MAKEFOURCC('3','T','X','D'):
+            case MAKEFOURCC('5','T','X','D'):
             case MAKEFOURCC('0','1','X','D'):
-			case MAKEFOURCC('1','I','T','A'):
-			case MAKEFOURCC('2','I','T','A'):
+            case MAKEFOURCC('1','I','T','A'):
+            case MAKEFOURCC('2','I','T','A'):
             case MAKEFOURCC('U','4','C','B'):
-			case MAKEFOURCC('U','5','C','B'):
+            case MAKEFOURCC('U','5','C','B'):
                 return true;
             default: return false;
         }
@@ -260,9 +260,6 @@ namespace LegacyUtils {
 // =======================================================================================
 namespace NumpyUtils {
     float half_to_float(uint16_t half) {
-        // Use DirectXPackedVector instead of manual bit magic if possible,
-        // but manual bit magic is fine if headers are missing. The error C3861 meant the
-        // namespace was wrong in the refactor. Here we use the explicit call.
         return DirectX::PackedVector::XMConvertHalfToFloat(half);
     }
 
@@ -297,12 +294,20 @@ namespace NumpyUtils {
         py::buffer_info buf = numpy_array.request();
         auto* dst_ptr = static_cast<float*>(buf.ptr);
         const auto* src_ptr_base = image->pixels;
+
+        // Optimization: Use DirectXMath Stream conversion (SIMD)
         for (size_t y = 0; y < image->height; ++y) {
             const auto* src_row_ptr = reinterpret_cast<const uint16_t*>(src_ptr_base + y * image->rowPitch);
             float* dst_row_ptr = dst_ptr + y * image->width * num_components;
-            for (size_t i = 0; i < image->width * num_components; ++i) {
-                dst_row_ptr[i] = half_to_float(src_row_ptr[i]);
-            }
+
+            // This function converts an array of halfs to floats using SSE/AVX
+            DirectX::PackedVector::XMConvertHalfToFloatStream(
+                dst_row_ptr,
+                sizeof(float),
+                reinterpret_cast<const DirectX::PackedVector::HALF*>(src_row_ptr),
+                sizeof(uint16_t),
+                image->width * num_components
+            );
         }
         return py::object(numpy_array);
     }
@@ -334,7 +339,6 @@ namespace NumpyUtils {
             case DXGI_FORMAT_B8G8R8A8_UNORM:
             case DXGI_FORMAT_B8G8R8X8_UNORM:
             case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: {
-                // Explicit shape
                 std::vector<py::ssize_t> shape = {(py::ssize_t)image->height, (py::ssize_t)image->width, 4};
                 auto arr = py::array_t<uint8_t>(shape);
                 py::buffer_info buf = arr.request();
@@ -380,10 +384,6 @@ namespace NumpyUtils {
                 }
                 return arr;
             }
-            // Added missing BC7/SRGB cases to fallback logic (by treating them as 8-bit/float earlier in pipeline)
-            // BUT here we are converting raw pixel data. BC7 must be decompressed BEFORE calling this.
-            // The decode_dds function handles decompression.
-
             case DXGI_FORMAT_B5G6R5_UNORM: {
                 std::vector<py::ssize_t> shape = {(py::ssize_t)image->height, (py::ssize_t)image->width, 4};
                 auto arr = py::array_t<uint8_t>(shape);

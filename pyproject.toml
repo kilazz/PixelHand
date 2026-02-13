@@ -35,7 +35,9 @@ dependencies = [
     "simple-ocio>=0.2.0",
     "Pillow>=12.1.1",
     "OpenImageIO>=3.1.10.0",
-    #"directxtex-decoder", #for DDS
+    # Custom C++ Extensions
+	#.tools\uv.exe pip install ./src_directxtex_decoder --python .venv-cpu --force-reinstall
+    "directxtex-decoder",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,10 @@ dev = [
     "tqdm",
 ]
 
+# Tell uv to build this package from the local directory
+[tool.uv.sources]
+directxtex-decoder = { path = "src_directxtex_decoder" }
+
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
 
@@ -65,7 +71,7 @@ exclude = [
 	".venv-directml",
 	".venv-cuda",
 	".venv-cpu",
-    "_src_directxtex_decoder",
+    "src_directxtex_decoder",
     "tests",
 ]
 
@@ -96,7 +102,7 @@ exclude = [
     ".vscode",
     "node_modules",
 	".ruff_cache",
-	"_src_directxtex_decoder",
+	"src_directxtex_decoder",
 	"app_data",
 	"venv",
 	".venv",
