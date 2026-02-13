@@ -40,6 +40,13 @@ class CMakeBuild(build_ext):
         # Arguments for the CMake build step
         build_args = ["--config", "Release"]
 
+        # Add compiler optimization flags for MSVC
+        if sys.platform == "win32":
+            # /O2: Maximize Speed
+            # /Ob2: Inline Function Expansion (Any Suitable)
+            # /Oi: Generate Intrinsic Functions
+            cmake_args.append("-DCMAKE_CXX_FLAGS_RELEASE=/O2 /Ob2 /Oi /DNDEBUG")
+
         # Temporary build directory
         build_temp = Path(self.build_temp) / ext.name
         if build_temp.exists():

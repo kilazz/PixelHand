@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cmath>
 #include <limits>
+#include <future> // Added for std::async
 
 #define NOMINMAX
 #include <Windows.h>
@@ -666,14 +667,24 @@ py::dict decode_dds(const py::bytes& dds_bytes, size_t mip_level = 0, py::ssize_
         throw py::value_error("Array index is out of bounds");
     }
 
-    std::vector<std::unique_ptr<ScratchImage>> processed_images;
+    std::vector<std::unique_ptr<ScratchImage>> processed_images(num_images_to_process);
+    std::vector<std::future<void>> futures;
+
+    // Use async tasks for parallel decompression/conversion of array slices or volume depth layers
     for (size_t i = 0; i < num_images_to_process; ++i) {
-        size_t current_index = load_all ? i : static_cast<size_t>(array_index);
-        const DirectX::Image* selected_image = image->GetImage(mip_level, current_index, 0);
-        if (!selected_image) {
-            throw DDSLoadError("Failed to get image slice for index " + std::to_string(current_index));
-        }
-        processed_images.push_back(process_single_image(selected_image));
+        futures.push_back(std::async(std::launch::async, [&](size_t idx) {
+            size_t current_index = load_all ? idx : static_cast<size_t>(array_index);
+            const DirectX::Image* selected_image = image->GetImage(mip_level, current_index, 0);
+            if (!selected_image) {
+                throw DDSLoadError("Failed to get image slice for index " + std::to_string(current_index));
+            }
+            processed_images[idx] = process_single_image(selected_image);
+        }, i));
+    }
+
+    // Wait for all processing to complete and propagate exceptions
+    for (auto& f : futures) {
+        f.get();
     }
 
     const DirectX::Image* first_final_image = processed_images[0]->GetImage(0, 0, 0);
