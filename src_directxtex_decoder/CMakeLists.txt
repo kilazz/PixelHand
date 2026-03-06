@@ -1,13 +1,21 @@
-# Minimum required version of CMake.
-cmake_minimum_required(VERSION 3.12)
+# Modern CMake minimum version
+cmake_minimum_required(VERSION 4.0)
 
-# The project name.
 project(directxtex_decoder_project)
 
-# Find the pybind11 package, required for creating Python bindings.
-find_package(pybind11 REQUIRED)
+# Find Python first
+find_package(Python 3.13 COMPONENTS Interpreter Development.Module REQUIRED)
 
-# Set the C++17 standard.
+# Find or download nanobind
+include(FetchContent)
+FetchContent_Declare(
+  nanobind
+  GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+  GIT_TAG        v2.12.0
+)
+FetchContent_MakeAvailable(nanobind)
+
+# Set the C++17 standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -21,18 +29,12 @@ add_subdirectory(external/DirectXTex)
 
 # --- Main Target Definition ---
 # Create the Python module "directxtex_decoder" from its source file.
-pybind11_add_module(directxtex_decoder directxtex_decoder/decoder.cpp)
-
-# This block corrects the output path for the final compiled library (.pyd).
-# Without it, Visual Studio would create extra /Debug or /Release subfolders,
-# breaking the setuptools build process.
-set_target_properties(directxtex_decoder PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
-    LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
-    LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_LIBRARY_OUTPUT_DIRECTORY}"
-)
+nanobind_add_module(directxtex_decoder directxtex_decoder/decoder.cpp)
 
 # --- Linking ---
 # Link our Python module against the DirectXTex static library.
 target_link_libraries(directxtex_decoder PRIVATE DirectXTex)
+
+# --- Installation ---
+# scikit-build-core requires an install command to know what to package
+install(TARGETS directxtex_decoder DESTINATION .)

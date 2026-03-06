@@ -1,11 +1,16 @@
-# This file tells pip which packages are required to build the C++ module.
-# It ensures that build dependencies are installed *before* setup.py is executed.
-
 [build-system]
-# A list of all dependencies needed to run setup.py and compile the C++ code.
-requires = [
-    "setuptools",
-    "cmake",
-    "pybind11"
-]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core", "nanobind"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "directxtex_decoder"
+version = "1.0.0"
+description = "DDS decoder"
+authors = [{ name = "kilazz" }]
+requires-python = ">=3.13"
+
+[tool.scikit-build]
+cmake.version = ">=4.0"
+cmake.build-type = "Release"
+ninja.make-fallback = true
+sdist.include = ["directxtex_decoder/**/*", "external/**/*", "CMakeLists.txt"]
