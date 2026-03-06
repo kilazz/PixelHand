@@ -284,8 +284,7 @@ class ItemGenerationStage(ScanStage):
             if compare_by_channel and (
                 not channel_split_tags or any(tag in path.name.lower() for tag in channel_split_tags)
             ):
-                for channel in active_channels:
-                    items.append(AnalysisItem(path=path, analysis_type=channel))
+                items.extend(AnalysisItem(path=path, analysis_type=channel) for channel in active_channels)
             elif compare_by_luminance:
                 items.append(AnalysisItem(path=path, analysis_type="Luminance"))
             else:

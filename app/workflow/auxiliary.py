@@ -283,7 +283,7 @@ class VisualizationTask(QRunnable):
             df = pl.from_arrow(arrow_table)
             grouped = df.partition_by("group_id", as_dict=True)
 
-            for _group_id, group_df in grouped.items():
+            for group_df in grouped.values():
                 rows = group_df.to_dicts()
                 best_row = next((r for r in rows if r["is_best"]), None)
                 if not best_row:

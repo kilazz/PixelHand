@@ -109,14 +109,16 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle: errors (e.g., indentation, syntax)
-    "W",   # pycodestyle: warnings (e.g., line length)
-    "F",   # Pyflakes: logical errors (undefined names, unused imports)
-    "I",   # isort: sorting and formatting of imports
-    "B",   # flake8-bugbear: finds likely bugs and design problems
-    "UP",  # pyupgrade: upgrades syntax to newer Python versions
-    "SIM", # flake8-simplify: suggests simplifications for complex code
-    "RUF", # Enables Ruff's native, fast, and often unique checks
+    "E",    # pycodestyle: errors (e.g., indentation, syntax)
+    "W",    # pycodestyle: warnings (e.g., line length)
+    "F",    # Pyflakes: logical errors (undefined names, unused imports)
+    "I",    # isort: sorting and formatting of imports
+    "B",    # flake8-bugbear: finds likely bugs and design problems
+    "UP",   # pyupgrade: upgrades syntax to newer Python versions
+    "SIM",  # flake8-simplify: suggests simplifications for complex code
+    "RUF",  # Enables Ruff's native, fast, and often unique checks
+    "PERF", # Perflint: Performance anti-patterns
+    "FURB", # Refurb: Modernize Python code
 ]
 
 ignore = ["E501"]
