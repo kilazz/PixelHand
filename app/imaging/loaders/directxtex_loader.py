@@ -52,9 +52,7 @@ class DirectXTexLoader(BaseLoader):
 
             # Pillow might hold a reference to the numpy array, which holds a reference
             # to C++ memory that might get garbage collected.
-            # Calling .load() forces Pillow to copy the data into its own memory buffer.
-            pil_image.load()
-            # Alternatively, creating a full copy explicitly:
+            # Creating a full copy explicitly forces Pillow to copy the data into its own memory buffer.
             pil_image = pil_image.copy()
 
             ignore_zero_alpha = shrink > 1
