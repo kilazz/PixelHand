@@ -1,0 +1,16 @@
+[build-system]
+requires = ["scikit-build-core", "nanobind"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "directxtex_decoder"
+version = "1.0.0"
+description = "DDS decoder"
+authors = [{ name = "kilazz" }]
+requires-python = ">=3.13"
+
+[tool.scikit-build]
+cmake.version = ">=4.0"
+cmake.build-type = "Release"
+ninja.make-fallback = true
+sdist.include = ["directxtex_decoder/**/*", "external/**/*", "CMakeLists.txt"]

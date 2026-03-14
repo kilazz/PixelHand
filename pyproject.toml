@@ -1,0 +1,136 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "PixelHand"
+description = "An AI-powered tool for finding and managing duplicate and visually similar images."
+version = "1.0.0"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "MIT"
+authors = [{name = "kilazz"}]
+
+dependencies = [
+    # Core Application & GUI
+    "PySide6>=6.10.2",
+    "send2trash>=2.1.0",
+    # AI & Machine Learning
+    "torch>=2.10.0",
+	"transformers>=5.3.0",
+	"torchvision>=0.25.0",
+    "onnx>=1.20.1",
+    "onnxscript>=0.6.2",
+    "sentencepiece>=0.2.1",
+    "huggingface_hub[hf_xet]>=1.6.0",
+    # Data Handling and Vector DB
+    "lancedb>=0.29.2",
+    "pylance>=2.0.1",
+    "numpy>=2.4.2",
+    "pyarrow>=23.0.1",
+    "polars>=1.38.1",
+    "xxhash>=3.6.0",
+    "ImageHash>=4.3.2",
+    # Image Processing
+    "simple-ocio>=0.2.0",
+    "Pillow>=12.1.1",
+    "OpenImageIO>=3.1.11.0",
+    # Custom C++ Extensions
+    "directxtex-decoder",
+]
+
+[project.optional-dependencies]
+# ONNX Runtime variants
+cpu      = ["onnxruntime>=1.24.3"]
+cuda     = ["onnxruntime-gpu>=1.24.3"]
+directml = ["onnxruntime-directml>=1.24.3"]
+webgpu   = ["onnxruntime-webgpu>=1.25.0.dev20260210001"]
+
+dev = [
+    "ruff",
+    "snakeviz",
+    "py-spy",
+    "tabulate2",
+    "psutil",
+    "tqdm",
+]
+
+# Tell uv to build this package from the local directory
+[tool.uv.sources]
+directxtex-decoder = { path = "src_directxtex_decoder" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.hatch.build]
+exclude = [
+    "app_data",
+    ".venv",
+	".venv-webgpu",
+	".venv-directml",
+	".venv-cuda",
+	".venv-cpu",
+]
+
+[tool.ruff]
+exclude = [
+	"__pycache__",
+	"__pypackages__",
+	".direnv",
+	".eggs",
+	".git",
+	".git-rewrite",
+	".hg",
+	".mypy_cache",
+	".nox",
+	".pants.d",
+	".pyenv",
+	".pytype",
+	".svn",
+	".tox",
+	"_build",
+	"buck-out",
+	"build",
+	"dist",
+	"site-packages",
+    ".bzr",
+    ".ipynb_checkpoints",
+    ".pytest_cache",
+    ".vscode",
+    "node_modules",
+	".ruff_cache",
+	"app_data",
+	"venv",
+	".venv",
+]
+
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle: errors (e.g., indentation, syntax)
+    "W",    # pycodestyle: warnings (e.g., line length)
+    "F",    # Pyflakes: logical errors (undefined names, unused imports)
+    "I",    # isort: sorting and formatting of imports
+    "B",    # flake8-bugbear: finds likely bugs and design problems
+    "UP",   # pyupgrade: upgrades syntax to newer Python versions
+    "SIM",  # flake8-simplify: suggests simplifications for complex code
+    "RUF",  # Enables Ruff's native, fast, and often unique checks
+    "PERF", # Perflint: Performance anti-patterns
+    "FURB", # Refurb: Modernize Python code
+]
+
+ignore = ["E501"]
+fixable = ["ALL"]
+unfixable = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
