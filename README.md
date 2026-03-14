@@ -1,8 +1,6 @@
 # PixelHand
 **A local tool for finding duplicate images, visual similarity search, and quality control.**
 
-> **Note: This is a Prototype**
-
 ## Features
 *   🔍 **Duplicate Detection**
     Finds everything from exact byte-matches (**xxHash**) to visual lookalikes (**dHash/pHash**) and conceptual duplicates via AI models (**CLIP, SigLIP**).
