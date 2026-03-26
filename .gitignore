@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+.env
+.tools/
+app_data/
+src_directxtex_decoder/build/
+uv.lock

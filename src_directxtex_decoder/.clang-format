@@ -1,0 +1,69 @@
+---
+# ==============================================================================
+# .clang-format configuration for C++
+# ==============================================================================
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+# --- Basic Formatting & Limits ---
+ColumnLimit: 120                                     # Max line length (120 is standard for modern screens)
+IndentWidth: 4                                       # 4 spaces for indentation
+TabWidth: 4                                          # Tab width
+UseTab: Never                                        # Use spaces only, no tabs (golden rule)
+MaxEmptyLinesToKeep: 2                               # Prevent excessive vertical whitespace (max 2 blank lines)
+
+# --- Alignment (The magic of clean code) ---
+AlignConsecutiveAssignments: true                    # Align '=' signs in a column
+AlignConsecutiveDeclarations: true                   # Align variable names in declarations
+AlignConsecutiveMacros: true                         # Align macros (#define)
+AlignTrailingComments: true                          # Align trailing comments in a column
+AlignOperands: Align                                 # Align operands when wrapping long expressions
+AlignAfterOpenBracket: Align                         # Align function arguments by the opening bracket
+
+# --- Braces & Wrapping (Visual Studio / Allman Style) ---
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true                                   # Brace on a new line after class
+  AfterControlStatement: true                        # Brace on a new line after if/for/while
+  AfterEnum: true                                    # Brace on a new line after enum
+  AfterFunction: true                                # Brace on a new line after function
+  AfterNamespace: false                              # Brace on the same line for namespace (saves space)
+  AfterStruct: true                                  # Brace on a new line after struct
+  AfterUnion: true                                   # Brace on a new line after union
+  BeforeCatch: true                                  # 'catch' on a new line
+  BeforeElse: true                                   # 'else' on a new line
+  IndentBraces: false                                # Braces themselves are not indented
+
+# --- Indentation in Specific Areas ---
+AccessModifierOffset: -4                             # Move public/private/protected 4 spaces left
+IndentCaseLabels: true                               # Indent 'case' inside 'switch' statements
+NamespaceIndentation: None                           # Do not add extra indentation inside namespaces
+KeepEmptyLinesAtTheStartOfBlocks: false              # Remove empty lines right after an opening brace
+
+# --- Spaces ---
+SpaceAfterCStyleCast: false                          # No space after cast: (int)x instead of (int) x
+SpaceAfterTemplateKeyword: true                      # Space after template: template <typename T>
+SpaceBeforeAssignmentOperators: true                 # Space before '='
+SpaceBeforeParens: ControlStatements                 # Space only before if/for/while, not before functions like MyFunc()
+SpacesInAngles: false                                # No spaces inside < >
+SpacesInCStyleCastParentheses: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# --- Pointers and References ---
+PointerAlignment: Left                               # Asterisk attached to type: int* ptr
+DerivePointerAlignment: false                        # Strictly follow the rule above, do not auto-detect
+
+# --- Functions and Initialization Lists ---
+AllowShortFunctionsOnASingleLine: Empty              # Only empty functions can be one-liners: void foo() {}
+AllowShortBlocksOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never           # Prevent one-liner ifs: if (x) return;
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false                              # Prevent argument packing (one argument per line if wrapped)
+BinPackParameters: false                             # Prevent parameter packing (one parameter per line if wrapped)
+ConstructorInitializerAllOnOneLineOrOnePerLine: true # Initializer lists aligned cleanly
+
+# --- Sorting ---
+SortIncludes: CaseInsensitive                        # Alphabetical sorting for #includes
+SortUsingDeclarations: true                          # Alphabetical sorting for using declarations
