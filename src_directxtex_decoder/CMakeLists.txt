@@ -6,26 +6,36 @@ project(directxtex_decoder_project)
 # Find Python first
 find_package(Python 3.13 COMPONENTS Interpreter Development.Module REQUIRED)
 
-# Find or download nanobind
+# Include the FetchContent module to download dependencies automatically
 include(FetchContent)
+
+# 1. Declare where to fetch nanobind from
 FetchContent_Declare(
   nanobind
   GIT_REPOSITORY https://github.com/wjakob/nanobind.git
   GIT_TAG        v2.12.0
 )
-FetchContent_MakeAvailable(nanobind)
 
-# Set the C++17 standard
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# 2. Declare where to fetch DirectXTex from (official Microsoft repository)
+FetchContent_Declare(
+  DirectXTex
+  GIT_REPOSITORY https://github.com/microsoft/DirectXTex.git
+  GIT_TAG        main
+)
 
 # --- Subproject Build Optimizations ---
-# Disable building parts of DirectXTex that we don't need (tools and tests).
+# Disable building parts of DirectXTex that we don't need (tools and tests)
+# This must be set BEFORE calling FetchContent_MakeAvailable
 set(BUILD_TOOLS OFF CACHE BOOL "Build command line tools" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "Build unit tests" FORCE)
 
-# Add the DirectXTex library as a subproject from the external folder.
-add_subdirectory(external/DirectXTex)
+# Download, configure, and include both dependencies automatically!
+# This completely replaces the need for add_subdirectory() and manual git submodules.
+FetchContent_MakeAvailable(nanobind DirectXTex)
+
+# Set the C++ standard (Updated to C++20 for modern features)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Main Target Definition ---
 # Create the Python module "directxtex_decoder" from its source file.

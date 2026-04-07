@@ -1,10 +1,10 @@
 ---
 # ==============================================================================
-# .clang-format configuration for C++
+# .clang-format configuration for Modern C++ (C++20/23/26)
 # ==============================================================================
 Language: Cpp
 BasedOnStyle: LLVM
-Standard: c++20
+Standard: Latest                                     # 'Latest' is preferred over 'c++20' to parse C++23/26 features properly
 
 # --- Basic Formatting & Limits ---
 ColumnLimit: 120                                     # Max line length (120 is standard for modern screens)
@@ -12,14 +12,23 @@ IndentWidth: 4                                       # 4 spaces for indentation
 TabWidth: 4                                          # Tab width
 UseTab: Never                                        # Use spaces only, no tabs (golden rule)
 MaxEmptyLinesToKeep: 2                               # Prevent excessive vertical whitespace (max 2 blank lines)
+InsertNewlineAtEOF: true                             # Always ensure an empty line at the end of the file (POSIX standard)
 
-# --- Alignment (The magic of clean code) ---
-AlignConsecutiveAssignments: true                    # Align '=' signs in a column
-AlignConsecutiveDeclarations: true                   # Align variable names in declarations
+# --- C++20 Specifics (Concepts & Requires) ---
+RequiresClausePosition: OwnLine                      # Place 'requires' on a new line
+IndentRequiresClause: true                           # Indent the 'requires' clause
+RequiresExpressionIndentation: OuterScope            # Clean indentation inside requires { ... } blocks
+
+# --- Alignment (Clean code vs Git history) ---
+# NOTE: AlignConsecutive options are set to 'None' by default here to prevent massive Git diffs
+# when renaming a single variable. Change to 'true' if you prefer visual column alignment.
+AlignConsecutiveAssignments: true                    # Disabled for cleaner git diffs and code review
+AlignConsecutiveDeclarations: true                   # Disabled for cleaner git diffs and code review
 AlignConsecutiveMacros: true                         # Align macros (#define)
 AlignTrailingComments: true                          # Align trailing comments in a column
 AlignOperands: Align                                 # Align operands when wrapping long expressions
 AlignAfterOpenBracket: Align                         # Align function arguments by the opening bracket
+QualifierAlignment: Left                             # Forces 'West Const': 'const int' instead of 'int const'
 
 # --- Braces & Wrapping (Visual Studio / Allman Style) ---
 BreakBeforeBraces: Custom
@@ -28,11 +37,12 @@ BraceWrapping:
   AfterControlStatement: true                        # Brace on a new line after if/for/while
   AfterEnum: true                                    # Brace on a new line after enum
   AfterFunction: true                                # Brace on a new line after function
-  AfterNamespace: false                              # Brace on the same line for namespace (saves space)
+  AfterNamespace: false                              # Brace on the same line for namespace (saves vertical space)
   AfterStruct: true                                  # Brace on a new line after struct
   AfterUnion: true                                   # Brace on a new line after union
   BeforeCatch: true                                  # 'catch' on a new line
   BeforeElse: true                                   # 'else' on a new line
+  BeforeLambdaBody: false                            # Keep lambda bodies attached to the declaration
   IndentBraces: false                                # Braces themselves are not indented
 
 # --- Indentation in Specific Areas ---
@@ -40,29 +50,35 @@ AccessModifierOffset: -4                             # Move public/private/prote
 IndentCaseLabels: true                               # Indent 'case' inside 'switch' statements
 NamespaceIndentation: None                           # Do not add extra indentation inside namespaces
 KeepEmptyLinesAtTheStartOfBlocks: false              # Remove empty lines right after an opening brace
+EmptyLineBeforeAccessModifier: LogicalBlock          # Add an empty line before public/private/protected
+EmptyLineAfterAccessModifier: Never                  # Do not add an empty line immediately after public:
 
 # --- Spaces ---
 SpaceAfterCStyleCast: false                          # No space after cast: (int)x instead of (int) x
 SpaceAfterTemplateKeyword: true                      # Space after template: template <typename T>
 SpaceBeforeAssignmentOperators: true                 # Space before '='
 SpaceBeforeParens: ControlStatements                 # Space only before if/for/while, not before functions like MyFunc()
-SpacesInAngles: false                                # No spaces inside < >
-SpacesInCStyleCastParentheses: false
-SpacesInParentheses: false
-SpacesInSquareBrackets: false
+SpacesInAngles: Leave                                # Don't touch spaces inside < > (useful for complex templates)
+SpaceBeforeCpp11BracedList: false                    # std::vector<int> v{1, 2, 3}; (no space before brace)
+SpacesInCStyleCastParentheses: false                 # No spaces inside (int)
+SpacesInParentheses: false                           # No spaces inside (x == y)
+SpacesInSquareBrackets: false                        # No spaces inside arr[10]
 
 # --- Pointers and References ---
 PointerAlignment: Left                               # Asterisk attached to type: int* ptr
+ReferenceAlignment: Pointer                          # Ampersand behaves like pointer asterisk: int& ref
 DerivePointerAlignment: false                        # Strictly follow the rule above, do not auto-detect
 
 # --- Functions and Initialization Lists ---
 AllowShortFunctionsOnASingleLine: Empty              # Only empty functions can be one-liners: void foo() {}
-AllowShortBlocksOnASingleLine: Empty
+AllowShortBlocksOnASingleLine: Empty                 # Only empty blocks can be one-liners
 AllowShortIfStatementsOnASingleLine: Never           # Prevent one-liner ifs: if (x) return;
-AllowShortLoopsOnASingleLine: false
+AllowShortEnumsOnASingleLine: false                  # Keep enum items on separate lines
+AllowShortLambdasOnASingleLine: All                  # Allow single-line lambdas (very common in C++20)
+AllowShortLoopsOnASingleLine: false                  # Prevent one-liner loops
 BinPackArguments: false                              # Prevent argument packing (one argument per line if wrapped)
 BinPackParameters: false                             # Prevent parameter packing (one parameter per line if wrapped)
-ConstructorInitializerAllOnOneLineOrOnePerLine: true # Initializer lists aligned cleanly
+PackConstructorInitializers: NextLine                # Replaces deprecated ConstructorInitializerAllOnOneLineOrOnePerLine
 
 # --- Sorting ---
 SortIncludes: CaseInsensitive                        # Alphabetical sorting for #includes
