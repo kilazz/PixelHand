@@ -17,24 +17,24 @@ dependencies = [
     "send2trash>=2.1.0",
     # AI & Machine Learning
     "torch>=2.11.0",
-	"transformers>=5.3.0",
+	"transformers>=5.5.0",
 	"torchvision>=0.26.0",
-    "onnx>=1.20.1",
+    "onnx>=1.21.0",
     "onnxscript>=0.6.2",
     "sentencepiece>=0.2.1",
-    "huggingface_hub[hf_xet]>=1.8.0",
+    "huggingface_hub[hf_xet]>=1.9.1",
     # Data Handling and Vector DB
-    "lancedb==0.30.0",
-    "pylance>=3.0.1",
-    "numpy>=2.4.3",
+    "lancedb>=0.30.2",
+    "pylance>=4.0.0",
+    "numpy>=2.4.4",
     "pyarrow>=23.0.1",
     "polars>=1.39.3",
     "xxhash>=3.6.0",
     "ImageHash>=4.3.2",
     # Image Processing
     "simple-ocio>=0.2.0",
-    "Pillow>=12.1.1",
-    "OpenImageIO>=3.1.11.0",
+    "Pillow>=12.2.0",
+    "OpenImageIO>=3.1.12.0",
     # Custom C++ Extensions
     "directxtex-decoder",
 ]

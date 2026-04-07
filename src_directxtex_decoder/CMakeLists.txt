@@ -39,7 +39,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # --- Main Target Definition ---
 # Create the Python module "directxtex_decoder" from its source file.
-nanobind_add_module(directxtex_decoder directxtex_decoder/decoder.cpp)
+nanobind_add_module(directxtex_decoder src/decoder.cpp)
 
 # --- Linking ---
 # Link our Python module against the DirectXTex static library.
