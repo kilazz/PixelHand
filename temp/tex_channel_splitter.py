@@ -1,6 +1,7 @@
-import os
 from pathlib import Path
+
 from PIL import Image
+
 
 def split_directory_textures(input_dir: str, split_dir: str, process_mode: str):
     """
@@ -234,10 +235,10 @@ def main():
         print("\n" + "="*45)
         print("     AI TEXTURE PREPARATION UTILITY")
         print("="*45)
-        print(f" 1. Split Textures (TGA/DDS/TIF) into PNGs")
-        print(f" 2. Merge PNGs back into TGA or TIF")
-        print(f" 3. Run both (Test)")
-        print(f" 0. Exit")
+        print(" 1. Split Textures (TGA/DDS/TIF) into PNGs")
+        print(" 2. Merge PNGs back into TGA or TIF")
+        print(" 3. Run both (Test)")
+        print(" 0. Exit")
         print("="*45)
 
         choice = input("Choose an action (0-3): ").strip()

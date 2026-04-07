@@ -67,7 +67,7 @@ DEEP_LEARNING_AVAILABLE = all(importlib.util.find_spec(pkg) for pkg in ["onnxrun
 
 OIIO_AVAILABLE = bool(importlib.util.find_spec("OpenImageIO"))
 LANCEDB_AVAILABLE = bool(importlib.util.find_spec("lancedb"))
-OCIO_AVAILABLE = bool(importlib.util.find_spec("simple_ocio"))
+OCIO_AVAILABLE = bool(importlib.util.find_spec("PyOpenColorIO"))
 POLARS_AVAILABLE = bool(importlib.util.find_spec("polars"))
 
 # Robust check for local DirectXTex binary (DDS support)

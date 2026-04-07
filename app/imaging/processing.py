@@ -16,11 +16,11 @@ app_logger = logging.getLogger("PixelHand.imaging.processing")
 TONE_MAPPER = None
 if OCIO_AVAILABLE:
     try:
-        from simple_ocio import ToneMapper
+        from app.imaging.tonemapper import ToneMapper
 
-        TONE_MAPPER = ToneMapper(view="Khronos PBR Neutral")
+        TONE_MAPPER = ToneMapper(view="ACES 2.0 - SDR 100 nits (Rec.709)")
     except Exception as e:
-        app_logger.error(f"Failed to initialize simple-ocio ToneMapper: {e}")
+        app_logger.error(f"Failed to initialize ToneMapper: {e}")
         OCIO_AVAILABLE = False
 
 
@@ -51,7 +51,7 @@ def tonemap_float_array(float_array: np.ndarray) -> np.ndarray:
             rgb_tonemapped = TONE_MAPPER.hdr_to_ldr((rgb * 1.5).astype(np.float32), clip=True)
             final_rgb = (rgb_tonemapped * 255).astype(np.uint8)
         except Exception as e:
-            app_logger.error(f"simple-ocio tonemapping failed: {e}")
+            app_logger.error(f"OCIO tonemapping failed: {e}")
             final_rgb = (np.clip(rgb, 0.0, 1.0) * 255).astype(np.uint8)
     else:
         # Fallback if OCIO is not available

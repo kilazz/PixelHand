@@ -24,17 +24,17 @@ dependencies = [
     "sentencepiece>=0.2.1",
     "huggingface_hub[hf_xet]>=1.9.1",
     # Data Handling and Vector DB
-    "lancedb>=0.30.2",
     "pylance>=4.0.0",
+    "lancedb>=0.30.2",
     "numpy>=2.4.4",
     "pyarrow>=23.0.1",
     "polars>=1.39.3",
     "xxhash>=3.6.0",
     "ImageHash>=4.3.2",
     # Image Processing
-    "simple-ocio>=0.2.0",
     "Pillow>=12.2.0",
     "OpenImageIO>=3.1.12.0",
+    "OpenColorIO>=2.5.1",
     # Custom C++ Extensions
     "directxtex-decoder",
 ]

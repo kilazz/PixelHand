@@ -102,7 +102,7 @@ def check_library_imports() -> bool:
         },
         "Advanced Image I/O": {
             "OpenImageIO": "OpenImageIO",
-            "simple_ocio": "simple-ocio",
+            "PyOpenColorIO": "OpenColorIO",
         },
     }
 
