@@ -23,7 +23,6 @@ from app.domain.data_models import AppSettings, ScanMode
 from app.infrastructure.settings import SettingsManager
 from app.shared.constants import (
     ALL_SUPPORTED_EXTENSIONS,
-    ROOT_DIR,
     SUPPORTED_MODELS,
     UIConfig,
 )
@@ -182,12 +181,12 @@ class OptionsPanel(QGroupBox):
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
 
     def _create_theme_menu(self) -> QMenu:
+        from app.shared.constants import THEMES_DIR
         theme_menu = QMenu(self)
         theme_action_group = QActionGroup(self)
         theme_action_group.setExclusive(True)
-        styles_dir = ROOT_DIR / "app/ui/styles"
-        if styles_dir.is_dir():
-            for theme_dir in sorted(p for p in styles_dir.iterdir() if p.is_dir()):
+        if THEMES_DIR.is_dir():
+            for theme_dir in sorted(p for p in THEMES_DIR.iterdir() if p.is_dir()):
                 theme_id = theme_dir.name
                 if (theme_dir / f"{theme_id}.qss").is_file():
                     theme_name = theme_id.replace("_", " ").title()

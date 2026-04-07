@@ -27,7 +27,6 @@ from app.infrastructure.container import ServiceContainer
 from app.infrastructure.settings import SettingsManager
 from app.shared.constants import (
     DEEP_LEARNING_AVAILABLE,
-    ROOT_DIR,
     VISUALS_DIR,
 )
 from app.shared.signal_bus import APP_SIGNAL_BUS
@@ -196,7 +195,8 @@ class App(QMainWindow):
             self.options_panel.theme_menu.actions()[0].trigger()
 
     def load_theme(self, theme_id: str):
-        qss_file = ROOT_DIR / "app/ui/styles" / theme_id / f"{theme_id}.qss"
+        from app.shared.constants import THEMES_DIR
+        qss_file = THEMES_DIR / theme_id / f"{theme_id}.qss"
         if not qss_file.is_file():
             APP_SIGNAL_BUS.log_message.emit(f"Error: Theme file not found at '{qss_file}'", "error")
             return

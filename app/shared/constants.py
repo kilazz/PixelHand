@@ -44,6 +44,12 @@ os.environ["TMPDIR"] = str(APP_TEMP_DIR.resolve())
 MODELS_DIR = APP_DATA_DIR / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
+THEMES_DIR = APP_DATA_DIR / "themes"
+THEMES_DIR.mkdir(parents=True, exist_ok=True)
+
+OCIO_DIR = APP_DATA_DIR / "ocio_configs"
+OCIO_DIR.mkdir(parents=True, exist_ok=True)
+
 HF_CACHE_DIR = APP_DATA_DIR / ".hf_cache"
 # Set HF Home before importing transformers to redirect cache
 os.environ["HF_HOME"] = str(HF_CACHE_DIR.resolve())

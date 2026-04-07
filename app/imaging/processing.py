@@ -18,7 +18,7 @@ if OCIO_AVAILABLE:
     try:
         from app.imaging.tonemapper import ToneMapper
 
-        TONE_MAPPER = ToneMapper(view="ACES 2.0 - SDR 100 nits (Rec.709)")
+        TONE_MAPPER = ToneMapper(default_view="[cg-config-v4.0.0_aces-v2.0_ocio-v2.5] ACES 2.0 - SDR 100 nits (Rec.709)")
     except Exception as e:
         app_logger.error(f"Failed to initialize ToneMapper: {e}")
         OCIO_AVAILABLE = False
