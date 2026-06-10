@@ -21,12 +21,6 @@ export default function App() {
     "Locating existing models..."
   );
 
-  const [logs, setLogs] = createSignal([]);
-  const addLog = (message, level = "info") => {
-    const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false });
-    setLogs((prev) => [...prev, { timestamp, message, level }]);
-  };
-
   const [dirA, setDirA] = createSignal("");
   const [dirB, setDirB] = createSignal("");
 
@@ -57,8 +51,91 @@ export default function App() {
   const [viewerCanvasOpen, setViewerCanvasOpen] = createSignal(false);
   const [viewerGridMode, setViewerGridMode] = createSignal(false);
 
+  const [detailedLogs, setDetailedLogs] = createSignal([]);
+  const [isLogCollapsed, setIsLogCollapsed] = createSignal(false);
+  const [logFilter, setLogFilter] = createSignal("all");
+  const [logSearchQuery, setLogSearchQuery] = createSignal("");
+  let detailedLogRef;
+
+  // Function to add detailed log entries with level (info, success, warning, error)
+  const appendDetailedLog = (message, level = "info") => {
+    const timestamp = new Date().toLocaleTimeString("en-US", { hour12: false });
+    setDetailedLogs((prev) => [...prev, { timestamp, message, level }]);
+
+    // Auto scroll down to the bottom
+    if (detailedLogRef) {
+      setTimeout(() => {
+        detailedLogRef.scrollTop = detailedLogRef.scrollHeight;
+      }, 30);
+    }
+  };
+
+  const clearDetailedLogs = () => {
+    setDetailedLogs([]);
+  };
+
+  const exportDetailedLogs = () => {
+    try {
+      const textContent = detailedLogs()
+        .map((l) => `[${l.timestamp}] [${l.level.toUpperCase()}] ${l.message}`)
+        .join("\r\n");
+      const blob = new Blob([textContent], {
+        type: "text/plain;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `pixelhand_log_${new Date()
+        .toISOString()
+        .slice(0, 10)}.txt`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      appendDetailedLog("Logs exported successfully", "success");
+    } catch (e) {
+      appendDetailedLog(`Failed to export logs: ${e}`, "error");
+    }
+  };
+
+  const handleSelectDirA = async () => {
+    try {
+      appendDetailedLog("Opening system folder selector for Folder A...");
+      const selected = await invoke("select_folder");
+      if (selected) {
+        setDirA(selected);
+        appendDetailedLog(
+          `Successfully selected Folder A: ${selected}`,
+          "success"
+        );
+      } else {
+        appendDetailedLog("Folder selection A canceled", "warning");
+      }
+    } catch (err) {
+      appendDetailedLog(`Failed to select directory option A: ${err}`, "error");
+    }
+  };
+
+  const handleSelectDirB = async () => {
+    try {
+      appendDetailedLog("Opening system folder selector for Folder B...");
+      const selected = await invoke("select_folder");
+      if (selected) {
+        setDirB(selected);
+        appendDetailedLog(
+          `Successfully selected Folder B: ${selected}`,
+          "success"
+        );
+      } else {
+        appendDetailedLog("Folder selection B canceled", "warning");
+      }
+    } catch (err) {
+      appendDetailedLog(`Failed to select directory option B: ${err}`, "error");
+    }
+  };
+
   onMount(async () => {
-    addLog("Initializing application...");
+    appendDetailedLog("Initializing application architecture...");
     setStatusText("Verifying neural network models...");
     let unlisten;
     try {
@@ -70,10 +147,10 @@ export default function App() {
       await invoke("download_models");
       setStatusText("Initialization complete!");
       setProgress(100);
-      addLog("ONNX Loaded. System ready.", "success");
+      appendDetailedLog("ONNX Loaded. System ready.", "success");
       setTimeout(() => setLoading(false), 800);
     } catch (error) {
-      addLog(`Failed to initiate models: ${error}`, "error");
+      appendDetailedLog(`Failed to initiate models: ${error}`, "error");
       setTimeout(() => setLoading(false), 1000); // let them in anyway
     } finally {
       if (unlisten) unlisten();
@@ -86,7 +163,7 @@ export default function App() {
         setSelectedSamplePath(paths[0]);
         setSearchMethod("ai");
         const fileName = paths[0].split(/[\\/]/).pop();
-        addLog(`Reference image loaded: ${fileName}`);
+        appendDetailedLog(`Reference image loaded: ${fileName}`);
       }
     });
     onCleanup(() => cleanupDrop());
@@ -103,7 +180,9 @@ export default function App() {
     setSelectedGroupIndex(null);
     setViewerCanvasOpen(false);
 
-    addLog(`Starting scan on: ${dirA()}`);
+    appendDetailedLog(
+      `Starting scan on: ${dirA()} (Method: ${searchMethod()})`
+    );
     const startTime = performance.now();
 
     try {
@@ -189,9 +268,12 @@ export default function App() {
       setScanResults(finalRes);
 
       const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
-      addLog(`Finished in ${elapsed}s`, "success");
+      appendDetailedLog(
+        `Scan completed: found ${finalRes.length} records in ${elapsed}s`,
+        "success"
+      );
     } catch (error) {
-      addLog(`Scan failed: ${error}`, "error");
+      appendDetailedLog(`Scan failed: ${error}`, "error");
       setScanResults([{ type: "error", error: String(error) }]);
     } finally {
       setIsScanning(false);
@@ -251,11 +333,12 @@ export default function App() {
           <Show when={sidebarWidth() > 0}>
             <Sidebar
               width={sidebarWidth()}
-              logs={logs()}
               dirA={dirA}
               setDirA={setDirA}
               dirB={dirB}
               setDirB={setDirB}
+              onSelectDirA={handleSelectDirA}
+              onSelectDirB={handleSelectDirB}
               qcModeCheck={qcModeCheck}
               setQcModeCheck={setQcModeCheck}
               qcNpotCheck={qcNpotCheck}
@@ -288,31 +371,131 @@ export default function App() {
             }}
           ></div>
 
-          <ResultsPanel
-            results={scanResults()}
-            checkedFiles={checkedFiles()}
-            setCheckedFiles={setCheckedFiles}
-            isGridMode={isGridMode()}
-            setIsGridMode={setIsGridMode}
-            gridSize={gridSize()}
-            setGridSize={setGridSize}
-            onSelectGroup={(idx, path) => {
-              setSelectedGroupIndex(idx);
-              setViewerCanvasOpen(false);
-              const group = scanResults()[idx];
-              if (group && group.files && group.files.length > 0) {
-                const first = group.files[0].path;
-                setActiveOriginalPath(first);
-                const dup =
-                  path || (group.files.length > 1 ? group.files[1].path : null);
-                setActiveDuplicatePath(
-                  dup === first && group.files.length > 1
-                    ? group.files[1].path
-                    : dup
-                );
-              }
-            }}
-          />
+          <div style="flex: 1; display: flex; flex-direction: column; height: 100%; overflow: hidden;">
+            <div style="flex: 1; min-height: 0; display: flex; flex-direction: column;">
+              <ResultsPanel
+                results={scanResults()}
+                checkedFiles={checkedFiles()}
+                setCheckedFiles={setCheckedFiles}
+                isGridMode={isGridMode()}
+                setIsGridMode={setIsGridMode}
+                gridSize={gridSize()}
+                setGridSize={setGridSize}
+                onSelectGroup={(idx, path) => {
+                  setSelectedGroupIndex(idx);
+                  setViewerCanvasOpen(false);
+                  const group = scanResults()[idx];
+                  if (group && group.files && group.files.length > 0) {
+                    const first = group.files[0].path;
+                    setActiveOriginalPath(first);
+                    const dup =
+                      path ||
+                      (group.files.length > 1 ? group.files[1].path : null);
+                    setActiveDuplicatePath(
+                      dup === first && group.files.length > 1
+                        ? group.files[1].path
+                        : dup
+                    );
+                  }
+                }}
+              />
+            </div>
+
+            {/* Detailed Log Window (under Results panel) */}
+            <div
+              class="detailed-log-panel"
+              style={{ height: isLogCollapsed() ? "36px" : "220px" }}
+            >
+              <div class="detailed-log-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button
+                    class="detailed-log-btn"
+                    style="padding: 2px 6px; font-weight: bold;"
+                    onClick={() => setIsLogCollapsed(!isLogCollapsed())}
+                  >
+                    {isLogCollapsed() ? "▲ EXPAND LOG" : "▼ COLLAPSE LOG"}
+                  </button>
+                  <span style="color: var(--text-primary); letter-spacing: 0.5px;">
+                    SYSTEM & TECHNICAL CONSOLE LOGS
+                  </span>
+                </div>
+                <div class="detailed-log-controls">
+                  <span style="color: var(--text-secondary); font-size: 7.5pt;">
+                    Filter:
+                  </span>
+                  <select
+                    class="detailed-log-filter-select"
+                    value={logFilter()}
+                    onChange={(e) => setLogFilter(e.target.value)}
+                  >
+                    <option value="all">All levels</option>
+                    <option value="info">Info</option>
+                    <option value="success">Success</option>
+                    <option value="warning">Warning</option>
+                    <option value="error">Error</option>
+                  </select>
+
+                  <input
+                    type="text"
+                    placeholder="Search logs..."
+                    class="detailed-log-search"
+                    style="margin-left: 4px;"
+                    value={logSearchQuery()}
+                    onInput={(e) => setLogSearchQuery(e.target.value)}
+                  />
+
+                  <button
+                    class="detailed-log-btn"
+                    style="margin-left: 4px;"
+                    onClick={clearDetailedLogs}
+                  >
+                    Clear
+                  </button>
+                  <button class="detailed-log-btn" onClick={exportDetailedLogs}>
+                    Export (.txt)
+                  </button>
+                </div>
+              </div>
+
+              <Show when={!isLogCollapsed()}>
+                <div ref={detailedLogRef} class="detailed-log-content">
+                  <For
+                    each={detailedLogs().filter((l) => {
+                      const matchesFilter =
+                        logFilter() === "all" || l.level === logFilter();
+                      const matchesSearch =
+                        !logSearchQuery() ||
+                        l.message
+                          .toLowerCase()
+                          .includes(logSearchQuery().toLowerCase());
+                      return matchesFilter && matchesSearch;
+                    })}
+                  >
+                    {(log) => (
+                      <div class="detailed-log-line">
+                        <span class="detailed-log-time">[{log.timestamp}]</span>
+                        <span
+                          class="detailed-log-msg"
+                          style={{
+                            color:
+                              log.level === "error"
+                                ? "var(--danger-red)"
+                                : log.level === "warning"
+                                ? "var(--warning-yellow)"
+                                : log.level === "success"
+                                ? "var(--success-green)"
+                                : "var(--text-primary)",
+                          }}
+                        >
+                          [{log.level.toUpperCase()}] {log.message}
+                        </span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
+            </div>
+          </div>
 
           <div
             class="splitter-handle"

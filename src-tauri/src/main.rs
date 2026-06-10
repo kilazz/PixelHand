@@ -504,7 +504,7 @@ async fn run_perceptual_scan(
         if group_members.len() > 1 {
             group_id += 1;
             let mut file_summaries = Vec::new();
-            for (p_buf, hash_str) in &group_members {
+            for (p_buf, _hash_str) in &group_members {
                 let metadata = fs::metadata(p_buf).map_err(|e| e.to_string())?;
                 let size = metadata.len();
                 let (width, height) = match imagesize::size(p_buf) {
@@ -907,6 +907,15 @@ async fn calculate_diff(file1: String, file2: String) -> Result<String, String> 
     Ok(out_path.to_string_lossy().to_string())
 }
 
+/// Command: Opens a native system dialog to pick a directory/folder.
+#[tauri::command]
+fn select_folder() -> Result<Option<String>, String> {
+    let folder = rfd::FileDialog::new()
+        .set_title("Select Folder to Scan")
+        .pick_folder();
+    Ok(folder.map(|f| f.to_string_lossy().to_string()))
+}
+
 /// Command: Moves chosen paths safely to the system Trash/Recycle Bin.
 #[tauri::command]
 async fn delete_files(paths: Vec<String>) -> Result<(), String> {
@@ -1168,6 +1177,109 @@ fn calculate_xxhash(path: &Path) -> Result<String, std::io::Error> {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if args
+        .iter()
+        .any(|arg| arg == "--cli" || arg == "-c" || arg == "--help" || arg == "-h")
+    {
+        println!("==================================================");
+        println!("           PixelHandRust CLI Mode                 ");
+        println!("==================================================");
+
+        if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+            println!("Usage:");
+            println!("  pixelhand-ui -c --scan-exact <directory_path>");
+            println!("  pixelhand-ui -c --scan-qc <directory_path> [options]");
+            println!("\nQC Options:");
+            println!("  --check-npot          Verify if dimensions are Non-Power-of-Two");
+            println!("  --check-mipmaps       Verify if mipmaps are generated");
+            println!("  --check-block         Verify if dimensions are 4px block aligned");
+            println!("  --check-bit           Verify bit depths");
+            println!("  --validate-normals    Validate typical normal maps format");
+            return;
+        }
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        if let Some(pos) = args.iter().position(|arg| arg == "--scan-exact") {
+            if pos + 1 < args.len() {
+                let dir = args[pos + 1].clone();
+                println!("[CLI] Running Byte-Exact Scan (xxHash64) on: {}\n", dir);
+                match rt.block_on(run_exact_scan(dir)) {
+                    Ok(results) => {
+                        println!(
+                            "[SUCCESS] Exact Scan Completed! Found {} duplicate groups:",
+                            results.len()
+                        );
+                        for (idx, group) in results.iter().enumerate() {
+                            println!("  Group #{} (Hash: {})", idx + 1, group.hash);
+                            for file in &group.files {
+                                println!(
+                                    "    - {} (Size: {} bytes, Dim: {}x{})",
+                                    file.path, file.size, file.width, file.height
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[ERROR] Exact Scan Failed: {}", e);
+                    }
+                }
+            } else {
+                eprintln!("[ERROR] Missing directory path for --scan-exact");
+            }
+            return;
+        }
+
+        if let Some(pos) = args.iter().position(|arg| arg == "--scan-qc") {
+            if pos + 1 < args.len() {
+                let dir = args[pos + 1].clone();
+                let check_npot = args.iter().any(|arg| arg == "--check-npot");
+                let check_mipmaps = args.iter().any(|arg| arg == "--check-mipmaps");
+                let check_block = args.iter().any(|arg| arg == "--check-block");
+                let check_bit = args.iter().any(|arg| arg == "--check-bit");
+                let validate_normals = args.iter().any(|arg| arg == "--validate-normals");
+
+                println!("[CLI] Running Technical Quality Control Scan on: {}", dir);
+                println!(
+                    "      Options: NPOT={}, Mipmaps={}, BlockAlign={}, BitDepth={}, Normals={}\n",
+                    check_npot, check_mipmaps, check_block, check_bit, validate_normals
+                );
+
+                match rt.block_on(run_qc_scan(
+                    dir,
+                    check_npot,
+                    check_mipmaps,
+                    check_block,
+                    check_bit,
+                    validate_normals,
+                    "".to_string(),
+                )) {
+                    Ok(results) => {
+                        println!(
+                            "[SUCCESS] QC Scan Completed! Found {} issues:",
+                            results.len()
+                        );
+                        for issue in results {
+                            println!("  - File: {}", issue.path);
+                            println!("    Issue: {}", issue.issue);
+                            println!("    Details: {}", issue.details);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[ERROR] QC Scan Failed: {}", e);
+                    }
+                }
+            } else {
+                eprintln!("[ERROR] Missing directory path for --scan-qc");
+            }
+            return;
+        }
+
+        println!("[ERROR] Unknown CLI arguments. Use -h or --help for instructions.");
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
@@ -1185,7 +1297,8 @@ fn main() {
             create_hardlinks,
             create_reflinks,
             get_channel_preview,
-            generate_visualization_report
+            generate_visualization_report,
+            select_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

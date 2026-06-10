@@ -25,9 +25,12 @@ export default function Sidebar(props) {
             />
             <button
               onClick={() =>
-                props.setDirA("C:\\Users\\Zed\\Pictures\\Screenshots")
+                props.onSelectDirA
+                  ? props.onSelectDirA()
+                  : props.setDirA("C:\\Users\\Zed\\Pictures\\Screenshots")
               }
-              style="padding: 4px 8px;"
+              style="padding: 4px 8px; font-weight: bold; cursor: pointer;"
+              title="Select Folder"
             >
               ...
             </button>
@@ -47,9 +50,14 @@ export default function Sidebar(props) {
               />
               <button
                 onClick={() =>
-                  props.setDirB("C:\\Users\\Zed\\Pictures\\BuildScreenshots")
+                  props.onSelectDirB
+                    ? props.onSelectDirB()
+                    : props.setDirB(
+                        "C:\\Users\\Zed\\Pictures\\BuildScreenshots"
+                      )
                 }
-                style="padding: 4px 8px;"
+                style="padding: 4px 8px; font-weight: bold; cursor: pointer;"
+                title="Select Folder"
               >
                 ...
               </button>
@@ -205,42 +213,6 @@ export default function Sidebar(props) {
             />
             AI Semantic/Visual Search
           </label>
-        </div>
-      </div>
-
-      <div
-        class="panel-section"
-        style="flex: 1; display: flex; flex-direction: column; min-height: 140px; max-height: 300px; padding: 6px;"
-      >
-        <div class="section-title" style="margin-bottom: 4px;">
-          Log
-        </div>
-        <div
-          ref={logConsoleRef}
-          style="flex: 1; background-color: var(--darkest); border: 1px solid var(--border-gray); border-radius: 3px; padding: 4px; font-family: Consolas, Monaco, monospace; font-size: 7.5pt; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);"
-        >
-          <For each={props.logs}>
-            {(log) => (
-              <div class={`log-line ${log.level}`}>
-                <span style="color: #7c808a;">[{log.timestamp}]</span>
-                <span
-                  style={{
-                    color:
-                      log.level === "error"
-                        ? "#da373c"
-                        : log.level === "warning"
-                        ? "#f0b132"
-                        : log.level === "success"
-                        ? "#23a55a"
-                        : "#949ba4",
-                  }}
-                >
-                  {" "}
-                  {log.message}
-                </span>
-              </div>
-            )}
-          </For>
         </div>
       </div>
     </div>

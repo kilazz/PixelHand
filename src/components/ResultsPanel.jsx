@@ -389,9 +389,7 @@ export default function ResultsPanel(props) {
           <Show
             when={props.results.length === 0}
             fallback={
-              <div
-                style={{ "overflow-y": "auto", height: "calc(100% - 28px)" }}
-              >
+              <div style={{ "overflow-y": "auto", flex: 1, "min-height": 0 }}>
                 <For each={flattenedRows()}>
                   {(row) => <RowItem row={row} />}
                 </For>

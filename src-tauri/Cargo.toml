@@ -78,6 +78,9 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "s
 # Safe cross-platform Recycle Bin file deletion
 trash = "5.1"
 
+# Cross-platform file/folder dialogs
+rfd = "0.14"
+
 # Channels
 base64 = "0.22"
 

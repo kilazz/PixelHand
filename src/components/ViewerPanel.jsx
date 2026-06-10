@@ -26,6 +26,7 @@ export default function ViewerPanel(props) {
 
   let wipeViewportRef;
   const [isWiping, setIsWiping] = createSignal(false);
+  const [isSpecsCollapsed, setIsSpecsCollapsed] = createSignal(false);
 
   const handleWipeStart = (e) => {
     if (e.button !== 0) return;
@@ -541,192 +542,244 @@ export default function ViewerPanel(props) {
       </Show>
 
       <Show when={originalFile() || duplicateFile()}>
-        <div style="margin-top: 10px; border: 1px solid var(--border-gray); border-radius: 4px; background: var(--darkest); padding: 10px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06); display: flex; flex-direction: column; gap: 8px;">
-          <div style="font-size: 8pt; font-weight: bold; color: var(--text-secondary); text-transform: uppercase; border-bottom: 1px solid var(--border-gray); padding-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-            <span>Format Specs Comparison</span>
+        <div
+          style={{
+            margin: "6px -12px -12px -12px",
+            "border-top": "2px solid var(--border-gray)",
+            background: "var(--darkest)",
+            display: "flex",
+            "flex-direction": "column",
+            transition: "max-height 0.2s ease-in-out",
+            "max-height": isSpecsCollapsed() ? "36px" : "600px",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            onClick={() => setIsSpecsCollapsed(!isSpecsCollapsed())}
+            style={{
+              "font-size": "8pt",
+              "font-weight": "bold",
+              "text-transform": "uppercase",
+              "border-bottom": isSpecsCollapsed()
+                ? "none"
+                : "1px solid var(--border-gray)",
+              padding: "0 12px",
+              display: "flex",
+              "justify-content": "space-between",
+              "align-items": "center",
+              "user-select": "none",
+              height: "36px",
+              "background-color": "var(--darkest)",
+              cursor: "pointer",
+            }}
+          >
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button
+                class="detailed-log-btn"
+                style="padding: 2px 6px; font-weight: bold;"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsSpecsCollapsed(!isSpecsCollapsed());
+                }}
+              >
+                {isSpecsCollapsed() ? "▲ EXPAND" : "▼ COLLAPSE"}
+              </button>
+              <span style="color: var(--text-primary); letter-spacing: 0.5px;">
+                Format Specs Comparison
+              </span>
+            </div>
             <span style="font-size:7pt; font-weight: normal; text-transform: none; color: #888;">
               Complete Image Metadata
             </span>
           </div>
-          <table style="width: 100%; border-collapse: collapse; font-size: 8pt; text-align: left; table-layout: fixed;">
-            <thead>
-              <tr style="border-bottom: 1px solid var(--border-gray); color: var(--text-secondary); font-size:7.5pt;">
-                <th style="padding: 3px 0; width: 25%;">Property</th>
-                <th style="padding: 3px 0; width: 37.5%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                  Original
-                </th>
-                <th style="padding: 3px 0; width: 37.5%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                  Duplicate
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  File Name
-                </td>
-                <td
-                  style="padding: 5px 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                  title={originalFile()?.path.split(/[\\/]/).pop()}
-                >
-                  {originalFile()?.path.split(/[\\/]/).pop() || "-"}
-                </td>
-                <td
-                  style="padding: 5px 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                  title={duplicateFile()?.path.split(/[\\/]/).pop()}
-                >
-                  {duplicateFile()?.path.split(/[\\/]/).pop() || "-"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  File Size
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile() ? formatSize(originalFile().size) : "-"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile() ? formatSize(duplicateFile().size) : "-"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Format / Codec
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile()?.compression_format ||
-                    originalFile()?.format_str ||
-                    "-"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()?.compression_format ||
-                    duplicateFile()?.format_str ||
-                    "-"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Resolution
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile()
-                    ? `${originalFile().width}x${originalFile().height}`
-                    : "-"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()
-                    ? `${duplicateFile().width}x${duplicateFile().height}`
-                    : "-"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Bit Depth
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile()?.bit_depth
-                    ? `${originalFile().bit_depth}-bit`
-                    : "-"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()?.bit_depth
-                    ? `${duplicateFile().bit_depth}-bit`
-                    : "-"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Color Space
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile()?.color_space || "-"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()?.color_space || "-"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Mipmaps
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile()?.mipmap_count || "1"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()?.mipmap_count || "1"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Alpha Channel
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {originalFile()?.has_alpha ? "Yes" : "No"}
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()?.has_alpha ? "Yes" : "No"}
-                </td>
-              </tr>
-              <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
-                  Similarity
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  [Best match]
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary);">
-                  {duplicateFile()?.similarity !== undefined
-                    ? `${duplicateFile().similarity.toFixed(2)}%`
-                    : "Duplicate"}
-                </td>
-              </tr>
-              <tr>
-                <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary); vertical-align: top;">
-                  Full Path
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary); font-size:7.5pt; font-family: monospace;">
-                  <div style="display: flex; flex-direction: column; gap: 4px; overflow: hidden;">
-                    <span
-                      style="user-select: all; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
-                      title={originalFile()?.path}
-                    >
-                      {originalFile()?.path}
-                    </span>
-                    <button
-                      onClick={() =>
-                        navigator.clipboard.writeText(
-                          originalFile()?.path || ""
-                        )
-                      }
-                      style="font-size:7pt; padding: 2px 4px; align-self: flex-start; cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid var(--border-gray); color: var(--text-primary); border-radius: 3px;"
-                    >
-                      Copy Path
-                    </button>
-                  </div>
-                </td>
-                <td style="padding: 5px 0; color: var(--text-primary); font-size:7.5pt; font-family: monospace;">
-                  <div style="display: flex; flex-direction: column; gap: 4px; overflow: hidden;">
-                    <span
-                      style="user-select: all; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
-                      title={duplicateFile()?.path}
-                    >
-                      {duplicateFile()?.path}
-                    </span>
-                    <button
-                      onClick={() =>
-                        navigator.clipboard.writeText(
-                          duplicateFile()?.path || ""
-                        )
-                      }
-                      style="font-size:7pt; padding: 2px 4px; align-self: flex-start; cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid var(--border-gray); color: var(--text-primary); border-radius: 3px;"
-                    >
-                      Copy Path
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <div
+            style={{
+              padding: "10px",
+              display: "flex",
+              "flex-direction": "column",
+              gap: "8px",
+            }}
+          >
+            <table style="width: 100%; border-collapse: collapse; font-size: 8pt; text-align: left; table-layout: fixed;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border-gray); color: var(--text-secondary); font-size:7.5pt;">
+                  <th style="padding: 3px 0; width: 25%;">Property</th>
+                  <th style="padding: 3px 0; width: 37.5%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    Original
+                  </th>
+                  <th style="padding: 3px 0; width: 37.5%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    Duplicate
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    File Name
+                  </td>
+                  <td
+                    style="padding: 5px 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    title={originalFile()?.path.split(/[\\/]/).pop()}
+                  >
+                    {originalFile()?.path.split(/[\\/]/).pop() || "-"}
+                  </td>
+                  <td
+                    style="padding: 5px 0; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    title={duplicateFile()?.path.split(/[\\/]/).pop()}
+                  >
+                    {duplicateFile()?.path.split(/[\\/]/).pop() || "-"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    File Size
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile() ? formatSize(originalFile().size) : "-"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile() ? formatSize(duplicateFile().size) : "-"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Format / Codec
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile()?.compression_format ||
+                      originalFile()?.format_str ||
+                      "-"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()?.compression_format ||
+                      duplicateFile()?.format_str ||
+                      "-"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Resolution
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile()
+                      ? `${originalFile().width}x${originalFile().height}`
+                      : "-"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()
+                      ? `${duplicateFile().width}x${duplicateFile().height}`
+                      : "-"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Bit Depth
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile()?.bit_depth
+                      ? `${originalFile().bit_depth}-bit`
+                      : "-"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()?.bit_depth
+                      ? `${duplicateFile().bit_depth}-bit`
+                      : "-"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Color Space
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile()?.color_space || "-"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()?.color_space || "-"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Mipmaps
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile()?.mipmap_count || "1"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()?.mipmap_count || "1"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Alpha Channel
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {originalFile()?.has_alpha ? "Yes" : "No"}
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()?.has_alpha ? "Yes" : "No"}
+                  </td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary);">
+                    Similarity
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    [Best match]
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary);">
+                    {duplicateFile()?.similarity !== undefined
+                      ? `${duplicateFile().similarity.toFixed(2)}%`
+                      : "Duplicate"}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 0; font-weight: 500; color: var(--text-secondary); vertical-align: top;">
+                    Full Path
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary); font-size:7.5pt; font-family: monospace;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; overflow: hidden;">
+                      <span
+                        style="user-select: all; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
+                        title={originalFile()?.path}
+                      >
+                        {originalFile()?.path}
+                      </span>
+                      <button
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            originalFile()?.path || ""
+                          )
+                        }
+                        style="font-size:7pt; padding: 2px 4px; align-self: flex-start; cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid var(--border-gray); color: var(--text-primary); border-radius: 3px;"
+                      >
+                        Copy Path
+                      </button>
+                    </div>
+                  </td>
+                  <td style="padding: 5px 0; color: var(--text-primary); font-size:7.5pt; font-family: monospace;">
+                    <div style="display: flex; flex-direction: column; gap: 4px; overflow: hidden;">
+                      <span
+                        style="user-select: all; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;"
+                        title={duplicateFile()?.path}
+                      >
+                        {duplicateFile()?.path}
+                      </span>
+                      <button
+                        onClick={() =>
+                          navigator.clipboard.writeText(
+                            duplicateFile()?.path || ""
+                          )
+                        }
+                        style="font-size:7pt; padding: 2px 4px; align-self: flex-start; cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid var(--border-gray); color: var(--text-primary); border-radius: 3px;"
+                      >
+                        Copy Path
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </Show>
     </div>

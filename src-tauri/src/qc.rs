@@ -33,7 +33,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
         Err(_) => (0, 0),
     };
 
-    let mut format_str = ext.clone();
+    let format_str = ext.clone();
     let mut compression_format = ext.to_uppercase();
     let mut color_space = "sRGB".to_string();
     let mut has_alpha = false;
