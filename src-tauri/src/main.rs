@@ -1023,7 +1023,11 @@ async fn get_channel_preview(path: String, channel: String) -> Result<String, St
     let rgba = &cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {
-        image::DynamicImage::ImageRgba8(rgba.clone())
+        if crate::perceptual::is_vfx_transparent_texture(rgba) {
+            image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8())
+        } else {
+            image::DynamicImage::ImageRgba8(rgba.clone())
+        }
     } else {
         let channel_idx = match channel.as_str() {
             "R" => 0,
