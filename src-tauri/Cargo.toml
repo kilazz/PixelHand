@@ -28,6 +28,10 @@ image = { version = "0.25", features = ["png", "jpeg"] }
 # Native OpenEXR (.exr) file decoder
 exr = "1.7"
 
+# Custom DDS Decoder
+ddsfile = "0.6.0"
+image_dds = { version = "0.7.2", features = ["image"] }
+
 # Fast image dimension parsing without decoding full pixel data
 imagesize = "0.14"
 
@@ -46,16 +50,16 @@ ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
 ndarray = "0.17"
 
 # Hugging Face's native, fast tokenizer to encode text search queries
-tokenizers = "0.19"
+tokenizers = "0.23.1"
 
 # --- Vector Database & Storage ---
 # Embedded serverless vector database
 lancedb = "0.30"
 
 # Apache Arrow in-memory columnar data formatting (Required by LanceDB)
-arrow = "58"
-arrow-array = "58"
-arrow-schema = "58"
+arrow = "58.3"
+arrow-array = "58.3"
+arrow-schema = "58.3"
 
 # Futures utilities to work with LanceDB asynchronous query streams
 futures = "0.3"

@@ -3,8 +3,10 @@
     "version": "1.0.0",
     "identifier": "com.kilazz.pixelhand",
     "build": {
-        "frontendDist": "../src",
-        "devUrl": null
+        "beforeDevCommand": "npm run dev",
+        "beforeBuildCommand": "npm run build",
+        "frontendDist": "../dist",
+        "devUrl": "http://localhost:3000"
     },
     "app": {
         "withGlobalTauri": true,

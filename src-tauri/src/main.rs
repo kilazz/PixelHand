@@ -1,5 +1,6 @@
 // src-tauri/src/main.rs
 mod database;
+mod dds_loader;
 mod downloader;
 mod inference;
 mod perceptual;
@@ -501,7 +502,7 @@ async fn run_ai_duplicate_scan(
     let records: Vec<database::DbRecord> = paths
         .par_iter()
         .filter_map(|p| {
-            let img = image::open(p).ok()?;
+            let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
             let vector = engine
                 .encode_image(&img, &inference::PreprocessingConfig::default())
                 .ok()?;
@@ -602,7 +603,7 @@ async fn run_ai_search(
     let records: Vec<database::DbRecord> = paths
         .par_iter()
         .filter_map(|p| {
-            let img = image::open(p).ok()?;
+            let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
             let vector = engine
                 .encode_image(&img, &inference::PreprocessingConfig::default())
                 .ok()?;
@@ -667,7 +668,7 @@ async fn run_image_search(
     let records: Vec<database::DbRecord> = paths
         .par_iter()
         .filter_map(|p| {
-            let img = image::open(p).ok()?;
+            let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
             let vector = engine
                 .encode_image(&img, &inference::PreprocessingConfig::default())
                 .ok()?;
@@ -684,7 +685,7 @@ async fn run_image_search(
     db.add_batch(&records).await.map_err(|e| e.to_string())?;
     db.create_vector_index().await.map_err(|e| e.to_string())?;
 
-    let ref_img = image::open(&ref_path).map_err(|e| e.to_string())?;
+    let ref_img = dds_loader::open_image_with_dds_fallback(&ref_path).map_err(|e| e.to_string())?;
     let query_vec = engine
         .encode_image(&ref_img, &inference::PreprocessingConfig::default())
         .map_err(|e| e.to_string())?;
@@ -740,8 +741,8 @@ async fn calculate_diff(file1: String, file2: String) -> Result<String, String> 
         return Err("One or both targets are not valid files".into());
     }
 
-    let mut img1 = image::open(&p1).map_err(|e| e.to_string())?;
-    let mut img2 = image::open(&p2).map_err(|e| e.to_string())?;
+    let mut img1 = dds_loader::open_image_with_dds_fallback(&p1).map_err(|e| e.to_string())?;
+    let mut img2 = dds_loader::open_image_with_dds_fallback(&p2).map_err(|e| e.to_string())?;
 
     if img1.width() > 1024 || img1.height() > 1024 {
         img1 = img1.thumbnail(1024, 1024);
@@ -839,7 +840,7 @@ async fn get_channel_preview(path: String, channel: String) -> Result<String, St
         .unwrap_or(false);
 
     if !has_valid_cache {
-        let mut img = image::open(&p).map_err(|e| e.to_string())?;
+        let mut img = dds_loader::open_image_with_dds_fallback(&p).map_err(|e| e.to_string())?;
 
         // Fast downscaling limit optimization
         if img.width() > 512 || img.height() > 512 {
@@ -858,7 +859,8 @@ async fn get_channel_preview(path: String, channel: String) -> Result<String, St
         // Clear out oldest cached allocations if limit exceeded
         if cache.len() > 16 {
             cache.clear();
-            let mut img = image::open(&p).map_err(|e| e.to_string())?;
+            let mut img =
+                dds_loader::open_image_with_dds_fallback(&p).map_err(|e| e.to_string())?;
             if img.width() > 512 || img.height() > 512 {
                 img = img.thumbnail(512, 512);
             }
@@ -876,24 +878,28 @@ async fn get_channel_preview(path: String, channel: String) -> Result<String, St
     let cached_item = cache.get(&path).ok_or("Failed to retrieve cached item")?;
     let rgba = &cached_item.image;
 
-    let channel_idx = match channel.as_str() {
-        "R" => 0,
-        "G" => 1,
-        "B" => 2,
-        "A" => 3,
-        _ => return Err("Invalid channel requested".into()),
+    let out_img = if channel == "RGB" || channel == "Composite" {
+        image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8()
+    } else {
+        let channel_idx = match channel.as_str() {
+            "R" => 0,
+            "G" => 1,
+            "B" => 2,
+            "A" => 3,
+            _ => return Err("Invalid channel requested".into()),
+        };
+
+        let mut gray_img = image::GrayImage::new(rgba.width(), rgba.height());
+        for (x, y, pixel) in rgba.enumerate_pixels() {
+            gray_img.put_pixel(x, y, image::Luma([pixel[channel_idx]]));
+        }
+        image::DynamicImage::ImageLuma8(gray_img).to_rgb8()
     };
 
-    let mut out_img = image::GrayImage::new(rgba.width(), rgba.height());
-    for (x, y, pixel) in rgba.enumerate_pixels() {
-        out_img.put_pixel(x, y, image::Luma([pixel[channel_idx]]));
-    }
-
-    let rgb_img = image::DynamicImage::ImageLuma8(out_img).to_rgb8();
     let mut bytes: Vec<u8> = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut bytes);
 
-    rgb_img
+    out_img
         .write_to(&mut cursor, image::ImageFormat::Png)
         .map_err(|e| e.to_string())?;
 
@@ -943,7 +949,7 @@ async fn generate_visualization_report(
             let y_offset = padding + row * (card_size + text_height + padding);
 
             let p = PathBuf::from(&file_summary.path);
-            if let Ok(img) = image::open(&p) {
+            if let Ok(img) = dds_loader::open_image_with_dds_fallback(&p) {
                 let resized = img.resize(
                     card_size as u32,
                     card_size as u32,

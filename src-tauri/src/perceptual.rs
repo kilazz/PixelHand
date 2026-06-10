@@ -44,7 +44,7 @@ pub fn calculate_perceptual_hashes(
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
 ) -> Option<PerceptualHashes> {
-    let img = image::open(path).ok()?;
+    let img = crate::dds_loader::open_image_with_dds_fallback(path).ok()?;
     let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
     let rgba_img = resized_img.to_rgba8();
 

@@ -25,7 +25,7 @@ pub fn check_normal_map_integrity(
     path: &std::path::Path,
     threshold: f32,
 ) -> Option<(String, String)> {
-    let img = match image::open(path) {
+    let img = match crate::dds_loader::open_image_with_dds_fallback(path) {
         Ok(loaded_img) => loaded_img,
         Err(_) => return None,
     };
