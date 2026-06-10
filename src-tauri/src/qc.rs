@@ -1,6 +1,9 @@
 // src-tauri/src/qc.rs
+use exr::prelude::MetaData;
 use std::cmp;
-use std::path::PathBuf;
+use std::convert::TryInto;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct QcImageMetadata {
@@ -14,6 +17,172 @@ pub struct QcImageMetadata {
     pub has_alpha: bool,
     pub bit_depth: u32,
     pub mipmap_count: u32,
+}
+
+pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
+    // First get dimensions fast
+    let (mut w, mut h) = match imagesize::size(path) {
+        Ok(dim) => (dim.width as u32, dim.height as u32),
+        Err(_) => (0, 0),
+    };
+
+    let mut format_str = ext.clone();
+    let mut compression_format = ext.to_uppercase();
+    let mut color_space = "sRGB".to_string();
+    let mut has_alpha = false;
+    let mut bit_depth = 8;
+    let mut mipmap_count = 1;
+
+    if ext == "dds" {
+        // Read file bytes
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        if bytes.len() >= 128 {
+            // Read width, height
+            let height = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
+            let width = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+            w = width;
+            h = height;
+
+            // Mipmap count is at bytes 28..32
+            let dw_flags = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+            let mips = u32::from_le_bytes(bytes[28..32].try_into().unwrap());
+            // Check DDSD_MIPMAPCOUNT flag: 0x20000
+            if (dw_flags & 0x20000) != 0 && mips > 0 {
+                mipmap_count = mips;
+            } else {
+                mipmap_count = 1;
+            }
+
+            // Pixel format flags (bytes 80..84)
+            let pf_flags = u32::from_le_bytes(bytes[80..84].try_into().unwrap());
+            // Check DDPF_ALPHAPIXELS: 0x1, DDPF_ALPHA: 0x2
+            if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
+                has_alpha = true;
+            }
+
+            let pf_fourcc = u32::from_le_bytes(bytes[84..88].try_into().unwrap());
+            if pf_fourcc != 0 {
+                let fourcc_str = String::from_utf8_lossy(&bytes[84..88]).to_string();
+                compression_format = fourcc_str.trim().to_string();
+                if compression_format == "DXT3" || compression_format == "DXT5" {
+                    has_alpha = true;
+                }
+
+                if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
+                    let dxgi_format = u32::from_le_bytes(bytes[128..132].try_into().unwrap());
+                    compression_format = format!("DX10 (DXGI {})", dxgi_format);
+                    // Standard DXGI formats with alpha
+                    // e.g., BC1 usually no, BC2/BC3/BC7 yes
+                    if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
+                        has_alpha = true;
+                    }
+                    if matches!(dxgi_format, 72 | 75 | 78 | 99) {
+                        color_space = "sRGB".to_string();
+                    } else if matches!(dxgi_format, 71 | 74 | 77 | 80 | 83 | 98) {
+                        color_space = "Linear".to_string();
+                    }
+                }
+            } else {
+                compression_format = "Uncompressed".to_string();
+                // Check if RGB or RGBA uncompressed
+                let rgb_bit_count = u32::from_le_bytes(bytes[88..92].try_into().unwrap());
+                bit_depth = rgb_bit_count / 4;
+                if bit_depth == 0 {
+                    bit_depth = 8;
+                }
+            }
+        }
+    } else if ext == "exr" {
+        // Parse metadata using exr crate
+        if let Ok(meta) = MetaData::read_from_file(path, false) {
+            if let Some(header) = meta.headers.first() {
+                w = header.shared_attributes.display_window.size.width() as u32;
+                h = header.shared_attributes.display_window.size.height() as u32;
+
+                has_alpha = false;
+                bit_depth = 16; // default for EXR is f16 half-float
+                for channel in &header.channels.list {
+                    let channel_name = channel.name.to_string();
+                    if channel_name == "A" || channel_name == "alpha" {
+                        has_alpha = true;
+                    }
+                    // check sample type
+                    let sample_type_str = format!("{:?}", channel.sample_type);
+                    if sample_type_str.contains("F32") || sample_type_str.contains("U32") {
+                        bit_depth = 32;
+                    }
+                }
+
+                // Color space: EXR is natively Linear (Scene-referred)
+                color_space = "Linear".to_string();
+                compression_format = format!("{:?}", header.compression);
+            }
+        } else {
+            bit_depth = 16;
+            color_space = "Linear".to_string();
+            compression_format = "EXR (Unknown)".to_string();
+        }
+    } else if ext == "hdr" {
+        bit_depth = 32;
+        color_space = "Linear".to_string();
+        compression_format = "Radiance HDR".to_string();
+    } else {
+        // Standard formats PNG, JPEG, TGA
+        if let Ok(img) = image::open(path) {
+            let color = img.color();
+            let has_alpha_val = match color {
+                image::ColorType::La8
+                | image::ColorType::Rgba8
+                | image::ColorType::La16
+                | image::ColorType::Rgba16
+                | image::ColorType::Rgba32F => true,
+                _ => false,
+            };
+            has_alpha = has_alpha_val;
+
+            bit_depth = match color {
+                image::ColorType::L8
+                | image::ColorType::La8
+                | image::ColorType::Rgb8
+                | image::ColorType::Rgba8 => 8,
+                image::ColorType::L16
+                | image::ColorType::La16
+                | image::ColorType::Rgb16
+                | image::ColorType::Rgba16 => 16,
+                image::ColorType::Rgb32F | image::ColorType::Rgba32F => 32,
+                _ => 8,
+            };
+        }
+
+        // Linear normal maps rule
+        let path_lower = path.to_string_lossy().to_lowercase();
+        if path_lower.contains("normal")
+            || path_lower.contains("_n.")
+            || path_lower.contains("_ddn.")
+        {
+            color_space = "Linear".to_string();
+        }
+    }
+
+    Ok(QcImageMetadata {
+        path: path.to_path_buf(),
+        width: w,
+        height: h,
+        file_size: size,
+        format_str,
+        compression_format,
+        color_space,
+        has_alpha,
+        bit_depth,
+        mipmap_count,
+    })
 }
 
 #[inline]

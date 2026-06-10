@@ -6,6 +6,46 @@ function size_formatter(bytes) {
   return (bytes / (1024 * 1024)).toFixed(2) + " MB";
 }
 
+function renderRichMeta(file) {
+  const parts = [];
+  parts.push(`${file.width}x${file.height}`);
+
+  const format = file.compression_format || file.format_str;
+  if (format && format.toLowerCase() !== "unknown") {
+    parts.push(format);
+  }
+
+  if (file.bit_depth) {
+    parts.push(`${file.bit_depth}-bit`);
+  }
+
+  if (file.color_space && file.color_space.toLowerCase() !== "unknown") {
+    parts.push(file.color_space);
+  }
+
+  if (file.mipmap_count && file.mipmap_count > 1) {
+    parts.push(`Mips: ${file.mipmap_count}`);
+  }
+
+  if (file.has_alpha) {
+    parts.push("Alpha");
+  }
+
+  return (
+    <div style="display: flex; flex-direction: column; justify-content: center; line-height: 1.3; overflow: hidden; height: 100%;">
+      <span
+        style="font-size: 8pt; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+        title={parts.join(" • ")}
+      >
+        {parts.join(" • ")}
+      </span>
+      <span style="font-size: 7.5pt; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        {size_formatter(file.size)}
+      </span>
+    </div>
+  );
+}
+
 export default function ResultsPanel(props) {
   const [collapsedGroups, setCollapsedGroups] = createSignal(new Set());
 
@@ -145,13 +185,20 @@ export default function ResultsPanel(props) {
                 : "var(--text-primary)",
             }}
           >
-            {row.isBest ? "[Best]" : "Dup"}
+            {row.isBest
+              ? "[Best]"
+              : row.file.similarity !== undefined && row.file.similarity < 100
+              ? `${row.file.similarity.toFixed(1)}%`
+              : "Dup"}
           </span>
           <span class="col-path" title={row.file.path}>
             {row.file.path}
           </span>
-          <span class="col-meta">
-            {row.file.width}x{row.file.height} • {size_formatter(row.file.size)}
+          <span
+            class="col-meta"
+            style="display: flex; flex-direction: column; justify-content: center; height: 100%;"
+          >
+            {renderRichMeta(row.file)}
           </span>
         </div>
       );

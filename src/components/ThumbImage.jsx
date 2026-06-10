@@ -54,21 +54,37 @@ export default function ThumbImage(props) {
           class="corner-zone tl"
           data-channel="R"
           data-path={props.path}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (props.onCornerClick) props.onCornerClick("R", props.path);
+          }}
         ></div>
         <div
           class="corner-zone tr"
           data-channel="G"
           data-path={props.path}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (props.onCornerClick) props.onCornerClick("G", props.path);
+          }}
         ></div>
         <div
           class="corner-zone bl"
           data-channel="B"
           data-path={props.path}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (props.onCornerClick) props.onCornerClick("B", props.path);
+          }}
         ></div>
         <div
           class="corner-zone br"
           data-channel="A"
           data-path={props.path}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (props.onCornerClick) props.onCornerClick("A", props.path);
+          }}
         ></div>
       </Show>
     </div>

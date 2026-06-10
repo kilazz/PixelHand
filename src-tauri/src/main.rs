@@ -86,6 +86,13 @@ pub struct DuplicateFileSummary {
     pub size: u64,
     pub width: usize,
     pub height: usize,
+    pub format_str: String,
+    pub compression_format: String,
+    pub color_space: String,
+    pub has_alpha: bool,
+    pub bit_depth: u32,
+    pub mipmap_count: u32,
+    pub similarity: f32,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -197,11 +204,37 @@ async fn run_exact_scan(directory: String) -> Result<Vec<DuplicateGroupSummary>,
     for (hash, files) in dups {
         let file_summaries = files
             .into_iter()
-            .map(|f| DuplicateFileSummary {
-                path: f.path.to_string_lossy().to_string(),
-                size: f.size,
-                width: f.width,
-                height: f.height,
+            .map(|f| {
+                let qc_meta =
+                    qc::extract_qc_metadata(&f.path).unwrap_or_else(|_| qc::QcImageMetadata {
+                        path: f.path.clone(),
+                        width: f.width as u32,
+                        height: f.height as u32,
+                        file_size: f.size,
+                        format_str: f
+                            .path
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        compression_format: "Unknown".to_string(),
+                        color_space: "Unknown".to_string(),
+                        has_alpha: false,
+                        bit_depth: 8,
+                        mipmap_count: 1,
+                    });
+                DuplicateFileSummary {
+                    path: f.path.to_string_lossy().to_string(),
+                    size: f.size,
+                    width: f.width,
+                    height: f.height,
+                    format_str: qc_meta.format_str,
+                    compression_format: qc_meta.compression_format,
+                    color_space: qc_meta.color_space,
+                    has_alpha: qc_meta.has_alpha,
+                    bit_depth: qc_meta.bit_depth,
+                    mipmap_count: qc_meta.mipmap_count,
+                    similarity: 100.0,
+                }
             })
             .collect();
         results.push(DuplicateGroupSummary {
@@ -243,7 +276,7 @@ async fn run_qc_scan(
                 .unwrap_or_default();
             let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
 
-            let qc_meta = qc::QcImageMetadata {
+            let qc_meta = qc::extract_qc_metadata(p).unwrap_or_else(|_| qc::QcImageMetadata {
                 path: p.clone(),
                 width: w as u32,
                 height: h as u32,
@@ -254,7 +287,7 @@ async fn run_qc_scan(
                 has_alpha: false,
                 bit_depth: 8,
                 mipmap_count: 1,
-            };
+            });
 
             let abs_issues = qc::check_absolute(
                 &qc_meta,
@@ -361,7 +394,7 @@ async fn run_folder_compare(
                 .map(|e| e.to_string_lossy().to_string())
                 .unwrap_or_default();
 
-            let meta_a = qc::QcImageMetadata {
+            let meta_a = qc::extract_qc_metadata(p_a).unwrap_or_else(|_| qc::QcImageMetadata {
                 path: p_a.clone(),
                 width: w_a as u32,
                 height: h_a as u32,
@@ -372,9 +405,9 @@ async fn run_folder_compare(
                 has_alpha: false,
                 bit_depth: 8,
                 mipmap_count: 1,
-            };
+            });
 
-            let meta_b = qc::QcImageMetadata {
+            let meta_b = qc::extract_qc_metadata(p_b).unwrap_or_else(|_| qc::QcImageMetadata {
                 path: p_b.clone(),
                 width: w_b as u32,
                 height: h_b as u32,
@@ -385,7 +418,7 @@ async fn run_folder_compare(
                 has_alpha: false,
                 bit_depth: 8,
                 mipmap_count: 1,
-            };
+            });
 
             let rel_issues = qc::check_relative(
                 &meta_a,
@@ -420,7 +453,7 @@ async fn run_perceptual_scan(
     analysis_type: String,
     ignore_solid_channels: bool,
     use_phash: bool,
-) -> Result<Vec<PerceptualGroupSummary>, String> {
+) -> Result<Vec<DuplicateGroupSummary>, String> {
     let path = PathBuf::from(directory);
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
@@ -449,27 +482,98 @@ async fn run_perceptual_scan(
     let mut results = Vec::new();
     let mut group_id = 0;
 
+    // Convert similarity percentage S% (e.g. 90) to Hamming threshold
+    let max_dist = (((100.0 - threshold as f32) / 100.0) * 64.0).round() as u32;
+
     for i in 0..hashes.len() {
         if visited[i] {
             continue;
         }
-        let mut group_files = vec![hashes[i].0.to_string_lossy().to_string()];
+        let mut group_members = vec![hashes[i].clone()];
         for j in (i + 1)..hashes.len() {
             if visited[j] {
                 continue;
             }
             if let Some(dist) = perceptual::calculate_hamming_distance(&hashes[i].1, &hashes[j].1) {
-                if dist <= threshold {
-                    group_files.push(hashes[j].0.to_string_lossy().to_string());
+                if dist <= max_dist {
+                    group_members.push(hashes[j].clone());
                     visited[j] = true;
                 }
             }
         }
-        if group_files.len() > 1 {
+        if group_members.len() > 1 {
             group_id += 1;
-            results.push(PerceptualGroupSummary {
-                group_id,
-                files: group_files,
+            let mut file_summaries = Vec::new();
+            for (p_buf, hash_str) in &group_members {
+                let metadata = fs::metadata(p_buf).map_err(|e| e.to_string())?;
+                let size = metadata.len();
+                let (width, height) = match imagesize::size(p_buf) {
+                    Ok(dim) => (dim.width, dim.height),
+                    Err(_) => (0, 0),
+                };
+                let qc_meta =
+                    qc::extract_qc_metadata(p_buf).unwrap_or_else(|_| qc::QcImageMetadata {
+                        path: p_buf.clone(),
+                        width: width as u32,
+                        height: height as u32,
+                        file_size: size,
+                        format_str: p_buf
+                            .extension()
+                            .map(|e| e.to_string_lossy().to_string())
+                            .unwrap_or_default(),
+                        compression_format: "Unknown".to_string(),
+                        color_space: "Unknown".to_string(),
+                        has_alpha: false,
+                        bit_depth: 8,
+                        mipmap_count: 1,
+                    });
+
+                file_summaries.push(DuplicateFileSummary {
+                    path: p_buf.to_string_lossy().to_string(),
+                    size,
+                    width,
+                    height,
+                    format_str: qc_meta.format_str,
+                    compression_format: qc_meta.compression_format,
+                    color_space: qc_meta.color_space,
+                    has_alpha: qc_meta.has_alpha,
+                    bit_depth: qc_meta.bit_depth,
+                    mipmap_count: qc_meta.mipmap_count,
+                    similarity: 100.0,
+                });
+            }
+
+            file_summaries.sort_by(|a, b| {
+                let area_a = a.width * a.height;
+                let area_b = b.width * b.height;
+                if area_a != area_b {
+                    area_b.cmp(&area_a)
+                } else {
+                    b.size.cmp(&a.size)
+                }
+            });
+
+            // Recompute similarity against the new "best" representative at file_summaries[0]
+            let best_path = &file_summaries[0].path;
+            let best_hash = group_members
+                .iter()
+                .find(|(pb, _)| pb.to_string_lossy().to_string() == *best_path)
+                .map(|(_, h)| h.as_str())
+                .unwrap_or(&group_members[0].1);
+
+            for file in &mut file_summaries {
+                let cur_hash = group_members
+                    .iter()
+                    .find(|(pb, _)| pb.to_string_lossy().to_string() == file.path)
+                    .map(|(_, h)| h.as_str())
+                    .unwrap_or(&group_members[0].1);
+                let dist = perceptual::calculate_hamming_distance(best_hash, cur_hash).unwrap_or(0);
+                file.similarity = (1.0 - (dist as f32 / 64.0)) * 100.0;
+            }
+
+            results.push(DuplicateGroupSummary {
+                hash: group_id.to_string(),
+                files: file_summaries,
             });
         }
     }
@@ -545,15 +649,38 @@ async fn run_ai_duplicate_scan(
         for member_path in members {
             let p = PathBuf::from(&member_path);
             let metadata = fs::metadata(&p).map_err(|e| e.to_string())?;
+            let size = metadata.len();
             let (width, height) = match imagesize::size(&p) {
                 Ok(dim) => (dim.width, dim.height),
                 Err(_) => (0, 0),
             };
+            let qc_meta = qc::extract_qc_metadata(&p).unwrap_or_else(|_| qc::QcImageMetadata {
+                path: p.clone(),
+                width: width as u32,
+                height: height as u32,
+                file_size: size,
+                format_str: p
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                compression_format: "Unknown".to_string(),
+                color_space: "Unknown".to_string(),
+                has_alpha: false,
+                bit_depth: 8,
+                mipmap_count: 1,
+            });
             file_summaries.push(DuplicateFileSummary {
                 path: member_path,
-                size: metadata.len(),
+                size,
                 width,
                 height,
+                format_str: qc_meta.format_str,
+                compression_format: qc_meta.compression_format,
+                color_space: qc_meta.color_space,
+                has_alpha: qc_meta.has_alpha,
+                bit_depth: qc_meta.bit_depth,
+                mipmap_count: qc_meta.mipmap_count,
+                similarity: 100.0,
             });
         }
         file_summaries.sort_by(|a, b| {
@@ -565,6 +692,23 @@ async fn run_ai_duplicate_scan(
                 b.size.cmp(&a.size)
             }
         });
+
+        let best_path = &file_summaries[0].path;
+        let best_vec = records
+            .iter()
+            .find(|r| r.path == *best_path)
+            .map(|r| &r.vector);
+        if let Some(bv) = best_vec {
+            for file in &mut file_summaries {
+                if let Some(r) = records.iter().find(|r| r.path == file.path) {
+                    let dot: f32 = r.vector.iter().zip(bv.iter()).map(|(a, b)| a * b).sum();
+                    let sim_pct = dot.clamp(0.0, 1.0) * 100.0;
+                    file.similarity = sim_pct;
+                } else {
+                    file.similarity = 100.0;
+                }
+            }
+        }
 
         let mut hasher = Xxh64::new(0);
         hasher.update(root.as_bytes());
@@ -879,21 +1023,21 @@ async fn get_channel_preview(path: String, channel: String) -> Result<String, St
     let rgba = &cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {
-        image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8()
+        image::DynamicImage::ImageRgba8(rgba.clone())
     } else {
         let channel_idx = match channel.as_str() {
             "R" => 0,
             "G" => 1,
             "B" => 2,
-            "A" => 3,
-            _ => return Err("Invalid channel requested".into()),
+            _ => 3, // A
         };
 
-        let mut gray_img = image::GrayImage::new(rgba.width(), rgba.height());
+        let mut out_rgb = image::RgbImage::new(rgba.width(), rgba.height());
         for (x, y, pixel) in rgba.enumerate_pixels() {
-            gray_img.put_pixel(x, y, image::Luma([pixel[channel_idx]]));
+            let val = pixel[channel_idx];
+            out_rgb.put_pixel(x, y, image::Rgb([val, val, val]));
         }
-        image::DynamicImage::ImageLuma8(gray_img).to_rgb8()
+        image::DynamicImage::ImageRgb8(out_rgb)
     };
 
     let mut bytes: Vec<u8> = Vec::new();

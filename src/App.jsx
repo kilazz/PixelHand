@@ -170,11 +170,10 @@ export default function App() {
       let finalRes = [];
       if (
         backendCommand === "run_exact_scan" ||
-        backendCommand === "run_ai_duplicate_scan"
+        backendCommand === "run_ai_duplicate_scan" ||
+        backendCommand === "run_perceptual_scan"
       ) {
         finalRes = results.map((g) => ({ type: "duplicate", ...g }));
-      } else if (backendCommand === "run_perceptual_scan") {
-        finalRes = results.map((g) => ({ type: "perceptual", ...g }));
       } else if (
         backendCommand === "run_qc_scan" ||
         backendCommand === "run_folder_compare"
