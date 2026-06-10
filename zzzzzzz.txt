@@ -1,0 +1,11 @@
+$esaxx_build_files = Get-ChildItem -Path "$Home\.cargo\registry\src" -Filter "build.rs" -Recurse | Where-Object { $_.FullName -like "*esaxx-rs*" }
+
+foreach ($file in $esaxx_build_files) {
+    $content = Get-Content $file.FullName
+    $content = $content -replace '\.static_crt\(true\)', '.static_crt(false)'
+    Set-Content -Path $file.FullName -Value $content
+    Write-Host "Successfully patched build script at: $($file.FullName)"
+}
+
+cargo clippy
+cargo fmt

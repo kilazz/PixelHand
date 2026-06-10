@@ -1,0 +1,566 @@
+<!-- src/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>
+      PixelHand - Asset Quality Control & Visual Search
+    </title>
+    <style>
+      :root {
+        --darkest: #1e1f22; --darker: #2b2d31; --dark: #313338; --border-gray: #1f2023;
+        --button-gray: #4e5058; --button-hover: #5d6069; --text-primary: #dcddde;
+        --text-secondary: #949ba4; --text-disabled: #7c808a; --brand-blue: #5865f2;
+        --brand-blue-hover: #4752c4; --success-green: #23a55a; --danger-red: #f23f43; --warning-yellow: #f0b132;
+
+        /* CSS variables for interactive real-time grid scaling */
+        --results-grid-size: 100px;
+        --viewer-grid-size: 110px;
+      }
+      body { font-family: "Helvetica Neue", "Helvetica", "Arial", sans-serif; background-color: var(--dark); color: var(--text-primary); font-size: 9pt; margin: 0; padding: 0; height: 100vh; overflow: hidden; display: flex; }
+      #loader-view { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100vw; height: 100vh; background-color: var(--dark); z-index: 9999; position: absolute; top: 0; left: 0; }
+      .progress-bar-container { width: 350px; height: 16px; background-color: var(--darkest); border: 1px solid var(--border-gray); border-radius: 4px; overflow: hidden; margin-top: 15px; }
+      #progress-bar-fill { width: 0%; height: 100%; background-color: var(--success-green); transition: width 0.1s; }
+      #main-app-layout { display: none; width: 100vw; height: 100vh; }
+      .sidebar-panel { width: 320px; min-width: 280px; max-width: 450px; background-color: var(--darker); padding: 12px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex-shrink: 0; }
+      .panel-section { border: 1px solid var(--border-gray); background-color: var(--dark); border-radius: 4px; padding: 12px; }
+      .section-title { font-size: 8pt; font-weight: bold; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid var(--border-gray); padding-bottom: 4px; }
+      .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+      .form-group.row-layout { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; height: 26px; }
+      .form-group.row-layout label { margin: 0; }
+      input[type="text"], input[type="number"], select { background-color: var(--darkest); border: 1px solid var(--border-gray); color: var(--text-primary); border-radius: 3px; padding: 5px; font-size: 9pt; width: 100%; height: 26px; box-sizing: border-box; }
+      .checkbox-grid { display: grid; grid-template-columns: 1fr; gap: 6px; }
+      .checkbox-container { display: flex; align-items: center; gap: 6px; color: var(--text-primary); font-size: 8.5pt; cursor: pointer; }
+      .sub-group-container { border: 1px solid var(--border-gray); background-color: var(--darker); border-radius: 4px; padding: 8px; margin-top: 4px; display: flex; flex-direction: column; gap: 6px; }
+      .results-panel { flex: 1; background-color: var(--dark); padding: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 400px; }
+      .results-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; height: 28px; }
+      .results-list { flex: 1; background-color: var(--darker); border: 1px solid var(--border-gray); border-radius: 4px; overflow-y: auto; padding: 0; position: relative; }
+      .results-columns-header { display: flex; background-color: var(--darkest); border-bottom: 1px solid var(--border-gray); padding: 6px 10px; font-size: 7.5pt; font-weight: bold; color: var(--text-secondary); text-transform: uppercase; }
+      .col-file { width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .col-score { width: 12%; text-align: center; } .col-path { width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 10px; } .col-meta { width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-left: 10px; }
+      .group-card-header-row { color: var(--text-secondary); border-bottom: 1px solid var(--border-gray); background-color: var(--dark); font-weight: bold; font-size: 8pt; text-transform: uppercase; cursor: pointer; }
+      .group-card-header-row:hover { color: var(--text-primary); background-color: #35373c; }
+      .duplicate-item { color: var(--text-primary); transition: background-color 0.1s; } .duplicate-item:hover { background-color: #393c41; } .duplicate-item.best-match { background-color: #2c3e50; }
+
+      /* Standardized thumbnail container dimensions for interactive hovering */
+      .thumb-wrapper {
+        position: relative;
+        width: 32px;
+        height: 32px;
+        display: inline-block;
+        flex-shrink: 0;
+      }
+      .results-list.grid-mode .thumb-wrapper {
+        width: var(--results-grid-size);
+        height: var(--results-grid-size);
+      }
+      .viewer-item-thumb-wrapper {
+        position: relative;
+        width: 48px;
+        height: 48px;
+        display: inline-block;
+        flex-shrink: 0;
+      }
+      .viewer-list-container.grid-mode .viewer-item-thumb-wrapper {
+        width: calc(var(--viewer-grid-size) - 46px);
+        height: calc(var(--viewer-grid-size) - 46px);
+      }
+
+      /* Image scaling rule combined with micro checkered backdrops */
+      .row-thumb, .grid-cover, .viewer-item-thumb {
+        object-fit: contain !important;
+        background-image: linear-gradient(45deg, #18191c 25%, transparent 25%),
+                          linear-gradient(-45deg, #18191c 25%, transparent 25%),
+                          linear-gradient(45deg, transparent 75%, #18191c 75%),
+                          linear-gradient(-45deg, transparent 75%, #18191c 75%);
+        background-size: 10px 10px;
+        background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+        background-color: #232428;
+      }
+
+      .row-thumb { width: 32px; height: 32px; border-radius: 3px; }
+      .results-selection-box { border: 1px solid var(--border-gray); background-color: var(--darker); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+      .selection-buttons-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+      .results-footer-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+      /* Grid View Layout Styles modulated by custom CSS variable */
+      .results-list.grid-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--results-grid-size), 1fr)); gap: 10px; padding: 10px; align-content: start; }
+      .results-list.grid-mode .group-card { background-color: var(--dark); border: 1px solid var(--border-gray); border-radius: 4px; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 10px; height: calc(var(--results-grid-size) + 95px); justify-content: space-between; box-sizing: border-box; }
+      .results-list.grid-mode .grid-cover { width: var(--results-grid-size); height: var(--results-grid-size); border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.4); cursor: pointer; }
+
+      .viewer-panel { width: 450px; min-width: 350px; max-width: 650px; background-color: var(--darker); padding: 12px; display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
+      .viewer-list-container { flex: 1; background-color: var(--darkest); border: 1px solid var(--border-gray); border-radius: 4px; overflow-y: auto; padding: 8px; }
+      .viewer-item { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 4px; cursor: pointer; margin-bottom: 4px; background-color: var(--dark); border: 1px solid transparent;}
+      .viewer-item:hover { background-color: #393c41; } .viewer-item.active { border-color: var(--brand-blue); background-color: #2b3d52; }
+      .viewer-item-thumb { width: 48px; height: 48px; border-radius: 3px; flex-shrink: 0; }
+      .viewer-item-details { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+      .viewer-item-title { font-weight: bold; font-size: 8.5pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .viewer-item-meta { font-size: 7.5pt; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+      /* Fixed Viewer Grid CSS modulated by custom CSS variable */
+      .viewer-list-container.grid-mode { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--viewer-grid-size), 1fr)); gap: 8px; align-content: start; }
+      .viewer-list-container.grid-mode .viewer-item { flex-direction: column; align-items: center; text-align: center; padding: 8px; height: calc(var(--viewer-grid-size) + 20px); width: 100%; box-sizing: border-box; }
+      .viewer-list-container.grid-mode .viewer-item-thumb-wrapper { width: calc(var(--viewer-grid-size) - 46px); height: calc(var(--viewer-grid-size) - 46px); }
+      .viewer-list-container.grid-mode .viewer-item-thumb { width: 100%; height: 100%; } .viewer-list-container.grid-mode .viewer-item-meta { display: none; }
+
+      .viewer-viewport { flex: 1; background-color: var(--darkest); border: 1px solid var(--border-gray); border-radius: 4px; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+      .viewer-controls { background-color: var(--dark); border: 1px solid var(--border-gray); border-radius: 4px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+      .channel-toggles { display: flex; gap: 5px; justify-content: center; }
+
+      /* Corner absolute hover targets for dynamic RGBA previews */
+      .corner-zone {
+        position: absolute;
+        width: 35%;
+        height: 35%;
+        background-color: transparent;
+        z-index: 10;
+        cursor: crosshair;
+      }
+      .corner-zone.tl { top: 0; left: 0; }
+      .corner-zone.tr { top: 0; right: 0; }
+      .corner-zone.bl { bottom: 0; left: 0; }
+      .corner-zone.br { bottom: 0; right: 0; }
+
+      .corner-zone::after {
+        content: attr(data-channel);
+        position: absolute;
+        font-size: 7.5pt;
+        font-weight: bold;
+        color: white;
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 1px 3px;
+        border-radius: 2px;
+        opacity: 0;
+        transition: opacity 0.1s;
+        pointer-events: none;
+      }
+      .corner-zone.tl::after { top: 2px; left: 2px; }
+      .corner-zone.tr::after { top: 2px; right: 2px; }
+      .corner-zone.bl::after { bottom: 2px; left: 2px; }
+      .corner-zone.br::after { bottom: 2px; right: 2px; }
+      .corner-zone:hover::after { opacity: 1; }
+
+      /* Visual Wipe handle dragging cursor style */
+      .wipe-viewport { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; z-index: 2; cursor: col-resize; }
+      .wipe-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+      .wipe-layer img { max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; }
+      #wipe-layer-fg { clip-path: polygon(0 0, 50% 0, 50% 100%, 0 100%); }
+      #wipe-line { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; background-color: var(--warning-yellow); transform: translateX(-50%); pointer-events: none; z-index: 10; }
+
+      .modal-backdrop { display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.6); z-index: 10000; align-items: center; justify-content: center; }
+      .modal-dialog { background-color: var(--darker); border: 1px solid var(--border-gray); border-radius: 6px; width: 480px; padding: 15px; }
+      .modal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-height: 250px; overflow-y: auto; padding: 10px; background-color: var(--darkest); border-radius: 4px; margin: 12px 0; }
+
+      .splitter-handle { width: 5px; background-color: var(--border-gray); cursor: col-resize; position: relative; flex-shrink: 0; align-self: stretch; }
+      .splitter-handle:hover, .splitter-handle.dragging { background-color: var(--brand-blue); }
+
+      /* Standardized button styles for precise grid line alignments */
+      button {
+        background-color: var(--button-gray);
+        color: #f2f3f5;
+        border-radius: 3px;
+        padding: 5px 10px;
+        font-weight: 500;
+        cursor: pointer;
+        font-size: 8.5pt;
+        border: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 26px;
+        box-sizing: border-box;
+        transition: background-color 0.1s;
+      }
+      button:hover { background-color: var(--button-hover); } button:disabled { background-color: #36383e; color: var(--text-disabled); border-color: #36383e; cursor: not-allowed; }
+      button.active-toggle { background-color: var(--brand-blue); border-color: var(--brand-blue); }
+      button.primary-btn { background-color: var(--brand-blue); border-color: var(--brand-blue); } button.primary-btn:hover { background-color: var(--brand-blue-hover); }
+      button.success-btn { background-color: var(--success-green); border-color: var(--success-green); } button.success-btn:hover { background-color: #1e8547; }
+      button.danger-btn { background-color: var(--danger-red); border-color: var(--danger-red); } button.danger-btn:hover { background-color: #c03539; }
+      button.warning-btn { background-color: var(--warning-yellow); border-color: var(--warning-yellow); color: var(--darkest); }
+
+      .view-toggles { display: flex; gap: 4px; }
+      .view-toggles button { padding: 0 8px; font-size: 9.5pt; }
+
+      /* Clean standard slider layout configurations */
+      input[type="range"] {
+        -webkit-appearance: none;
+        background: var(--darkest);
+        height: 4px;
+        border-radius: 2px;
+        outline: none;
+        cursor: pointer;
+      }
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--brand-blue);
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+      input[type="range"]::-webkit-slider-thumb:hover {
+        background: var(--brand-blue-hover);
+      }
+
+      .checkered-backdrop { background-image: linear-gradient(45deg, #18191c 25%, transparent 25%), linear-gradient(-45deg, #18191c 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #18191c 75%), linear-gradient(-45deg, transparent 75%, #18191c 75%); background-size: 16px 16px; background-position: 0 0, 0 8px, 8px -8px, -8px 0px; background-color: #232428; }
+      #bg-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: var(--darkest); z-index: 1; pointer-events: none; transition: opacity 0.1s; }
+
+      .log-line { padding: 1px 0; font-size: 7.5pt; } .log-line.error { color: var(--danger-red); } .log-line.warning { color: var(--warning-yellow); } .log-line.success { color: var(--success-green); } .log-line.info { color: var(--text-secondary); }
+    </style>
+  </head>
+  <body>
+    <div id="loader-view">
+      <div class="loader-title">
+        Initializing AI Models
+      </div>
+      <div class="progress-bar-container">
+        <div id="progress-bar-fill">
+        </div>
+      </div>
+      <div id="status-text">
+        Locating existing models...
+      </div>
+    </div>
+    <div id="main-app-layout">
+      <!-- 1. LEFT SIDEBAR -->
+      <div class="sidebar-panel" id="sidebar-panel">
+        <div class="panel-section">
+          <div class="section-title">
+            Scan Configuration
+          </div>
+          <div class="form-group row-layout">
+            <label>
+              Folder A:
+            </label>
+            <div style="display:flex; gap:4px; flex:1;">
+              <input type="text" id="dir-input-a" placeholder="C:\Users\Zed\Pictures\Screenshots" style="flex:1;" />
+              <button id="browse-btn-a" style="padding: 4px 8px;">
+                ...
+              </button>
+            </div>
+          </div>
+          <!-- Folder B Configuration (Toggleable Comparative Target) -->
+          <div class="form-group" id="folder-b-group" style="display: none;">
+            <label>
+              Compare Folder B:
+            </label>
+            <div style="display:flex; gap:4px; width:100%;">
+              <input type="text" id="dir-input-b" placeholder="C:\Path\To\Build\Images" style="flex:1;" />
+              <button id="browse-btn-b" style="padding: 4px 8px;">
+                ...
+              </button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>
+              Find (Search AI):
+            </label>
+            <div style="display:flex; gap:4px; width:100%;">
+              <input type="text" id="semantic-query" placeholder="Enter text or drag image..." style="flex:1;" />
+            </div>
+            <div id="sample-path-label" style="display:none; font-size:7.5pt; color:var(--text-secondary); margin-top:2px;">
+              Sample: None
+            </div>
+          </div>
+          <div class="form-group row-layout">
+            <label>
+              Similarity Threshold:
+            </label>
+            <div style="display:flex; align-items:center; gap:4px; width: 120px;">
+              <input type="number" id="similarity-input" min="0" max="100" value="90" style="flex:1;" />
+              <span style="color:var(--text-secondary); font-size:9pt;">
+                %
+              </span>
+            </div>
+          </div>
+          <button id="scan-btn" class="success-btn" style="width:100%; height:32px; font-size:9.5pt; font-weight:bold; margin-top:8px;">
+            Start Scan
+          </button>
+        </div>
+        <div class="panel-section">
+          <div class="section-title">
+            Quality Control (QC) Options
+          </div>
+          <label class="checkbox-container" style="color: var(--warning-yellow); font-weight: bold; margin-bottom: 6px;">
+            <input type="checkbox" id="qc-mode-check" />
+            Enable Technical QC Mode
+          </label>
+          <div class="checkbox-grid" id="qc-options-container" style="opacity: 0.5; pointer-events: none;">
+            <label class="checkbox-container">
+              <input type="checkbox" id="qc-npot-check" checked />
+              Check NPOT (Power of 2)
+            </label>
+            <label class="checkbox-container">
+              <input type="checkbox" id="qc-mipmaps-check" checked />
+              Check Mip-Maps
+            </label>
+            <label class="checkbox-container">
+              <input type="checkbox" id="qc-block-align-check" checked />
+              Check BlockAlignment (4px)
+            </label>
+            <label class="checkbox-container">
+              <input type="checkbox" id="qc-bit-depth-check" checked />
+              Check Bit Depth
+            </label>
+            <label class="checkbox-container" style="margin-top: 6px;">
+              <input type="checkbox" id="qc-normal-maps-check" checked />
+              Validate Normal Maps
+            </label>
+            <input type="text" id="qc-normals-tags" placeholder="Tags: _norm, _ddn (empty = check all)" style="margin-top:4px;" />
+          </div>
+        </div>
+        <div class="panel-section">
+          <div class="section-title">
+            Search Methods (Non-QC)
+          </div>
+          <div class="sub-group-container">
+            <label class="checkbox-container">
+              <input type="radio" name="searchMethod" value="exact" checked />
+              Exact Match (xxHash)
+            </label>
+            <label class="checkbox-container">
+              <input type="radio" name="searchMethod" value="simple" />
+              Simple Duplicates (dHash)
+            </label>
+            <label class="checkbox-container">
+              <input type="radio" name="searchMethod" value="ai" />
+              AI Semantic/Visual Search
+            </label>
+          </div>
+        </div>
+        <!-- Advanced Perceptual & Channel-Split Hashing Configuration -->
+        <div class="panel-section" id="advanced-hashing-section" style="display: none;">
+          <div class="section-title">
+            Advanced Hashing Options
+          </div>
+          <div class="form-group">
+            <label class="checkbox-container">
+              <input type="checkbox" id="perceptual-use-phash" />
+              Use pHash instead of dHash
+            </label>
+            <label class="checkbox-container">
+              <input type="checkbox" id="perceptual-ignore-solid" checked />
+              Ignore Solid Channels
+            </label>
+          </div>
+          <div class="form-group">
+            <label>
+              Analysis Target Channel:
+            </label>
+            <select id="perceptual-channel-select">
+              <option value="Composite">
+                Composite (Full RGB)
+              </option>
+              <option value="Luminance">
+                Luminance (Grayscale)
+              </option>
+              <option value="R">
+                Red Channel Only
+              </option>
+              <option value="G">
+                Green Channel Only
+              </option>
+              <option value="B">
+                Blue Channel Only
+              </option>
+              <option value="A">
+                Alpha Channel Only
+              </option>
+            </select>
+          </div>
+        </div>
+        <div class="panel-section" style="flex: 1; display: flex; flex-direction: column; min-height: 140px; max-height: 300px; padding: 6px;">
+          <div class="section-title" style="margin-bottom: 4px;">
+            Log
+          </div>
+          <div id="log-console" style="flex: 1; background-color: var(--darkest); border: 1px solid var(--border-gray); border-radius: 3px; padding: 4px; font-family: Consolas, Monaco, monospace; font-size: 7.5pt; overflow-y: auto; white-space: pre-wrap; word-break: break-all; color: var(--text-secondary);">
+          </div>
+        </div>
+      </div>
+      <div class="splitter-handle" id="splitter-left">
+      </div>
+      <!-- 2. CENTER RESULTS -->
+      <div class="results-panel" id="results-panel">
+        <div class="results-header">
+          <div class="section-title" style="margin: 0;" id="results-count-title">
+            Results (0 items)
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <div id="results-slider-group" style="display: none; align-items: center; gap: 6px;">
+              <label style="color: var(--text-secondary); font-size: 8pt;">
+                Size:
+              </label>
+              <input type="range" id="results-grid-size-slider" min="80" max="200" value="100" style="width: 70px;" />
+            </div>
+            <div class="view-toggles">
+              <button id="btn-list-view" class="active-toggle">
+                ☰
+              </button>
+              <button id="btn-grid-view">
+                ⊞
+              </button>
+            </div>
+            <button id="expand-all-btn">
+              Expand All
+            </button>
+            <button id="collapse-all-btn">
+              Collapse All
+            </button>
+          </div>
+        </div>
+        <div class="results-list" id="results-list-viewport">
+          <div class="results-columns-header" id="list-columns-header">
+            <span class="col-file">
+              File
+            </span>
+            <span class="col-score">
+              Score
+            </span>
+            <span class="col-path">
+              Path
+            </span>
+            <span class="col-meta">
+              Metadata
+            </span>
+          </div>
+          <div style="text-align: center; color: #949ba4; margin-top: 100px;" id="results-placeholder-text">
+            Enter directory and click scan to explore assets.
+          </div>
+        </div>
+        <div class="results-selection-box">
+          <label style="font-weight: bold; color: var(--text-secondary); font-size:7.5pt; text-transform: uppercase;">
+            Selection
+          </label>
+          <div class="selection-buttons-grid">
+            <button id="select-all-btn">
+              Select All
+            </button>
+            <button id="deselect-all-btn">
+              Deselect All
+            </button>
+            <button id="select-except-best-btn">
+              Select All Except Best
+            </button>
+            <button id="invert-selection-btn">
+              Invert Selection
+            </button>
+          </div>
+        </div>
+        <div class="results-footer-actions">
+          <button id="btn-generate-report" class="warning-btn" disabled>
+            Generate Visual Report
+          </button>
+          <button id="btn-hardlink" class="primary-btn" disabled>
+            Replace with Hardlink
+          </button>
+          <button id="btn-reflink" class="primary-btn" disabled>
+            Replace with Reflink
+          </button>
+          <button id="btn-trash" class="danger-btn" disabled>
+            Move to Trash
+          </button>
+        </div>
+      </div>
+      <div class="splitter-handle" id="splitter-right">
+      </div>
+      <!-- 3. RIGHT IMAGE VIEWER -->
+      <div class="viewer-panel" id="viewer-panel">
+        <div class="section-title" style="margin: 0; border: none; padding: 0;">
+          Image Viewer
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; gap: 8px; width: 100%;">
+          <div class="view-toggles" style="flex-shrink:0;">
+            <button id="btn-viewer-list-mode" class="active-toggle">
+              ☰
+            </button>
+            <button id="btn-viewer-grid-mode">
+              ⊞
+            </button>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-left: auto;">
+            <div id="viewer-size-slider-group" style="display:none; align-items:center; gap:6px;">
+              <label style="color:var(--text-secondary); font-size:8pt;">
+                Size:
+              </label>
+              <input type="range" id="viewer-grid-size-slider" min="90" max="220" value="110" style="width: 70px;" />
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+              <span style="width:12px; height:12px; background-color:var(--brand-blue); border-radius:2px; display:inline-block;" id="viewer-bg-swatch">
+              </span>
+              <label style="color:var(--text-secondary); font-size:8pt;">
+                BG:
+              </label>
+              <input type="range" id="viewer-bg-alpha-slider" min="0" max="255" value="255" style="width: 60px;" />
+            </div>
+          </div>
+        </div>
+        <button id="btn-compare-trigger" style="width:100%;" disabled>
+          Compare (0)
+        </button>
+        <div class="viewer-list-container" id="viewer-list-container">
+        </div>
+        <div class="viewer-viewport checkered-backdrop" id="viewer-canvas" style="display: none;">
+          <div id="bg-overlay">
+          </div>
+          <div class="wipe-viewport" id="compare-wipe-viewport" style="display: none;">
+            <div class="wipe-layer" id="wipe-layer-bg">
+              <img id="wipe-img-bg" />
+            </div>
+            <div class="wipe-layer" id="wipe-layer-fg">
+              <img id="wipe-img-fg" />
+            </div>
+            <div id="wipe-line">
+            </div>
+          </div>
+          <div id="viewer-placeholder" style="color: #949ba4; text-align: center; display:none; z-index: 5;">
+            Evaluating difference map...
+          </div>
+        </div>
+        <div class="viewer-controls" id="viewer-compare-controls" style="display: none;">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button id="btn-back-to-list">
+              &lt; Back
+            </button>
+            <select id="compare-mode-select" style="width:120px;">
+              <option value="side-by-side">
+                Side-by-Side
+              </option>
+              <option value="wipe">
+                Wipe
+              </option>
+              <option value="overlay">
+                Overlay
+              </option>
+              <option value="heatmap">
+                Difference
+              </option>
+            </select>
+            <div class="channel-toggles" style="margin-left:auto;">
+              <button class="channel-btn" data-channel="R" style="background-color: var(--danger-red); color: black;">
+                R
+              </button>
+              <button class="channel-btn" data-channel="G" style="background-color: var(--success-green); color: black;">
+                G
+              </button>
+              <button class="channel-btn" data-channel="B" style="background-color: var(--brand-blue); color: black;">
+                B
+              </button>
+              <button class="channel-btn" data-channel="A" style="background-color: var(--text-primary); color: black;">
+                A
+              </button>
+            </div>
+          </div>
+          <div class="form-group" id="wipe-slider-group" style="display: none; margin: 0;">
+            <label id="compare-slider-label">
+              Wipe Handle Offset:
+            </label>
+            <input type="range" id="wipe-slider" min="0" max="100" value="50" />
+          </div>
+        </div>
+      </div>
+    </div>
+    <script src="main.js">
+    </script>
+  </body>
+</html>

@@ -1,0 +1,99 @@
+[package]
+name = "pixelhand"
+version = "1.0.0"
+edition = "2024"
+authors = ["Kilazz <vladzed2012@gmail.com>"]
+description = "An AI-powered duplicate image finder, technical QC tool, and visual comparative viewer"
+
+[dependencies]
+# --- Tauri GUI Framework ---
+tauri = { version = "2.0", features = ["protocol-asset"] }
+tauri-plugin-shell = "2.0"
+
+# --- Serialization ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# --- Core Concurrency ---
+# Fast multi-threaded directory traversal
+walkdir = "2.5"
+
+# Data parallelism library for multi-core scaling
+rayon = "1.10"
+
+# --- Image Processing & Formats ---
+# Native image processing (decoding, resizing, RGB/RGBA operations)
+image = { version = "0.25", features = ["png", "jpeg"] }
+
+# Native OpenEXR (.exr) file decoder
+exr = "1.7"
+
+# Fast image dimension parsing without decoding full pixel data
+imagesize = "0.14"
+
+# --- Hashing Algorithms ---
+# Extremely fast xxHash64 implementation (64-bit non-cryptographic hash)
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
+# Perceptual hashing (dHash, aHash, etc.) for visual similarity detection
+image_hasher = "3.1"
+
+# --- AI & Machine Learning ---
+# High-performance ONNX Runtime bindings for local inference (CLIP, SigLIP)
+ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
+
+# Optimized multidimensional arrays required for ONNX tensor inputs
+ndarray = "0.17"
+
+# Hugging Face's native, fast tokenizer to encode text search queries
+tokenizers = "0.19"
+
+# --- Vector Database & Storage ---
+# Embedded serverless vector database
+lancedb = "0.30"
+
+# Apache Arrow in-memory columnar data formatting (Required by LanceDB)
+arrow = "58"
+arrow-array = "58"
+arrow-schema = "58"
+
+# Futures utilities to work with LanceDB asynchronous query streams
+futures = "0.3"
+futures-util = "0.3"
+
+# --- Async Runtime, Networking & Utilities ---
+# Asynchronous runtime environment required by LanceDB
+tokio = { version = "1.35", features = ["full"] }
+
+# UUID generation for unique database keys
+uuid = { version = "1.6", features = ["v4"] }
+
+# HTTP Client used for downloading models directly from HuggingFace
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream"] }
+
+# Safe cross-platform Recycle Bin file deletion
+trash = "5.1"
+
+# Channels
+base64 = "0.22"
+
+[build-dependencies]
+# Required for generating a Windows Resource file and packaging web assets during build
+tauri-build = { version = "2.0", features = [] }
+
+
+[profile.release]
+# Enable Link-Time Optimization for maximum compiler optimization across crates
+lto = true
+
+# Reduce parallel codegen units to allow compiler to optimize code more aggressively
+codegen-units = 1
+
+# Strip debug symbols from the binary to dramatically reduce the final execution file size
+strip = true
+
+# Optimize strictly for execution speed
+opt-level = 3
+
+# Terminate immediately on panic to avoid stack unwinding overhead (further reduces size)
+panic = "abort"
