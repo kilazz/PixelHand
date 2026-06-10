@@ -52,19 +52,26 @@ impl InferenceEngine {
         model_dir: &Path,
         model_dim: usize,
         threads_per_worker: usize,
+        execution_provider: &str,
     ) -> Result<Self, Box<dyn Error>> {
         let visual_path = model_dir.join("visual.onnx");
         let text_path = model_dir.join("text.onnx");
         let tokenizer_path = model_dir.join("tokenizer.json");
 
-        let visual_session = Session::builder()?
-            .with_intra_threads(threads_per_worker)?
-            .commit_from_file(&visual_path)?;
+        let mut builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
+        if execution_provider == "DirectML" {
+            builder = builder.with_execution_providers([ort::ep::DirectML::default().build()])?;
+        }
+
+        let visual_session = builder.commit_from_file(&visual_path)?;
 
         let text_session = if text_path.exists() {
-            let session = Session::builder()?
-                .with_intra_threads(threads_per_worker)?
-                .commit_from_file(&text_path)?;
+            let mut text_builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
+            if execution_provider == "DirectML" {
+                text_builder = text_builder
+                    .with_execution_providers([ort::ep::DirectML::default().build()])?;
+            }
+            let session = text_builder.commit_from_file(&text_path)?;
             Some(Mutex::new(session))
         } else {
             None

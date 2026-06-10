@@ -14,7 +14,79 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use tauri::Emitter;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use xxhash_rust::xxh64::Xxh64;
+
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+struct TauriLogLayer;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for TauriLogLayer {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let meta = event.metadata();
+        if meta.target().starts_with("ort") {
+            let mut visitor = StringVisitor::new();
+            event.record(&mut visitor);
+            if let Some(app) = APP_HANDLE.get() {
+                let level = match *meta.level() {
+                    tracing::Level::ERROR => "error",
+                    tracing::Level::WARN => "warning",
+                    tracing::Level::INFO => "info",
+                    _ => "info",
+                };
+                let clean_msg = visitor.message.trim_matches('"');
+                emit_log(app, clean_msg, level);
+            }
+        }
+    }
+}
+
+struct StringVisitor {
+    message: String,
+}
+
+impl StringVisitor {
+    fn new() -> Self {
+        Self {
+            message: String::new(),
+        }
+    }
+}
+
+impl tracing::field::Visit for StringVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+        }
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+struct DownloadProgress {
+    file_name: String,
+    percentage: f64,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct LogPayload {
+    message: String,
+    level: String,
+}
+
+fn emit_log(app: &tauri::AppHandle, message: &str, level: &str) {
+    let _ = app.emit(
+        "backend-log",
+        LogPayload {
+            message: message.to_string(),
+            level: level.to_string(),
+        },
+    );
+}
 
 /// Disjoint Set Union (Union-Find) structure for clustering similar image vectors.
 struct UnionFind {
@@ -583,14 +655,35 @@ async fn run_perceptual_scan(
 /// Command: Discovers similar duplicates using ONNX embeddings.
 #[tauri::command]
 async fn run_ai_duplicate_scan(
+    app: tauri::AppHandle,
     directory: String,
     threshold: f32,
+    execution_provider: String,
 ) -> Result<Vec<DuplicateGroupSummary>, String> {
+    emit_log(
+        &app,
+        &format!("AI Duplicate Scan: starting on '{}'", directory),
+        "info",
+    );
     let path = PathBuf::from(directory);
     if !path.is_dir() {
+        emit_log(
+            &app,
+            "Error: The specified path is not a valid directory",
+            "error",
+        );
         return Err("The specified path is not a valid directory".into());
     }
+    emit_log(&app, "Discovering files...", "info");
     let paths = discover_files(&path);
+    emit_log(
+        &app,
+        &format!(
+            "Found {} potential image files. Initializing database...",
+            paths.len()
+        ),
+        "info",
+    );
     let app_dir = get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
     let model_dir = app_dir
@@ -598,11 +691,39 @@ async fn run_ai_duplicate_scan(
         .join("CLIP-ViT-B-32-laion2B-s34B-b79K_fp16");
 
     let mut db = database::DatabaseService::new();
-    db.initialize(&db_dir, "images", 512)
-        .await
-        .map_err(|e| e.to_string())?;
-    let engine = inference::InferenceEngine::new(&model_dir, 512, 4).map_err(|e| e.to_string())?;
+    db.initialize(&db_dir, "images", 512).await.map_err(|e| {
+        emit_log(
+            &app,
+            &format!("Database initialization failed: {}", e),
+            "error",
+        );
+        e.to_string()
+    })?;
+    emit_log(
+        &app,
+        &format!("Loading AI model from {}...", model_dir.display()),
+        "info",
+    );
+    emit_log(
+        &app,
+        &format!("Requested Execution Provider: {}", execution_provider),
+        "info",
+    );
+    let engine =
+        inference::InferenceEngine::new(&model_dir, 512, 4, &execution_provider).map_err(|e| {
+            emit_log(
+                &app,
+                &format!("Failed to initialize AI inference engine: {}", e),
+                "error",
+            );
+            e.to_string()
+        })?;
 
+    emit_log(
+        &app,
+        "Extracting features from images (this may take a while)...",
+        "info",
+    );
     let records: Vec<database::DbRecord> = paths
         .par_iter()
         .filter_map(|p| {
@@ -620,9 +741,25 @@ async fn run_ai_duplicate_scan(
         })
         .collect();
 
-    db.add_batch(&records).await.map_err(|e| e.to_string())?;
-    db.create_vector_index().await.map_err(|e| e.to_string())?;
+    emit_log(
+        &app,
+        &format!(
+            "Extracted features for {} images. Adding to database...",
+            records.len()
+        ),
+        "info",
+    );
+    db.add_batch(&records).await.map_err(|e| {
+        emit_log(&app, &format!("Database add_batch failed: {}", e), "error");
+        e.to_string()
+    })?;
+    emit_log(&app, "Building vector index...", "info");
+    db.create_vector_index().await.map_err(|e| {
+        emit_log(&app, &format!("Index creation failed: {}", e), "error");
+        e.to_string()
+    })?;
 
+    emit_log(&app, "Searching for similar images in index...", "info");
     let dist_threshold = 1.0 - (threshold / 100.0);
     let mut uf = UnionFind::new();
 
@@ -724,14 +861,35 @@ async fn run_ai_duplicate_scan(
 /// Command: Queries semantic image contents using a descriptive text query.
 #[tauri::command]
 async fn run_ai_search(
+    app: tauri::AppHandle,
     directory: String,
     query: String,
+    execution_provider: String,
 ) -> Result<Vec<AiSearchResultSummary>, String> {
+    emit_log(
+        &app,
+        &format!("AI Semantic Search: '{}' on '{}'", query, directory),
+        "info",
+    );
     let path = PathBuf::from(directory);
     if !path.is_dir() {
+        emit_log(
+            &app,
+            "Error: The specified path is not a valid directory",
+            "error",
+        );
         return Err("The specified path is not a valid directory".into());
     }
+    emit_log(&app, "Discovering files...", "info");
     let paths = discover_files(&path);
+    emit_log(
+        &app,
+        &format!(
+            "Found {} potential image files. Initializing database...",
+            paths.len()
+        ),
+        "info",
+    );
     let app_dir = get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
     let model_dir = app_dir
@@ -739,11 +897,39 @@ async fn run_ai_search(
         .join("CLIP-ViT-B-32-laion2B-s34B-b79K_fp16");
 
     let mut db = database::DatabaseService::new();
-    db.initialize(&db_dir, "images", 512)
-        .await
-        .map_err(|e| e.to_string())?;
-    let engine = inference::InferenceEngine::new(&model_dir, 512, 4).map_err(|e| e.to_string())?;
+    db.initialize(&db_dir, "images", 512).await.map_err(|e| {
+        emit_log(
+            &app,
+            &format!("Database initialization failed: {}", e),
+            "error",
+        );
+        e.to_string()
+    })?;
+    emit_log(
+        &app,
+        &format!("Loading AI model from {}...", model_dir.display()),
+        "info",
+    );
+    emit_log(
+        &app,
+        &format!("Requested Execution Provider: {}", execution_provider),
+        "info",
+    );
+    let engine =
+        inference::InferenceEngine::new(&model_dir, 512, 4, &execution_provider).map_err(|e| {
+            emit_log(
+                &app,
+                &format!("Failed to initialize AI inference engine: {}", e),
+                "error",
+            );
+            e.to_string()
+        })?;
 
+    emit_log(
+        &app,
+        "Extracting features from images (this may take a while)...",
+        "info",
+    );
     let records: Vec<database::DbRecord> = paths
         .par_iter()
         .filter_map(|p| {
@@ -761,8 +947,25 @@ async fn run_ai_search(
         })
         .collect();
 
-    db.add_batch(&records).await.map_err(|e| e.to_string())?;
-    db.create_vector_index().await.map_err(|e| e.to_string())?;
+    emit_log(
+        &app,
+        &format!(
+            "Extracted features for {} images. Adding to database...",
+            records.len()
+        ),
+        "info",
+    );
+    db.add_batch(&records).await.map_err(|e| {
+        emit_log(&app, &format!("Database add_batch failed: {}", e), "error");
+        e.to_string()
+    })?;
+    emit_log(&app, "Building vector index...", "info");
+    db.create_vector_index().await.map_err(|e| {
+        emit_log(&app, &format!("Index creation failed: {}", e), "error");
+        e.to_string()
+    })?;
+
+    emit_log(&app, "Encoding semantic query...", "info");
 
     let query_vec = engine.encode_text(&query).map_err(|e| e.to_string())?;
     let search_results = db
@@ -785,18 +988,40 @@ async fn run_ai_search(
 /// Command: Queries semantic contents using a reference image.
 #[tauri::command]
 async fn run_image_search(
+    app: tauri::AppHandle,
     directory: String,
     reference_image: String,
+    execution_provider: String,
 ) -> Result<Vec<AiSearchResultSummary>, String> {
+    emit_log(
+        &app,
+        &format!("AI Visual Search: starting on '{}'", directory),
+        "info",
+    );
     let path = PathBuf::from(directory);
     let ref_path = PathBuf::from(reference_image);
     if !path.is_dir() {
+        emit_log(
+            &app,
+            "Error: The specified path is not a valid directory",
+            "error",
+        );
         return Err("The specified path is not a valid directory".into());
     }
     if !ref_path.is_file() {
+        emit_log(&app, "Error: The reference image path is invalid", "error");
         return Err("The reference image path is invalid".into());
     }
+    emit_log(&app, "Discovering files...", "info");
     let paths = discover_files(&path);
+    emit_log(
+        &app,
+        &format!(
+            "Found {} potential image files. Initializing database...",
+            paths.len()
+        ),
+        "info",
+    );
     let app_dir = get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
     let model_dir = app_dir
@@ -804,11 +1029,39 @@ async fn run_image_search(
         .join("CLIP-ViT-B-32-laion2B-s34B-b79K_fp16");
 
     let mut db = database::DatabaseService::new();
-    db.initialize(&db_dir, "images", 512)
-        .await
-        .map_err(|e| e.to_string())?;
-    let engine = inference::InferenceEngine::new(&model_dir, 512, 4).map_err(|e| e.to_string())?;
+    db.initialize(&db_dir, "images", 512).await.map_err(|e| {
+        emit_log(
+            &app,
+            &format!("Database initialization failed: {}", e),
+            "error",
+        );
+        e.to_string()
+    })?;
+    emit_log(
+        &app,
+        &format!("Loading AI model from {}...", model_dir.display()),
+        "info",
+    );
+    emit_log(
+        &app,
+        &format!("Requested Execution Provider: {}", execution_provider),
+        "info",
+    );
+    let engine =
+        inference::InferenceEngine::new(&model_dir, 512, 4, &execution_provider).map_err(|e| {
+            emit_log(
+                &app,
+                &format!("Failed to initialize AI inference engine: {}", e),
+                "error",
+            );
+            e.to_string()
+        })?;
 
+    emit_log(
+        &app,
+        "Extracting features from images (this may take a while)...",
+        "info",
+    );
     let records: Vec<database::DbRecord> = paths
         .par_iter()
         .filter_map(|p| {
@@ -826,10 +1079,33 @@ async fn run_image_search(
         })
         .collect();
 
-    db.add_batch(&records).await.map_err(|e| e.to_string())?;
-    db.create_vector_index().await.map_err(|e| e.to_string())?;
+    emit_log(
+        &app,
+        &format!(
+            "Extracted features for {} images. Adding to database...",
+            records.len()
+        ),
+        "info",
+    );
+    db.add_batch(&records).await.map_err(|e| {
+        emit_log(&app, &format!("Database add_batch failed: {}", e), "error");
+        e.to_string()
+    })?;
+    emit_log(&app, "Building vector index...", "info");
+    db.create_vector_index().await.map_err(|e| {
+        emit_log(&app, &format!("Index creation failed: {}", e), "error");
+        e.to_string()
+    })?;
 
-    let ref_img = dds_loader::open_image_with_dds_fallback(&ref_path).map_err(|e| e.to_string())?;
+    emit_log(&app, "Generating vector for reference image...", "info");
+    let ref_img = dds_loader::open_image_with_dds_fallback(&ref_path).map_err(|e| {
+        emit_log(
+            &app,
+            &format!("Failed to load reference image: {}", e),
+            "error",
+        );
+        e.to_string()
+    })?;
     let query_vec = engine
         .encode_image(&ref_img, &inference::PreprocessingConfig::default())
         .map_err(|e| e.to_string())?;
@@ -1280,7 +1556,15 @@ fn main() {
         return;
     }
 
+    let _ = tracing_subscriber::registry()
+        .with(TauriLogLayer)
+        .try_init();
+
     tauri::Builder::default()
+        .setup(|app| {
+            let _ = APP_HANDLE.set(app.handle().clone());
+            Ok(())
+        })
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
             download_models,

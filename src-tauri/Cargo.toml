@@ -6,6 +6,9 @@ authors = ["Kilazz <vladzed2012@gmail.com>"]
 description = "An AI-powered duplicate image finder, technical QC tool, and visual comparative viewer"
 
 [dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-core = "0.1"
 # --- Tauri GUI Framework ---
 tauri = { version = "2.0", features = ["protocol-asset"] }
 tauri-plugin-shell = "2.0"
@@ -44,7 +47,7 @@ image_hasher = "3.1"
 
 # --- AI & Machine Learning ---
 # High-performance ONNX Runtime bindings for local inference (CLIP, SigLIP)
-ort = { version = "2.0.0-rc.12", features = ["ndarray"] }
+ort = { version = "2.0.0-rc.12", features = ["ndarray", "directml"] }
 
 # Optimized multidimensional arrays required for ONNX tensor inputs
 ndarray = "0.17"
@@ -79,7 +82,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls", "s
 trash = "5.1"
 
 # Cross-platform file/folder dialogs
-rfd = "0.14"
+rfd = "0.17.2"
 
 # Channels
 base64 = "0.22"

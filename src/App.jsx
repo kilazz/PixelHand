@@ -32,6 +32,8 @@ export default function App() {
   const [qcNormalMapsCheck, setQcNormalMapsCheck] = createSignal(true);
   const [qcNormalsTags, setQcNormalsTags] = createSignal("");
 
+  const [executionProvider, setExecutionProvider] = createSignal("CPU");
+
   const [searchMethod, setSearchMethod] = createSignal("exact");
   const [semanticQuery, setSemanticQuery] = createSignal("");
   const [selectedSamplePath, setSelectedSamplePath] = createSignal(null);
@@ -166,7 +168,16 @@ export default function App() {
         appendDetailedLog(`Reference image loaded: ${fileName}`);
       }
     });
-    onCleanup(() => cleanupDrop());
+
+    const cleanupLog = await listen("backend-log", (event) => {
+      const { message, level } = event.payload;
+      appendDetailedLog(message, level);
+    });
+
+    onCleanup(() => {
+      cleanupDrop();
+      cleanupLog();
+    });
   });
 
   const handleScan = async () => {
@@ -219,15 +230,21 @@ export default function App() {
           params = {
             directory: dirA().trim(),
             referenceImage: selectedSamplePath(),
+            executionProvider: executionProvider(),
           };
         } else if (semanticQuery().trim().length > 0) {
           backendCommand = "run_ai_search";
-          params = { directory: dirA().trim(), query: semanticQuery().trim() };
+          params = {
+            directory: dirA().trim(),
+            query: semanticQuery().trim(),
+            executionProvider: executionProvider(),
+          };
         } else {
           backendCommand = "run_ai_duplicate_scan";
           params = {
             directory: dirA().trim(),
             threshold: parseFloat(similarityThreshold()),
+            executionProvider: executionProvider(),
           };
         }
       } else if (searchMethod() === "simple") {
@@ -353,6 +370,8 @@ export default function App() {
               setQcNormalMapsCheck={setQcNormalMapsCheck}
               qcNormalsTags={qcNormalsTags}
               setQcNormalsTags={setQcNormalsTags}
+              executionProvider={executionProvider}
+              setExecutionProvider={setExecutionProvider}
               searchMethod={searchMethod}
               setSearchMethod={setSearchMethod}
               semanticQuery={semanticQuery}

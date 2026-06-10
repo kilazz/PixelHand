@@ -215,6 +215,22 @@ export default function Sidebar(props) {
           </label>
         </div>
       </div>
+      <div class="panel-section">
+        <div class="section-title">Execution Provider</div>
+        <div class="form-group row-layout">
+          <label>Backend:</label>
+          <div style="display:flex; align-items:center; gap:4px; flex:1;">
+            <select
+              value={props.executionProvider()}
+              onChange={(e) => props.setExecutionProvider(e.target.value)}
+              style="flex: 1; padding: 4px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;"
+            >
+              <option value="CPU">CPU</option>
+              <option value="DirectML">GPU (DirectML)</option>
+            </select>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
