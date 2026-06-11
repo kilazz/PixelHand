@@ -1,4 +1,3 @@
-// src-tauri/src/tonemapper.rs
 use exr::prelude::*;
 use image::{Rgba, RgbaImage};
 use rayon::prelude::*;
@@ -104,10 +103,10 @@ pub fn calculate_difference_map(
         let p1 = img1.get_pixel(x, y);
         let p2 = ref_img2.get_pixel(x, y);
 
-        let r_diff = (p1[0] as i16 - p2[0] as i16).abs() as u8;
-        let g_diff = (p1[1] as i16 - p2[1] as i16).abs() as u8;
-        let b_diff = (p1[2] as i16 - p2[2] as i16).abs() as u8;
-        let a_diff = (p1[3] as i16 - p2[3] as i16).abs() as u8;
+        let r_diff = (p1[0] as i16 - p2[0] as i16).unsigned_abs() as u8;
+        let g_diff = (p1[1] as i16 - p2[1] as i16).unsigned_abs() as u8;
+        let b_diff = (p1[2] as i16 - p2[2] as i16).unsigned_abs() as u8;
+        let a_diff = (p1[3] as i16 - p2[3] as i16).unsigned_abs() as u8;
 
         if heatmap {
             let total_diff = (r_diff as u32 + g_diff as u32 + b_diff as u32 + a_diff as u32) / 4;

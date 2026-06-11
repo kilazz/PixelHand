@@ -374,14 +374,12 @@ async fn run_qc_scan(
                 });
             }
 
-            if check_solid {
-                if let Some((issue, details)) = qc::check_solid_texture(p) {
-                    file_issues.push(QcIssueSummary {
-                        path: p.to_string_lossy().to_string(),
-                        issue,
-                        details,
-                    });
-                }
+            if check_solid && let Some((issue, details)) = qc::check_solid_texture(p) {
+                file_issues.push(QcIssueSummary {
+                    path: p.to_string_lossy().to_string(),
+                    issue,
+                    details,
+                });
             }
 
             if validate_normals {
@@ -395,14 +393,14 @@ async fn run_qc_scan(
                         .filter(|t| !t.is_empty())
                         .any(|t| path_str.contains(&t))
                 };
-                if should_check {
-                    if let Some((issue, details)) = qc::check_normal_map_integrity(p, 0.15) {
-                        file_issues.push(QcIssueSummary {
-                            path: p.to_string_lossy().to_string(),
-                            issue,
-                            details,
-                        });
-                    }
+                if should_check
+                    && let Some((issue, details)) = qc::check_normal_map_integrity(p, 0.15)
+                {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
                 }
             }
             file_issues
@@ -1184,19 +1182,18 @@ async fn run_image_search(
             loaded_images.into_iter().unzip();
 
         let mut chunk_records: Vec<database::DbRecord> = Vec::new();
-        if !imgs.is_empty() {
-            if let Ok(vectors) =
+        if !imgs.is_empty()
+            && let Ok(vectors) =
                 engine.encode_images_batch(&imgs, &inference::PreprocessingConfig::default())
-            {
-                for (path, vector) in chunk_paths.into_iter().zip(vectors.into_iter()) {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    chunk_records.push(database::DbRecord {
-                        id,
-                        vector,
-                        path: path.to_string_lossy().to_string(),
-                        channel: "Composite".to_string(),
-                    });
-                }
+        {
+            for (path, vector) in chunk_paths.into_iter().zip(vectors) {
+                let id = uuid::Uuid::new_v4().to_string();
+                chunk_records.push(database::DbRecord {
+                    id,
+                    vector,
+                    path: path.to_string_lossy().to_string(),
+                    channel: "Composite".to_string(),
+                });
             }
         }
         records.extend(chunk_records);
@@ -1487,7 +1484,7 @@ async fn generate_visualization_report(
             continue;
         }
 
-        let rows = (file_count + columns - 1) / columns;
+        let rows = file_count.div_ceil(columns);
         let canvas_w = columns * (card_size + padding) + padding;
         let canvas_h = rows * (card_size + text_height + padding) + padding + 20;
 
