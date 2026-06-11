@@ -136,14 +136,14 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
         // Standard formats PNG, JPEG, TGA
         if let Ok(img) = image::open(path) {
             let color = img.color();
-            let has_alpha_val = match color {
+            let has_alpha_val = matches!(
+                color,
                 image::ColorType::La8
-                | image::ColorType::Rgba8
-                | image::ColorType::La16
-                | image::ColorType::Rgba16
-                | image::ColorType::Rgba32F => true,
-                _ => false,
-            };
+                    | image::ColorType::Rgba8
+                    | image::ColorType::La16
+                    | image::ColorType::Rgba16
+                    | image::ColorType::Rgba32F
+            );
             has_alpha = has_alpha_val;
 
             bit_depth = match color {
@@ -282,10 +282,7 @@ pub fn check_solid_texture(path: &std::path::Path) -> Option<(String, String)> {
 
     let rgba_img = processed_img.to_rgba8();
     let mut pixels = rgba_img.pixels();
-    let first = match pixels.next() {
-        Some(p) => p,
-        None => return None,
-    };
+    let first = pixels.next()?;
 
     let tolerance = 2i16;
     for p in pixels {
@@ -316,7 +313,7 @@ pub fn check_absolute(
     if check_npot && (!is_power_of_two(meta.width) || !is_power_of_two(meta.height)) {
         issues.push("Non-Power-Of-Two (NPOT)".to_string());
     }
-    if check_block_align && (meta.width % 4 != 0 || meta.height % 4 != 0) {
+    if check_block_align && (!meta.width.is_multiple_of(4) || !meta.height.is_multiple_of(4)) {
         issues.push("Bad Block Alignment (Not divisible by 4)".to_string());
     }
     if check_mipmaps && cmp::min(meta.width, meta.height) >= 64 && meta.mipmap_count <= 1 {

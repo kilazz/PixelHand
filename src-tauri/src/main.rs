@@ -315,6 +315,7 @@ async fn run_exact_scan(
 
 /// Command: Conducts an absolute technical quality control audit on target assets.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn run_qc_scan(
     directory: String,
     check_npot: bool,
@@ -412,6 +413,7 @@ async fn run_qc_scan(
 
 /// Command: Compares assets between two folders to discover relative QC modifications.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn run_folder_compare(
     directory_a: String,
     directory_b: String,
@@ -573,11 +575,11 @@ async fn run_perceptual_scan(
             if visited[j] {
                 continue;
             }
-            if let Some(dist) = perceptual::calculate_hamming_distance(&hashes[i].1, &hashes[j].1) {
-                if dist <= max_dist {
-                    group_members.push(hashes[j].clone());
-                    visited[j] = true;
-                }
+            if let Some(dist) = perceptual::calculate_hamming_distance(&hashes[i].1, &hashes[j].1)
+                && dist <= max_dist
+            {
+                group_members.push(hashes[j].clone());
+                visited[j] = true;
             }
         }
         if group_members.len() > 1 {
@@ -635,14 +637,14 @@ async fn run_perceptual_scan(
             let best_path = &file_summaries[0].path;
             let best_hash = group_members
                 .iter()
-                .find(|(pb, _)| pb.to_string_lossy().to_string() == *best_path)
+                .find(|(pb, _)| pb.to_string_lossy() == *best_path)
                 .map(|(_, h)| h.as_str())
                 .unwrap_or(&group_members[0].1);
 
             for file in &mut file_summaries {
                 let cur_hash = group_members
                     .iter()
-                    .find(|(pb, _)| pb.to_string_lossy().to_string() == file.path)
+                    .find(|(pb, _)| pb.to_string_lossy() == file.path)
                     .map(|(_, h)| h.as_str())
                     .unwrap_or(&group_members[0].1);
                 let dist = perceptual::calculate_hamming_distance(best_hash, cur_hash).unwrap_or(0);
@@ -763,19 +765,18 @@ async fn run_ai_duplicate_scan(
             loaded_images.into_iter().unzip();
 
         let mut chunk_records: Vec<database::DbRecord> = Vec::new();
-        if !imgs.is_empty() {
-            if let Ok(vectors) =
+        if !imgs.is_empty()
+            && let Ok(vectors) =
                 engine.encode_images_batch(&imgs, &inference::PreprocessingConfig::default())
-            {
-                for (path, vector) in chunk_paths.into_iter().zip(vectors.into_iter()) {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    chunk_records.push(database::DbRecord {
-                        id,
-                        vector,
-                        path: path.to_string_lossy().to_string(),
-                        channel: "Composite".to_string(),
-                    });
-                }
+        {
+            for (path, vector) in chunk_paths.into_iter().zip(vectors) {
+                let id = uuid::Uuid::new_v4().to_string();
+                chunk_records.push(database::DbRecord {
+                    id,
+                    vector,
+                    path: path.to_string_lossy().to_string(),
+                    channel: "Composite".to_string(),
+                });
             }
         }
         records.extend(chunk_records);
@@ -811,7 +812,7 @@ async fn run_ai_duplicate_scan(
             .map(|r| (r.path.clone(), r.vector.clone()))
             .collect();
 
-        let mut query_stream = futures::stream::iter(query_items.into_iter())
+        let mut query_stream = futures::stream::iter(query_items)
             .map(|(r_path, query_vec)| {
                 let db_clone = db.clone();
                 async move {
@@ -1018,19 +1019,18 @@ async fn run_ai_search(
             loaded_images.into_iter().unzip();
 
         let mut chunk_records: Vec<database::DbRecord> = Vec::new();
-        if !imgs.is_empty() {
-            if let Ok(vectors) =
+        if !imgs.is_empty()
+            && let Ok(vectors) =
                 engine.encode_images_batch(&imgs, &inference::PreprocessingConfig::default())
-            {
-                for (path, vector) in chunk_paths.into_iter().zip(vectors.into_iter()) {
-                    let id = uuid::Uuid::new_v4().to_string();
-                    chunk_records.push(database::DbRecord {
-                        id,
-                        vector,
-                        path: path.to_string_lossy().to_string(),
-                        channel: "Composite".to_string(),
-                    });
-                }
+        {
+            for (path, vector) in chunk_paths.into_iter().zip(vectors) {
+                let id = uuid::Uuid::new_v4().to_string();
+                chunk_records.push(database::DbRecord {
+                    id,
+                    vector,
+                    path: path.to_string_lossy().to_string(),
+                    channel: "Composite".to_string(),
+                });
             }
         }
         records.extend(chunk_records);

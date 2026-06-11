@@ -70,8 +70,8 @@ fn unswizzle_block_linear(
     height: u32,
     block_bytes: usize,
 ) -> Result<(), String> {
-    let block_width = (width + 3) / 4;
-    let block_height = (height + 3) / 4;
+    let block_width = width.div_ceil(4);
+    let block_height = height.div_ceil(4);
     let required_size = (block_width as usize) * (block_height as usize) * block_bytes;
     if src.len() < required_size || dst.len() < required_size {
         return Err("Buffer too small for unswizzle operation".to_string());
@@ -287,14 +287,14 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
     }
 
     let (pitch, slice_pitch) = if is_compressed {
-        let num_blocks_wide = ((width + 3) / 4).max(1) as usize;
-        let num_blocks_high = ((height + 3) / 4).max(1) as usize;
+        let num_blocks_wide = width.div_ceil(4).max(1) as usize;
+        let num_blocks_high = height.div_ceil(4).max(1) as usize;
         let p = num_blocks_wide * block_bytes;
         let sp = p * num_blocks_high;
         (p, sp)
     } else {
         let bpp = pf_rgb_bitcount as usize;
-        let p = (width as usize * bpp + 7) / 8;
+        let p = (width as usize * bpp).div_ceil(8);
         let sp = p * height as usize;
         let _elem_bytes = 16 * bpp / 8;
         (p, sp)
@@ -398,11 +398,9 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
 
         clean.extend_from_slice(&dds_header);
 
-        if info.fourcc == FOURCC_DX10 {
-            if dds_bytes.len() >= 148 {
-                let dx10_header = &dds_bytes[128..148];
-                clean.extend_from_slice(dx10_header);
-            }
+        if info.fourcc == FOURCC_DX10 && dds_bytes.len() >= 148 {
+            let dx10_header = &dds_bytes[128..148];
+            clean.extend_from_slice(dx10_header);
         }
 
         clean.extend_from_slice(&pixel_data);
@@ -424,9 +422,10 @@ pub fn open_image_with_dds_fallback<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Result<DynamicImage, String> {
     let path_ref = path.as_ref();
-    if path_ref.extension().map_or(false, |ext| {
-        ext.to_string_lossy().to_ascii_lowercase() == "dds"
-    }) {
+    if path_ref
+        .extension()
+        .is_some_and(|ext| ext.to_string_lossy().to_ascii_lowercase() == "dds")
+    {
         let file = std::fs::File::open(path_ref).map_err(|e| e.to_string())?;
         let mmap = unsafe { memmap2::Mmap::map(&file).map_err(|e| e.to_string())? };
         decode_dds_bytes(&mmap)
