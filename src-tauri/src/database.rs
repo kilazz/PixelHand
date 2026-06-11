@@ -29,6 +29,7 @@ pub struct SearchResult {
 }
 
 /// Service manager handling all embedded database interactions using LanceDB.
+#[derive(Clone)]
 pub struct DatabaseService {
     pub db: Option<Connection>,
     pub table: Option<Table>,
@@ -154,14 +155,14 @@ impl DatabaseService {
     }
 
     /// Generates an IVF-PQ vector index on the `vector` column to accelerate nearest-neighbor lookups.
-    /// Safely skips index creation if there are fewer than 256 rows to avoid training errors.
+    /// Safely skips index creation if there are fewer than 5000 rows to avoid training errors.
     pub async fn create_vector_index(&self) -> Result<(), Box<dyn Error>> {
         let table = self
             .table
             .as_ref()
             .ok_or("Database table is not initialized")?;
         let row_count = table.count_rows(None).await?;
-        if row_count < 256 {
+        if row_count < 5000 {
             return Ok(());
         }
 

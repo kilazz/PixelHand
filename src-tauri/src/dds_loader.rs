@@ -28,7 +28,6 @@ struct AnalyzedHeaderInfo {
     fourcc: u32,
     is_swizzled: bool,
     is_xbox: bool,
-    header_size: usize,
     pixel_data_offset: usize,
     block_bytes: usize,
     pitch: usize,
@@ -90,47 +89,56 @@ fn unswizzle_block_linear(
     };
     let min_log = std::cmp::min(log_w, log_h);
 
-    for y in 0..block_height {
-        for x in 0..block_width {
-            let mut swizzled_index = 0u32;
-            for i in 0..min_log {
-                swizzled_index |= ((x >> i) & 1) << (2 * i);
-                swizzled_index |= ((y >> i) & 1) << (2 * i + 1);
-            }
-            if log_w > log_h {
-                for i in min_log..log_w {
-                    swizzled_index |= ((x >> i) & 1) << (i + min_log);
-                }
-            } else {
-                for i in min_log..log_h {
-                    swizzled_index |= ((y >> i) & 1) << (i + min_log);
-                }
-            }
+    use rayon::prelude::*;
+    let row_bytes = (block_width as usize) * block_bytes;
 
-            let src_offset = (swizzled_index as usize) * block_bytes;
-            let dst_offset = ((y * block_width + x) as usize) * block_bytes;
-            if src_offset + block_bytes <= src.len() && dst_offset + block_bytes <= dst.len() {
-                dst[dst_offset..dst_offset + block_bytes]
-                    .copy_from_slice(&src[src_offset..src_offset + block_bytes]);
+    dst.par_chunks_mut(row_bytes)
+        .enumerate()
+        .for_each(|(y_idx, row_chunk)| {
+            let y = y_idx as u32;
+            for x in 0..block_width {
+                let mut swizzled_index = 0u32;
+                for i in 0..min_log {
+                    swizzled_index |= ((x >> i) & 1) << (2 * i);
+                    swizzled_index |= ((y >> i) & 1) << (2 * i + 1);
+                }
+                if log_w > log_h {
+                    for i in min_log..log_w {
+                        swizzled_index |= ((x >> i) & 1) << (i + min_log);
+                    }
+                } else {
+                    for i in min_log..log_h {
+                        swizzled_index |= ((y >> i) & 1) << (i + min_log);
+                    }
+                }
+
+                let src_offset = (swizzled_index as usize) * block_bytes;
+                let dst_offset = (x as usize) * block_bytes;
+                if src_offset + block_bytes <= src.len()
+                    && dst_offset + block_bytes <= row_chunk.len()
+                {
+                    row_chunk[dst_offset..dst_offset + block_bytes]
+                        .copy_from_slice(&src[src_offset..src_offset + block_bytes]);
+                }
             }
-        }
-    }
+        });
     Ok(())
 }
 
 fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
+    use rayon::prelude::*;
     if format_fourcc == FOURCC_DXT1
         || format_fourcc == FOURCC_ATI1
         || format_fourcc == FOURCC_BC4U
         || format_fourcc == FOURCC_BC4S
     {
         let block_size = 8;
-        let mut i = 0;
-        while i + block_size <= data.len() {
-            data.swap(i, i + 1);
-            data.swap(i + 2, i + 3);
-            i += block_size;
-        }
+        data.par_chunks_mut(block_size).for_each(|chunk| {
+            if chunk.len() >= 4 {
+                chunk.swap(0, 1);
+                chunk.swap(2, 3);
+            }
+        });
     } else if format_fourcc == FOURCC_DXT2
         || format_fourcc == FOURCC_DXT3
         || format_fourcc == FOURCC_DXT4
@@ -138,38 +146,38 @@ fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
     {
         let block_size = 16;
         let is_bc3 = format_fourcc == FOURCC_DXT4 || format_fourcc == FOURCC_DXT5;
-        let mut i = 0;
-        while i + block_size <= data.len() {
-            data.swap(i + 8, i + 9);
-            data.swap(i + 10, i + 11);
-            if is_bc3 {
-                data.swap(i + 2, i + 3);
-                data.swap(i + 4, i + 5);
-                data.swap(i + 6, i + 7);
+        data.par_chunks_mut(block_size).for_each(|chunk| {
+            if chunk.len() >= 12 {
+                chunk.swap(8, 9);
+                chunk.swap(10, 11);
+                if is_bc3 && chunk.len() >= 8 {
+                    chunk.swap(2, 3);
+                    chunk.swap(4, 5);
+                    chunk.swap(6, 7);
+                }
             }
-            i += block_size;
-        }
+        });
     } else if format_fourcc == FOURCC_ATI2
         || format_fourcc == FOURCC_BC5U
         || format_fourcc == FOURCC_BC5S
     {
         let block_size = 16;
-        let mut i = 0;
-        while i + block_size <= data.len() {
-            data.swap(i + 2, i + 3);
-            data.swap(i + 4, i + 5);
-            data.swap(i + 6, i + 7);
-            data.swap(i + 10, i + 11);
-            data.swap(i + 12, i + 13);
-            data.swap(i + 14, i + 15);
-            i += block_size;
-        }
+        data.par_chunks_mut(block_size).for_each(|chunk| {
+            if chunk.len() >= 16 {
+                chunk.swap(2, 3);
+                chunk.swap(4, 5);
+                chunk.swap(6, 7);
+                chunk.swap(10, 11);
+                chunk.swap(12, 13);
+                chunk.swap(14, 15);
+            }
+        });
     } else {
-        let mut i = 0;
-        while i + 2 <= data.len() {
-            data.swap(i, i + 1);
-            i += 2;
-        }
+        data.par_chunks_mut(2).for_each(|chunk| {
+            if chunk.len() >= 2 {
+                chunk.swap(0, 1);
+            }
+        });
     }
 }
 
@@ -298,7 +306,6 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
         fourcc: pf_fourcc,
         is_swizzled,
         is_xbox,
-        header_size,
         pixel_data_offset: data_ptr_offset,
         block_bytes,
         pitch,
@@ -310,6 +317,7 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
 pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
     let info = analyze_header(dds_bytes)?;
 
+    use std::borrow::Cow;
     let clean_dds_bytes = if info.is_swizzled || info.is_xbox {
         let mut pixel_data = if info.is_swizzled {
             let mut unswizzled = vec![0u8; info.slice_pitch];
@@ -398,12 +406,12 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
         }
 
         clean.extend_from_slice(&pixel_data);
-        clean
+        Cow::Owned(clean)
     } else {
-        dds_bytes.to_vec()
+        Cow::Borrowed(dds_bytes)
     };
 
-    let dds = image_dds::ddsfile::Dds::read(Cursor::new(&clean_dds_bytes))
+    let dds = image_dds::ddsfile::Dds::read(Cursor::new(&*clean_dds_bytes))
         .map_err(|e| format!("Ddsfile parse error: {}", e))?;
 
     let rgba_img =
@@ -419,8 +427,9 @@ pub fn open_image_with_dds_fallback<P: AsRef<std::path::Path>>(
     if path_ref.extension().map_or(false, |ext| {
         ext.to_string_lossy().to_ascii_lowercase() == "dds"
     }) {
-        let bytes = std::fs::read(path_ref).map_err(|e| e.to_string())?;
-        decode_dds_bytes(&bytes)
+        let file = std::fs::File::open(path_ref).map_err(|e| e.to_string())?;
+        let mmap = unsafe { memmap2::Mmap::map(&file).map_err(|e| e.to_string())? };
+        decode_dds_bytes(&mmap)
     } else {
         image::open(path_ref).map_err(|e| e.to_string())
     }

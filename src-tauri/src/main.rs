@@ -67,12 +67,6 @@ impl tracing::field::Visit for StringVisitor {
 }
 
 #[derive(Clone, serde::Serialize)]
-struct DownloadProgress {
-    file_name: String,
-    percentage: f64,
-}
-
-#[derive(Clone, serde::Serialize)]
 struct LogPayload {
     message: String,
     level: String,
@@ -235,12 +229,15 @@ async fn download_models(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Command: Scans a directory to locate byte-exact duplicates using xxHash64.
 #[tauri::command]
-async fn run_exact_scan(directory: String) -> Result<Vec<DuplicateGroupSummary>, String> {
+async fn run_exact_scan(
+    directory: String,
+    extensions: Vec<String>,
+) -> Result<Vec<DuplicateGroupSummary>, String> {
     let path = PathBuf::from(directory);
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path);
+    let paths = discover_files(&path, &extensions);
     let metadata_list: Vec<FileMetadata> = paths
         .par_iter()
         .filter_map(|p| {
@@ -279,7 +276,6 @@ async fn run_exact_scan(directory: String) -> Result<Vec<DuplicateGroupSummary>,
             .map(|f| {
                 let qc_meta =
                     qc::extract_qc_metadata(&f.path).unwrap_or_else(|_| qc::QcImageMetadata {
-                        path: f.path.clone(),
                         width: f.width as u32,
                         height: f.height as u32,
                         file_size: f.size,
@@ -327,12 +323,14 @@ async fn run_qc_scan(
     check_bit_depth: bool,
     validate_normals: bool,
     normals_tags: String,
+    check_solid: bool,
+    extensions: Vec<String>,
 ) -> Result<Vec<QcIssueSummary>, String> {
     let path = PathBuf::from(directory);
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path);
+    let paths = discover_files(&path, &extensions);
 
     let issues: Vec<QcIssueSummary> = paths
         .par_iter()
@@ -349,7 +347,6 @@ async fn run_qc_scan(
             let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
 
             let qc_meta = qc::extract_qc_metadata(p).unwrap_or_else(|_| qc::QcImageMetadata {
-                path: p.clone(),
                 width: w as u32,
                 height: h as u32,
                 file_size: size,
@@ -374,6 +371,16 @@ async fn run_qc_scan(
                     issue,
                     details: String::new(),
                 });
+            }
+
+            if check_solid {
+                if let Some((issue, details)) = qc::check_solid_texture(p) {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
+                }
             }
 
             if validate_normals {
@@ -413,6 +420,7 @@ async fn run_folder_compare(
     check_color_space: bool,
     check_compression: bool,
     match_by_stem: bool,
+    extensions: Vec<String>,
 ) -> Result<Vec<QcIssueSummary>, String> {
     let path_a = PathBuf::from(directory_a);
     let path_b = PathBuf::from(directory_b);
@@ -420,8 +428,8 @@ async fn run_folder_compare(
         return Err("Both target paths must be valid directories".into());
     }
 
-    let files_a = discover_files(&path_a);
-    let files_b = discover_files(&path_b);
+    let files_a = discover_files(&path_a, &extensions);
+    let files_b = discover_files(&path_b, &extensions);
 
     let get_key = |p: &Path, by_stem: bool| -> String {
         if by_stem {
@@ -467,7 +475,6 @@ async fn run_folder_compare(
                 .unwrap_or_default();
 
             let meta_a = qc::extract_qc_metadata(p_a).unwrap_or_else(|_| qc::QcImageMetadata {
-                path: p_a.clone(),
                 width: w_a as u32,
                 height: h_a as u32,
                 file_size: size_a,
@@ -480,7 +487,6 @@ async fn run_folder_compare(
             });
 
             let meta_b = qc::extract_qc_metadata(p_b).unwrap_or_else(|_| qc::QcImageMetadata {
-                path: p_b.clone(),
                 width: w_b as u32,
                 height: h_b as u32,
                 file_size: size_b,
@@ -525,12 +531,13 @@ async fn run_perceptual_scan(
     analysis_type: String,
     ignore_solid_channels: bool,
     use_phash: bool,
+    extensions: Vec<String>,
 ) -> Result<Vec<DuplicateGroupSummary>, String> {
     let path = PathBuf::from(directory);
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path);
+    let paths = discover_files(&path, &extensions);
 
     let ana_type = match analysis_type.as_str() {
         "Luminance" => perceptual::AnalysisType::Luminance,
@@ -585,7 +592,6 @@ async fn run_perceptual_scan(
                 };
                 let qc_meta =
                     qc::extract_qc_metadata(p_buf).unwrap_or_else(|_| qc::QcImageMetadata {
-                        path: p_buf.clone(),
                         width: width as u32,
                         height: height as u32,
                         file_size: size,
@@ -659,6 +665,8 @@ async fn run_ai_duplicate_scan(
     directory: String,
     threshold: f32,
     execution_provider: String,
+    extensions: Vec<String>,
+    batch_size: Option<usize>,
 ) -> Result<Vec<DuplicateGroupSummary>, String> {
     emit_log(
         &app,
@@ -675,7 +683,7 @@ async fn run_ai_duplicate_scan(
         return Err("The specified path is not a valid directory".into());
     }
     emit_log(&app, "Discovering files...", "info");
-    let paths = discover_files(&path);
+    let paths = discover_files(&path, &extensions);
     emit_log(
         &app,
         &format!(
@@ -719,27 +727,59 @@ async fn run_ai_duplicate_scan(
             e.to_string()
         })?;
 
+    let batch_sz = batch_size.unwrap_or(128);
     emit_log(
         &app,
-        "Extracting features from images (this may take a while)...",
+        &format!(
+            "Extracting features from images in chunks of {} (this may take a while)...",
+            batch_sz
+        ),
         "info",
     );
-    let records: Vec<database::DbRecord> = paths
-        .par_iter()
-        .filter_map(|p| {
-            let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
-            let vector = engine
-                .encode_image(&img, &inference::PreprocessingConfig::default())
-                .ok()?;
-            let id = uuid::Uuid::new_v4().to_string();
-            Some(database::DbRecord {
-                id,
-                vector,
-                path: p.to_string_lossy().to_string(),
-                channel: "Composite".to_string(),
+
+    let mut records: Vec<database::DbRecord> = Vec::new();
+    let chunks: Vec<&[PathBuf]> = paths.chunks(batch_sz).collect();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        emit_log(
+            &app,
+            &format!(
+                "Processing AI Batch {}/{} ({} files)...",
+                i + 1,
+                chunks.len(),
+                chunk.len()
+            ),
+            "info",
+        );
+        let loaded_images: Vec<(PathBuf, image::DynamicImage)> = chunk
+            .par_iter()
+            .filter_map(|p| {
+                let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
+                Some((p.clone(), img))
             })
-        })
-        .collect();
+            .collect();
+
+        let (chunk_paths, imgs): (Vec<PathBuf>, Vec<image::DynamicImage>) =
+            loaded_images.into_iter().unzip();
+
+        let mut chunk_records: Vec<database::DbRecord> = Vec::new();
+        if !imgs.is_empty() {
+            if let Ok(vectors) =
+                engine.encode_images_batch(&imgs, &inference::PreprocessingConfig::default())
+            {
+                for (path, vector) in chunk_paths.into_iter().zip(vectors.into_iter()) {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    chunk_records.push(database::DbRecord {
+                        id,
+                        vector,
+                        path: path.to_string_lossy().to_string(),
+                        channel: "Composite".to_string(),
+                    });
+                }
+            }
+        }
+        records.extend(chunk_records);
+    }
 
     emit_log(
         &app,
@@ -763,14 +803,30 @@ async fn run_ai_duplicate_scan(
     let dist_threshold = 1.0 - (threshold / 100.0);
     let mut uf = UnionFind::new();
 
-    for r in &records {
-        let matches = db
-            .search_similarity(&r.vector, 10)
-            .await
-            .map_err(|e| e.to_string())?;
-        for m in matches {
-            if m.path != r.path && m.distance <= dist_threshold {
-                uf.union(&r.path, &m.path);
+    {
+        use futures::StreamExt;
+
+        let query_items: Vec<(String, Vec<f32>)> = records
+            .iter()
+            .map(|r| (r.path.clone(), r.vector.clone()))
+            .collect();
+
+        let mut query_stream = futures::stream::iter(query_items.into_iter())
+            .map(|(r_path, query_vec)| {
+                let db_clone = db.clone();
+                async move {
+                    let matches = db_clone.search_similarity(&query_vec, 10).await?;
+                    Ok::<_, Box<dyn std::error::Error>>((r_path, matches))
+                }
+            })
+            .buffer_unordered(16);
+
+        while let Some(res) = query_stream.next().await {
+            let (r_path, matches) = res.map_err(|e| e.to_string())?;
+            for m in matches {
+                if m.path != r_path && m.distance <= dist_threshold {
+                    uf.union(&r_path, &m.path);
+                }
             }
         }
     }
@@ -792,7 +848,6 @@ async fn run_ai_duplicate_scan(
                 Err(_) => (0, 0),
             };
             let qc_meta = qc::extract_qc_metadata(&p).unwrap_or_else(|_| qc::QcImageMetadata {
-                path: p.clone(),
                 width: width as u32,
                 height: height as u32,
                 file_size: size,
@@ -865,6 +920,8 @@ async fn run_ai_search(
     directory: String,
     query: String,
     execution_provider: String,
+    extensions: Vec<String>,
+    batch_size: Option<usize>,
 ) -> Result<Vec<AiSearchResultSummary>, String> {
     emit_log(
         &app,
@@ -881,7 +938,7 @@ async fn run_ai_search(
         return Err("The specified path is not a valid directory".into());
     }
     emit_log(&app, "Discovering files...", "info");
-    let paths = discover_files(&path);
+    let paths = discover_files(&path, &extensions);
     emit_log(
         &app,
         &format!(
@@ -925,27 +982,59 @@ async fn run_ai_search(
             e.to_string()
         })?;
 
+    let batch_sz = batch_size.unwrap_or(128);
     emit_log(
         &app,
-        "Extracting features from images (this may take a while)...",
+        &format!(
+            "Extracting features from images in chunks of {} (this may take a while)...",
+            batch_sz
+        ),
         "info",
     );
-    let records: Vec<database::DbRecord> = paths
-        .par_iter()
-        .filter_map(|p| {
-            let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
-            let vector = engine
-                .encode_image(&img, &inference::PreprocessingConfig::default())
-                .ok()?;
-            let id = uuid::Uuid::new_v4().to_string();
-            Some(database::DbRecord {
-                id,
-                vector,
-                path: p.to_string_lossy().to_string(),
-                channel: "Composite".to_string(),
+
+    let mut records: Vec<database::DbRecord> = Vec::new();
+    let chunks: Vec<&[PathBuf]> = paths.chunks(batch_sz).collect();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        emit_log(
+            &app,
+            &format!(
+                "Processing AI Batch {}/{} ({} files)...",
+                i + 1,
+                chunks.len(),
+                chunk.len()
+            ),
+            "info",
+        );
+        let loaded_images: Vec<(PathBuf, image::DynamicImage)> = chunk
+            .par_iter()
+            .filter_map(|p| {
+                let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
+                Some((p.clone(), img))
             })
-        })
-        .collect();
+            .collect();
+
+        let (chunk_paths, imgs): (Vec<PathBuf>, Vec<image::DynamicImage>) =
+            loaded_images.into_iter().unzip();
+
+        let mut chunk_records: Vec<database::DbRecord> = Vec::new();
+        if !imgs.is_empty() {
+            if let Ok(vectors) =
+                engine.encode_images_batch(&imgs, &inference::PreprocessingConfig::default())
+            {
+                for (path, vector) in chunk_paths.into_iter().zip(vectors.into_iter()) {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    chunk_records.push(database::DbRecord {
+                        id,
+                        vector,
+                        path: path.to_string_lossy().to_string(),
+                        channel: "Composite".to_string(),
+                    });
+                }
+            }
+        }
+        records.extend(chunk_records);
+    }
 
     emit_log(
         &app,
@@ -992,6 +1081,8 @@ async fn run_image_search(
     directory: String,
     reference_image: String,
     execution_provider: String,
+    extensions: Vec<String>,
+    batch_size: Option<usize>,
 ) -> Result<Vec<AiSearchResultSummary>, String> {
     emit_log(
         &app,
@@ -1013,7 +1104,7 @@ async fn run_image_search(
         return Err("The reference image path is invalid".into());
     }
     emit_log(&app, "Discovering files...", "info");
-    let paths = discover_files(&path);
+    let paths = discover_files(&path, &extensions);
     emit_log(
         &app,
         &format!(
@@ -1057,27 +1148,59 @@ async fn run_image_search(
             e.to_string()
         })?;
 
+    let batch_sz = batch_size.unwrap_or(128);
     emit_log(
         &app,
-        "Extracting features from images (this may take a while)...",
+        &format!(
+            "Extracting features from images in chunks of {} (this may take a while)...",
+            batch_sz
+        ),
         "info",
     );
-    let records: Vec<database::DbRecord> = paths
-        .par_iter()
-        .filter_map(|p| {
-            let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
-            let vector = engine
-                .encode_image(&img, &inference::PreprocessingConfig::default())
-                .ok()?;
-            let id = uuid::Uuid::new_v4().to_string();
-            Some(database::DbRecord {
-                id,
-                vector,
-                path: p.to_string_lossy().to_string(),
-                channel: "Composite".to_string(),
+
+    let mut records: Vec<database::DbRecord> = Vec::new();
+    let chunks: Vec<&[PathBuf]> = paths.chunks(batch_sz).collect();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        emit_log(
+            &app,
+            &format!(
+                "Processing AI Batch {}/{} ({} files)...",
+                i + 1,
+                chunks.len(),
+                chunk.len()
+            ),
+            "info",
+        );
+        let loaded_images: Vec<(PathBuf, image::DynamicImage)> = chunk
+            .par_iter()
+            .filter_map(|p| {
+                let img = dds_loader::open_image_with_dds_fallback(p).ok()?;
+                Some((p.clone(), img))
             })
-        })
-        .collect();
+            .collect();
+
+        let (chunk_paths, imgs): (Vec<PathBuf>, Vec<image::DynamicImage>) =
+            loaded_images.into_iter().unzip();
+
+        let mut chunk_records: Vec<database::DbRecord> = Vec::new();
+        if !imgs.is_empty() {
+            if let Ok(vectors) =
+                engine.encode_images_batch(&imgs, &inference::PreprocessingConfig::default())
+            {
+                for (path, vector) in chunk_paths.into_iter().zip(vectors.into_iter()) {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    chunk_records.push(database::DbRecord {
+                        id,
+                        vector,
+                        path: path.to_string_lossy().to_string(),
+                        channel: "Composite".to_string(),
+                    });
+                }
+            }
+        }
+        records.extend(chunk_records);
+    }
 
     emit_log(
         &app,
@@ -1419,10 +1542,7 @@ struct FileMetadata {
     hash: String,
 }
 
-fn discover_files(root: &Path) -> Vec<PathBuf> {
-    let supported_extensions = [
-        "png", "jpg", "jpeg", "tga", "dds", "exr", "hdr", "tif", "tiff",
-    ];
+fn discover_files(root: &Path, extensions: &[String]) -> Vec<PathBuf> {
     walkdir::WalkDir::new(root)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -1430,7 +1550,13 @@ fn discover_files(root: &Path) -> Vec<PathBuf> {
         .map(|e| e.into_path())
         .filter(|p| {
             if let Some(ext) = p.extension() {
-                supported_extensions.contains(&ext.to_string_lossy().to_lowercase().as_str())
+                let ext_str = ext.to_string_lossy().to_lowercase();
+                let lower_ext = if ext_str.starts_with('.') {
+                    ext_str.clone()
+                } else {
+                    format!(".{}", ext_str)
+                };
+                extensions.contains(&lower_ext) || extensions.contains(&ext_str)
             } else {
                 false
             }
@@ -1481,7 +1607,18 @@ fn main() {
             if pos + 1 < args.len() {
                 let dir = args[pos + 1].clone();
                 println!("[CLI] Running Byte-Exact Scan (xxHash64) on: {}\n", dir);
-                match rt.block_on(run_exact_scan(dir)) {
+                let default_exts = vec![
+                    ".png".to_string(),
+                    ".jpg".to_string(),
+                    ".jpeg".to_string(),
+                    ".tga".to_string(),
+                    ".dds".to_string(),
+                    ".exr".to_string(),
+                    ".hdr".to_string(),
+                    ".tif".to_string(),
+                    ".tiff".to_string(),
+                ];
+                match rt.block_on(run_exact_scan(dir, default_exts)) {
                     Ok(results) => {
                         println!(
                             "[SUCCESS] Exact Scan Completed! Found {} duplicate groups:",
@@ -1522,6 +1659,17 @@ fn main() {
                     check_npot, check_mipmaps, check_block, check_bit, validate_normals
                 );
 
+                let default_exts = vec![
+                    ".png".to_string(),
+                    ".jpg".to_string(),
+                    ".jpeg".to_string(),
+                    ".tga".to_string(),
+                    ".dds".to_string(),
+                    ".exr".to_string(),
+                    ".hdr".to_string(),
+                    ".tif".to_string(),
+                    ".tiff".to_string(),
+                ];
                 match rt.block_on(run_qc_scan(
                     dir,
                     check_npot,
@@ -1530,6 +1678,8 @@ fn main() {
                     check_bit,
                     validate_normals,
                     "".to_string(),
+                    false, // check_solid (disabled via CLI by default)
+                    default_exts,
                 )) {
                     Ok(results) => {
                         println!(
@@ -1559,6 +1709,12 @@ fn main() {
     let _ = tracing_subscriber::registry()
         .with(TauriLogLayer)
         .try_init();
+
+    // Prevent ONNX Runtime from printing massive C++ execution provider logs (CPU fallbacks)
+    unsafe {
+        std::env::set_var("ORT_LOGGING_LEVEL", "WARNING");
+        std::env::set_var("ORT_LOG_LEVEL", "WARNING");
+    }
 
     tauri::Builder::default()
         .setup(|app| {

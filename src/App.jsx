@@ -29,8 +29,38 @@ export default function App() {
   const [qcMipmapsCheck, setQcMipmapsCheck] = createSignal(true);
   const [qcBlockAlignCheck, setQcBlockAlignCheck] = createSignal(true);
   const [qcBitDepthCheck, setQcBitDepthCheck] = createSignal(true);
+  const [qcSolidColorCheck, setQcSolidColorCheck] = createSignal(true);
   const [qcNormalMapsCheck, setQcNormalMapsCheck] = createSignal(true);
   const [qcNormalsTags, setQcNormalsTags] = createSignal("");
+
+  const ALL_EXTENSIONS = [
+    ".avif",
+    ".bmp",
+    ".cin",
+    ".cur",
+    ".dds",
+    ".dpx",
+    ".exr",
+    ".gif",
+    ".hdr",
+    ".heic",
+    ".heif",
+    ".ico",
+    ".j2k",
+    ".jp2",
+    ".jpeg",
+    ".jpg",
+    ".jxl",
+    ".png",
+    ".psd",
+    ".tga",
+    ".tif",
+    ".tiff",
+    ".webp",
+  ];
+  const [selectedExtensions, setSelectedExtensions] = createSignal([
+    ...ALL_EXTENSIONS,
+  ]);
 
   const [executionProvider, setExecutionProvider] = createSignal("CPU");
 
@@ -38,6 +68,7 @@ export default function App() {
   const [semanticQuery, setSemanticQuery] = createSignal("");
   const [selectedSamplePath, setSelectedSamplePath] = createSignal(null);
   const [similarityThreshold, setSimilarityThreshold] = createSignal(90);
+  const [aiBatchSize, setAiBatchSize] = createSignal(128);
 
   const [scanResults, setScanResults] = createSignal([]);
   const [checkedFiles, setCheckedFiles] = createSignal([]);
@@ -222,6 +253,7 @@ export default function App() {
             checkBitDepth: qcBitDepthCheck(),
             validateNormals: qcNormalMapsCheck(),
             normalsTags: qcNormalsTags().trim(),
+            checkSolid: qcSolidColorCheck(),
           };
         }
       } else if (searchMethod() === "ai") {
@@ -231,6 +263,7 @@ export default function App() {
             directory: dirA().trim(),
             referenceImage: selectedSamplePath(),
             executionProvider: executionProvider(),
+            batchSize: aiBatchSize(),
           };
         } else if (semanticQuery().trim().length > 0) {
           backendCommand = "run_ai_search";
@@ -238,6 +271,7 @@ export default function App() {
             directory: dirA().trim(),
             query: semanticQuery().trim(),
             executionProvider: executionProvider(),
+            batchSize: aiBatchSize(),
           };
         } else {
           backendCommand = "run_ai_duplicate_scan";
@@ -245,6 +279,7 @@ export default function App() {
             directory: dirA().trim(),
             threshold: parseFloat(similarityThreshold()),
             executionProvider: executionProvider(),
+            batchSize: aiBatchSize(),
           };
         }
       } else if (searchMethod() === "simple") {
@@ -260,6 +295,8 @@ export default function App() {
         backendCommand = "run_exact_scan";
         params = { directory: dirA().trim() };
       }
+
+      params.extensions = selectedExtensions();
 
       const results = await invoke(backendCommand, params);
 
@@ -366,10 +403,15 @@ export default function App() {
               setQcBlockAlignCheck={setQcBlockAlignCheck}
               qcBitDepthCheck={qcBitDepthCheck}
               setQcBitDepthCheck={setQcBitDepthCheck}
+              qcSolidColorCheck={qcSolidColorCheck}
+              setQcSolidColorCheck={setQcSolidColorCheck}
               qcNormalMapsCheck={qcNormalMapsCheck}
               setQcNormalMapsCheck={setQcNormalMapsCheck}
               qcNormalsTags={qcNormalsTags}
               setQcNormalsTags={setQcNormalsTags}
+              selectedExtensions={selectedExtensions}
+              setSelectedExtensions={setSelectedExtensions}
+              allExtensions={ALL_EXTENSIONS}
               executionProvider={executionProvider}
               setExecutionProvider={setExecutionProvider}
               searchMethod={searchMethod}
@@ -379,6 +421,8 @@ export default function App() {
               selectedSamplePath={selectedSamplePath}
               similarityThreshold={similarityThreshold}
               setSimilarityThreshold={setSimilarityThreshold}
+              aiBatchSize={aiBatchSize}
+              setAiBatchSize={setAiBatchSize}
               isScanning={isScanning}
               onScan={handleScan}
             />

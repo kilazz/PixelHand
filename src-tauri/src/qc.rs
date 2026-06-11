@@ -3,11 +3,10 @@ use exr::prelude::MetaData;
 use std::cmp;
 use std::convert::TryInto;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct QcImageMetadata {
-    pub path: PathBuf,
     pub width: u32,
     pub height: u32,
     pub file_size: u64,
@@ -172,7 +171,6 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
     }
 
     Ok(QcImageMetadata {
-        path: path.to_path_buf(),
         width: w,
         height: h,
         file_size: size,
@@ -268,6 +266,43 @@ pub fn check_normal_map_integrity(
         }
     }
     None
+}
+
+pub fn check_solid_texture(path: &std::path::Path) -> Option<(String, String)> {
+    let img = match crate::dds_loader::open_image_with_dds_fallback(path) {
+        Ok(loaded_img) => loaded_img,
+        Err(_) => return None,
+    };
+
+    let processed_img = if img.width() > 128 || img.height() > 128 {
+        img.resize(128, 128, image::imageops::FilterType::Nearest)
+    } else {
+        img
+    };
+
+    let rgba_img = processed_img.to_rgba8();
+    let mut pixels = rgba_img.pixels();
+    let first = match pixels.next() {
+        Some(p) => p,
+        None => return None,
+    };
+
+    let tolerance = 2i16;
+    for p in pixels {
+        for i in 0..4 {
+            if (p[i] as i16 - first[i] as i16).abs() > tolerance {
+                return None;
+            }
+        }
+    }
+
+    Some((
+        "Solid Color Texture".to_string(),
+        format!(
+            "Image is entirely a single color: R:{}, G:{}, B:{}, A:{}",
+            first[0], first[1], first[2], first[3]
+        ),
+    ))
 }
 
 pub fn check_absolute(

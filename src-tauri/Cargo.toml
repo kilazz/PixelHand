@@ -23,10 +23,11 @@ walkdir = "2.5"
 
 # Data parallelism library for multi-core scaling
 rayon = "1.10"
+memmap2 = "0.9"
 
 # --- Image Processing & Formats ---
 # Native image processing (decoding, resizing, RGB/RGBA operations)
-image = { version = "0.25", features = ["png", "jpeg"] }
+image = { version = "0.25", features = ["png", "jpeg", "tga", "bmp", "tiff", "webp"] }
 
 # Native OpenEXR (.exr) file decoder
 exr = "1.7"
@@ -47,7 +48,7 @@ image_hasher = "3.1"
 
 # --- AI & Machine Learning ---
 # High-performance ONNX Runtime bindings for local inference (CLIP, SigLIP)
-ort = { version = "2.0.0-rc.12", features = ["ndarray", "directml"] }
+ort = { version = "2.0.0-rc.12", features = ["ndarray", "directml", "cuda", "tensorrt", "coreml"] }
 
 # Optimized multidimensional arrays required for ONNX tensor inputs
 ndarray = "0.17"

@@ -56,7 +56,46 @@ export default function ResultsPanel(props) {
 
     const collapsed = collapsedGroups();
 
+    // Group any QC items together by their issue type
+    const qcGroups = {};
+    const otherItems = [];
+
     results.forEach((group, gIdx) => {
+      if (group.type === "qc") {
+        const issueName = group.issue.issue || "Other Issue";
+        if (!qcGroups[issueName]) {
+          qcGroups[issueName] = [];
+        }
+        qcGroups[issueName].push(group.issue);
+      } else {
+        otherItems.push({ group, gIdx });
+      }
+    });
+
+    const qcKeys = Object.keys(qcGroups);
+    if (qcKeys.length > 0) {
+      qcKeys.forEach((issueName) => {
+        const issues = qcGroups[issueName];
+        const groupKey = `qc-${issueName}`;
+        rows.push({
+          type: "header-qc",
+          groupKey,
+          issueName,
+          count: issues.length,
+        });
+
+        if (!collapsed.has(groupKey)) {
+          issues.forEach((issue) => {
+            rows.push({
+              type: "qc",
+              issue,
+            });
+          });
+        }
+      });
+    }
+
+    otherItems.forEach(({ group, gIdx }) => {
       if (group.type === "duplicate") {
         rows.push({ type: "header", groupIndex: gIdx, group: group });
         if (!collapsed.has(gIdx)) {
@@ -69,8 +108,6 @@ export default function ResultsPanel(props) {
             });
           });
         }
-      } else if (group.type === "qc") {
-        rows.push({ type: "qc", issue: group.issue });
       } else if (group.type === "ai") {
         rows.push({ type: "ai", match: group.match });
       } else if (group.type === "perceptual") {
@@ -165,7 +202,7 @@ export default function ResultsPanel(props) {
               }}
               style={{ margin: 0 }}
             />
-            <ThumbImage path={row.file.path} showCorners={true} />
+            <ThumbImage path={row.file.path} showCorners={false} />
             <span
               style={{
                 overflow: "hidden",
@@ -203,6 +240,67 @@ export default function ResultsPanel(props) {
         </div>
       );
     }
+    if (row.type === "header-qc") {
+      const isCollapsed = collapsedGroups().has(row.groupKey);
+      return (
+        <div
+          class="group-card-header-row"
+          style={{
+            height: "44px",
+            display: "flex",
+            "align-items": "center",
+            "justify-content": "space-between",
+            padding: "0 10px",
+            "border-bottom": "1px solid var(--border-gray)",
+            background: "rgba(220, 53, 69, 0.12)",
+            cursor: "pointer",
+            "border-left": "4px solid var(--danger-red)",
+          }}
+          onClick={(e) => {
+            const curr = new Set(collapsedGroups());
+            if (curr.has(row.groupKey)) curr.delete(row.groupKey);
+            else curr.add(row.groupKey);
+            setCollapsedGroups(curr);
+          }}
+        >
+          <span
+            style={{
+              "font-weight": "bold",
+              color: "var(--text-primary)",
+              "font-size": "9.5pt",
+              display: "flex",
+              "align-items": "center",
+              gap: "6px",
+            }}
+          >
+            <span style="color: var(--text-secondary); font-size: 8pt;">
+              {isCollapsed ? "▸" : "▾"}
+            </span>
+            <span style="color: #ff6b6b; margin-right: 4px;">⚠</span>
+            {row.issueName}
+            <span
+              style={{
+                color: "var(--text-secondary)",
+                "font-weight": "normal",
+                "font-size": "8.5pt",
+                "margin-left": "6px",
+              }}
+            >
+              ({row.count} {row.count === 1 ? "item" : "items"})
+            </span>
+          </span>
+          <span
+            style={{
+              "font-size": "8pt",
+              color: "var(--text-secondary)",
+              opacity: 0.8,
+            }}
+          >
+            {isCollapsed ? "expand" : "collapse"}
+          </span>
+        </div>
+      );
+    }
     if (row.type === "qc") {
       const fileName = row.issue.path.split(/[\\/]/).pop();
       return (
@@ -212,24 +310,26 @@ export default function ResultsPanel(props) {
             height: "44px",
             display: "flex",
             "align-items": "center",
-            padding: "0 10px",
+            padding: "0 10px 0 32px",
             "border-bottom": "1px solid var(--border-gray)",
             "border-left": "3px solid var(--danger-red)",
+            background: "rgba(0, 0, 0, 0.08)",
           }}
         >
           <span
             class="col-file"
             style="width:50%; display:flex; align-items:center; gap:8px;"
           >
-            <ThumbImage path={row.issue.path} showCorners={true} />
-            <span>{fileName}</span>
+            <ThumbImage path={row.issue.path} showCorners={false} />
+            <span style={{ "font-size": "9pt", color: "var(--text-primary)" }}>
+              {fileName}
+            </span>
           </span>
           <span
             class="col-meta"
-            style="color: var(--danger-red); font-weight:bold; width:50%; text-align:right;"
+            style="color: var(--text-secondary); font-size: 8.5pt; width:50%; text-align:right;"
           >
-            {row.issue.issue}{" "}
-            {row.issue.details ? `(${row.issue.details})` : ""}
+            {row.issue.details || "Issue detected"}
           </span>
         </div>
       );
@@ -278,7 +378,7 @@ export default function ResultsPanel(props) {
             class="col-file"
             style="width:100%; display:flex; align-items:center; gap:8px;"
           >
-            <ThumbImage path={row.path} showCorners={true} />
+            <ThumbImage path={row.path} showCorners={false} />
             <span>{row.path.split(/[\\/]/).pop()}</span>
           </span>
         </div>
@@ -301,7 +401,7 @@ export default function ResultsPanel(props) {
             class="col-file"
             style="width:50%; display:flex; align-items:center; gap:8px;"
           >
-            <ThumbImage path={row.match.path} showCorners={true} />
+            <ThumbImage path={row.match.path} showCorners={false} />
             <span>{row.match.path.split(/[\\/]/).pop()}</span>
           </span>
           <span
@@ -357,12 +457,15 @@ export default function ResultsPanel(props) {
           </button>
           <button
             onClick={() => {
-              const allIndices = props.results
-                .map((g, i) =>
-                  g.type === "duplicate" || g.type === "perceptual" ? i : -1
-                )
-                .filter((i) => i !== -1);
-              setCollapsedGroups(new Set(allIndices));
+              const allCollapsed = new Set();
+              props.results.forEach((g, i) => {
+                if (g.type === "duplicate" || g.type === "perceptual") {
+                  allCollapsed.add(i);
+                } else if (g.type === "qc" && g.issue && g.issue.issue) {
+                  allCollapsed.add(`qc-${g.issue.issue}`);
+                }
+              });
+              setCollapsedGroups(allCollapsed);
             }}
           >
             Collapse All
@@ -416,7 +519,7 @@ export default function ResultsPanel(props) {
                       height: "var(--results-grid-size)",
                     }}
                     imgClass="grid-cover"
-                    showCorners={true}
+                    showCorners={false}
                     onClick={() => props.onSelectGroup(index)}
                   />
                   <div class="group-card-header">

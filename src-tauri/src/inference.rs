@@ -59,17 +59,131 @@ impl InferenceEngine {
         let tokenizer_path = model_dir.join("tokenizer.json");
 
         let mut builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
-        if execution_provider == "DirectML" {
-            builder = builder.with_execution_providers([ort::ep::DirectML::default().build()])?;
+        match execution_provider {
+            "DirectML" => {
+                match builder.with_execution_providers([ort::ep::DirectML::default().build()]) {
+                    Ok(b) => {
+                        builder = b;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "DirectML EP failed to register, falling back to CPU: {:?}",
+                            e
+                        );
+                        builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
+                    }
+                }
+            }
+            "CUDA" => match builder.with_execution_providers([ort::ep::CUDA::default().build()]) {
+                Ok(b) => {
+                    builder = b;
+                }
+                Err(e) => {
+                    eprintln!("CUDA EP failed to register, falling back to CPU: {:?}", e);
+                    builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
+                }
+            },
+            "TensorRT" => {
+                match builder.with_execution_providers([ort::ep::TensorRT::default().build()]) {
+                    Ok(b) => {
+                        builder = b;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "TensorRT EP failed to register, falling back to CPU: {:?}",
+                            e
+                        );
+                        builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
+                    }
+                }
+            }
+            "CoreML" => {
+                match builder.with_execution_providers([ort::ep::CoreML::default().build()]) {
+                    Ok(b) => {
+                        builder = b;
+                    }
+                    Err(e) => {
+                        eprintln!("CoreML EP failed to register, falling back to CPU: {:?}", e);
+                        builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
+                    }
+                }
+            }
+            _ => {}
         }
 
         let visual_session = builder.commit_from_file(&visual_path)?;
 
         let text_session = if text_path.exists() {
             let mut text_builder = Session::builder()?.with_intra_threads(threads_per_worker)?;
-            if execution_provider == "DirectML" {
-                text_builder = text_builder
-                    .with_execution_providers([ort::ep::DirectML::default().build()])?;
+            match execution_provider {
+                "DirectML" => {
+                    match text_builder
+                        .with_execution_providers([ort::ep::DirectML::default().build()])
+                    {
+                        Ok(b) => {
+                            text_builder = b;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "DirectML text EP failed to register, falling back to CPU: {:?}",
+                                e
+                            );
+                            text_builder =
+                                Session::builder()?.with_intra_threads(threads_per_worker)?;
+                        }
+                    }
+                }
+                "CUDA" => {
+                    match text_builder.with_execution_providers([ort::ep::CUDA::default().build()])
+                    {
+                        Ok(b) => {
+                            text_builder = b;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "CUDA text EP failed to register, falling back to CPU: {:?}",
+                                e
+                            );
+                            text_builder =
+                                Session::builder()?.with_intra_threads(threads_per_worker)?;
+                        }
+                    }
+                }
+                "TensorRT" => {
+                    match text_builder
+                        .with_execution_providers([ort::ep::TensorRT::default().build()])
+                    {
+                        Ok(b) => {
+                            text_builder = b;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "TensorRT text EP failed to register, falling back to CPU: {:?}",
+                                e
+                            );
+                            text_builder =
+                                Session::builder()?.with_intra_threads(threads_per_worker)?;
+                        }
+                    }
+                }
+                "CoreML" => {
+                    match text_builder
+                        .with_execution_providers([ort::ep::CoreML::default().build()])
+                    {
+                        Ok(b) => {
+                            text_builder = b;
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "CoreML text EP failed to register, falling back to CPU: {:?}",
+                                e
+                            );
+                            text_builder =
+                                Session::builder()?.with_intra_threads(threads_per_worker)?;
+                        }
+                    }
+                }
+                _ => {}
             }
             let session = text_builder.commit_from_file(&text_path)?;
             Some(Mutex::new(session))
@@ -105,18 +219,27 @@ impl InferenceEngine {
         // Fast resize using a Bilinear filter
         let resized = img.resize_exact(tw, th, image::imageops::FilterType::Triangle);
         let rgb = resized.to_rgb8();
+        let raw = rgb.as_raw();
 
         let mut tensor = Array::zeros((1, 3, th as usize, tw as usize));
+        let tw_u = tw as usize;
+        let th_u = th as usize;
+        let plane_len = tw_u * th_u;
 
-        for (x, y, pixel) in rgb.enumerate_pixels() {
-            // Map pixel range [0, 255] to [0.0, 1.0] and apply standard mean/std normalization
-            let r = ((pixel[0] as f32 / 255.0) - config.mean[0]) / config.std[0];
-            let g = ((pixel[1] as f32 / 255.0) - config.mean[1]) / config.std[1];
-            let b = ((pixel[2] as f32 / 255.0) - config.mean[2]) / config.std[2];
+        // Use Ndarray flat slices mapping to avoid nested multidx cost and allow autovectorization
+        if let Some(slice) = tensor.as_slice_mut() {
+            let (r_plane, rest) = slice.split_at_mut(plane_len);
+            let (g_plane, b_plane) = rest.split_at_mut(plane_len);
 
-            tensor[[0, 0, y as usize, x as usize]] = r;
-            tensor[[0, 1, y as usize, x as usize]] = g;
-            tensor[[0, 2, y as usize, x as usize]] = b;
+            for i in 0..plane_len {
+                let r_val = raw[i * 3];
+                let g_val = raw[i * 3 + 1];
+                let b_val = raw[i * 3 + 2];
+
+                r_plane[i] = ((r_val as f32 / 255.0) - config.mean[0]) / config.std[0];
+                g_plane[i] = ((g_val as f32 / 255.0) - config.mean[1]) / config.std[1];
+                b_plane[i] = ((b_val as f32 / 255.0) - config.mean[2]) / config.std[2];
+            }
         }
 
         tensor
@@ -159,6 +282,81 @@ impl InferenceEngine {
         }
 
         Ok(normalize_vector(raw_vector))
+    }
+
+    /// Generates L2-normalized embeddings for a batch of images simultaneously
+    pub fn encode_images_batch(
+        &self,
+        images: &[DynamicImage],
+        config: &PreprocessingConfig,
+    ) -> Result<Vec<Vec<f32>>, Box<dyn Error>> {
+        if images.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let tw = config.target_size.0 as usize;
+        let th = config.target_size.1 as usize;
+        let batch_size = images.len();
+
+        // 1. Preprocess all images in parallel using rayon
+        use rayon::prelude::*;
+        let preprocessed_tensors: Vec<Array4<f32>> = images
+            .par_iter()
+            .map(|img| self.preprocess_image(img, config))
+            .collect();
+
+        // 2. Concatenate all tensors into a single [B, 3, H, W] tensor
+        let mut batch_tensor = Array::zeros((batch_size, 3, th, tw));
+        let plane_len = tw * th;
+        let img_bytes_len = 3 * plane_len;
+
+        if let Some(batch_slice) = batch_tensor.as_slice_mut() {
+            for (idx, tensor) in preprocessed_tensors.iter().enumerate() {
+                if let Some(src_slice) = tensor.as_slice() {
+                    let dst_start = idx * img_bytes_len;
+                    let dst_end = dst_start + img_bytes_len;
+                    batch_slice[dst_start..dst_end].copy_from_slice(src_slice);
+                }
+            }
+        }
+
+        let input_tensor = Value::from_array(batch_tensor)?;
+
+        let mut session = self
+            .visual_session
+            .lock()
+            .map_err(|_| "Visual session lock poisoned")?;
+
+        // Run the visual model on the locked mutable session
+        let outputs = session.run(inputs![
+            "pixel_values" => &input_tensor
+        ])?;
+
+        // Retrieve the output tensor (image_embeds)
+        let output_tensor = outputs["image_embeds"].try_extract_tensor::<f32>()?;
+
+        // Extract shape and raw slice
+        let (shape, raw_slice) = output_tensor;
+        let out_batch_size = shape[0] as usize;
+        let out_dim = shape[1] as usize;
+
+        if out_batch_size != batch_size || out_dim != self.model_dim {
+            return Err(format!(
+                "Output shape mismatch! Expected [{}, {}], got {:?}",
+                batch_size, self.model_dim, shape
+            )
+            .into());
+        }
+
+        let mut results = Vec::with_capacity(batch_size);
+        for i in 0..batch_size {
+            let start = i * self.model_dim;
+            let end = start + self.model_dim;
+            let vec = raw_slice[start..end].to_vec();
+            results.push(normalize_vector(vec));
+        }
+
+        Ok(results)
     }
 
     /// Encodes a text query into an L2-normalized semantic vector for text-to-image search

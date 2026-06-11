@@ -77,26 +77,29 @@ export default function ViewerPanel(props) {
   };
 
   createEffect(async () => {
-    if (
-      props.viewerCanvasOpen &&
-      props.activeOriginalPath &&
-      props.activeDuplicatePath
-    ) {
+    // Synchronously track state dependencies so SolidJS re-runs the effect on channel/mode updates
+    const channel = activeChannel();
+    const mode = compareMode();
+    const canvasOpen = props.viewerCanvasOpen;
+    const activeOrig = props.activeOriginalPath;
+    const activeDup = props.activeDuplicatePath;
+
+    if (canvasOpen && activeOrig && activeDup) {
       setLoadingHeatmap(true);
       // load images
       const channelOrSrc = async (path) => {
-        if (activeChannel()) {
+        if (channel) {
           try {
             return await invoke("get_channel_preview", {
               path,
-              channel: activeChannel(),
+              channel: channel,
             });
           } catch (e) {}
         }
         const ext = path.split(".").pop().toLowerCase();
         if (
           ["hdr", "dds", "exr", "tga", "tif", "tiff"].includes(ext) &&
-          !activeChannel()
+          !channel
         ) {
           return await invoke("get_channel_preview", {
             path,
@@ -106,19 +109,19 @@ export default function ViewerPanel(props) {
         return convertFileSrc(path);
       };
 
-      if (compareMode() === "heatmap") {
+      if (mode === "heatmap") {
         try {
           const diff = await invoke("calculate_diff", {
-            file1: props.activeOriginalPath,
-            file2: props.activeDuplicatePath,
+            file1: activeOrig,
+            file2: activeDup,
           });
           setHeatmapSrc(`${convertFileSrc(diff)}?t=${Date.now()}`);
         } catch (e) {
           console.error(e);
         }
       } else {
-        const s1 = await channelOrSrc(props.activeOriginalPath);
-        const s2 = await channelOrSrc(props.activeDuplicatePath);
+        const s1 = await channelOrSrc(activeOrig);
+        const s2 = await channelOrSrc(activeDup);
         setSrcOriginal(s1);
         setSrcDuplicate(s2);
       }
