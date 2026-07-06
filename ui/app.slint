@@ -53,8 +53,8 @@ component TabButton {
     in property <bool> active;
     callback clicked;
 
-    width: 90px;
-    height: 24px;
+    width: 100px;
+    height: 26px;
 
     rect := Rectangle {
         background: active ? #2d2d30 : #1e1f22;
@@ -68,7 +68,7 @@ component TabButton {
         txt := Text {
             text: root.text;
             color: active ? #ffffff : #858585;
-            font-size: 11px;
+            font-size: 13px;
             font-weight: active ? 600 : 400;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -96,8 +96,8 @@ component ChannelButton {
     in property <color> text-color: #ffffff;
     in property <bool> active;
     callback clicked;
-    width: 24px;
-    height: 24px;
+    width: 26px;
+    height: 26px;
 
     rect := Rectangle {
         background: active ? active-color : #1e1f22;
@@ -108,7 +108,7 @@ component ChannelButton {
         txt := Text {
             text: root.text;
             color: active ? root.text-color : #dcddde;
-            font-size: 11px;
+            font-size: 12px;
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -126,8 +126,8 @@ component CustomButton {
     in property <color> primary-color: #5865f2; // Default brand blue
     callback clicked;
 
-    height: 22px;
-    min-width: 65px;
+    height: 24px;
+    min-width: 75px;
 
     rect := Rectangle {
         background: !enabled ? #2f3136 : primary-color;
@@ -141,7 +141,7 @@ component CustomButton {
         txt := Text {
             text: root.text;
             color: !enabled ? #7c808a : #ffffff;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 600;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -168,23 +168,23 @@ component SpecsRow {
     in property <string> name;
     in property <string> val1;
     in property <string> val2;
-    height: 22px;
+    height: 24px;
     HorizontalLayout {
         spacing: 8px;
-        Text { text: name; width: 110px; color: #949ba4; font-size: 11px; vertical-alignment: center; }
-        Text { text: val1; color: #dcddde; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        Text { text: val2; color: #dcddde; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: name; width: 120px; color: #949ba4; font-size: 12px; vertical-alignment: center; }
+        Text { text: val1; color: #dcddde; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: val2; color: #dcddde; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
     }
 }
 
 // Section title widget
 component SectionTitle {
     in property <string> text;
-    height: 20px;
+    height: 22px;
     VerticalLayout {
         Text {
             text: root.text;
-            font-size: 10px;
+            font-size: 12px;
             font-weight: 700;
             color: #949ba4;
         }
@@ -314,6 +314,10 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_tif: true;
     in-out property <bool> ext_webp: true;
 
+    // Mini-list resizing & spec matrix collapse properties
+    in-out property <float> duplicates_panel_height: 140;
+    in-out property <bool> specs_matrix_collapsed: false;
+
     // Metadata tables data structures
     in-out property <SelectedFile> original_meta: {
         name: "-", size_str: "-", format: "-", resolution: "-", bit_depth: "-", color_space: "-", mipmaps: "-", alpha: "-", similarity: "-", path: ""
@@ -376,6 +380,7 @@ export component AppWindow inherits Window {
     callback row_clicked(int, bool, int, string); // idx, is_header, group_idx, path
     callback row_checkbox_toggled(int); // idx
     callback channel_toggled();
+    callback trigger_selection_rule(string); // "all", "none", "except_best", "invert"
 
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
@@ -461,30 +466,30 @@ export component AppWindow inherits Window {
                                     spacing: 8px;
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Folder A:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        Text { text: "Folder A:"; width: 70px; vertical-alignment: center; font-size: 12px; }
                                         LineEdit { text <=> root.dir_a; placeholder-text: "Source folder path..."; horizontal-stretch: 1; height: 24px; }
                                         CustomButton { text: "..."; width: 26px; height: 24px; clicked => { root.select_folder_a(); } }
                                     }
                                     if root.qc_mode : HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Folder B:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        Text { text: "Folder B:"; width: 70px; vertical-alignment: center; font-size: 12px; }
                                         LineEdit { text <=> root.dir_b; placeholder-text: "Comparison folder..."; horizontal-stretch: 1; height: 24px; }
                                         CustomButton { text: "..."; width: 26px; height: 24px; clicked => { root.select_folder_b(); } }
                                     }
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Query AI:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        Text { text: "Query AI:"; width: 70px; vertical-alignment: center; font-size: 12px; }
                                         LineEdit { text <=> root.query_text; placeholder-text: "Optional text or path..."; height: 24px; }
                                     }
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Similarity:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        Text { text: "Similarity:"; width: 70px; vertical-alignment: center; font-size: 12px; }
                                         Slider { value <=> root.similarity_threshold; minimum: 50; maximum: 100; height: 24px; } // Bidirectional binding
-                                        Text { text: Math.round(root.similarity_threshold) + "%"; width: 36px; horizontal-alignment: right; vertical-alignment: center; font-size: 11px; }
+                                        Text { text: Math.round(root.similarity_threshold) + "%"; width: 36px; horizontal-alignment: right; vertical-alignment: center; font-size: 12px; }
                                     }
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Batch Sz:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        Text { text: "Batch Sz:"; width: 70px; vertical-alignment: center; font-size: 12px; }
                                         SpinBox { value <=> root.batch_size; minimum: 16; maximum: 1024; height: 24px; }
                                     }
                                     HorizontalLayout {
@@ -564,7 +569,7 @@ export component AppWindow inherits Window {
 
                         HorizontalLayout {
                             alignment: space-between;
-                            Text { text: "Results (" + root.results.length + " items)"; font-size: 13px; font-weight: 700; }
+                            Text { text: "Results (" + root.results.length + " items)"; font-size: 14px; font-weight: 700; }
                             HorizontalLayout {
                                 spacing: 6px;
                                 CustomButton {
@@ -600,7 +605,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
 
-                                    // Header rendering for groups
+                                    // Header rendering for groups (Interactive Click to Collapse)
                                     if row.is_header : HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
@@ -609,14 +614,21 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: "Group # " + (row.group_index + 1) + " (Hash: " + row.hash_or_issue + ")";
                                             color: #949ba4;
-                                            font-size: 11px;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: row.meta_str; // Display dynamic status indicator
+                                            color: #f0b132;
+                                            font-size: 12px;
                                             font-weight: 700;
                                             vertical-alignment: center;
                                         }
                                         Text {
                                             text: row.size_str;
                                             color: #949ba4;
-                                            font-size: 11px;
+                                            font-size: 12px;
                                             vertical-alignment: center;
                                         }
                                     }
@@ -627,22 +639,19 @@ export component AppWindow inherits Window {
                                         padding-right: 10px;
                                         spacing: 8px;
 
-                                        // Selection checkboxes
-                                        if !row.is_best : CheckBox {
+                                        // Selection checkboxes (Enabled for ALL files, including originals!)
+                                        CheckBox {
                                             checked: row.is_checked;
                                             toggled => {
                                                 root.row_checkbox_toggled(idx);
                                             }
                                             width: 24px;
                                         }
-                                        if row.is_best : Rectangle {
-                                            width: 24px;
-                                        }
 
                                         // File layout details (With rich interactive Thumbnail)
                                         HorizontalLayout {
                                             spacing: 8px;
-                                            width: 200px;
+                                            width: 240px;
                                             InteractiveThumbnail {
                                                 source: row.thumbnail;
                                                 path: row.path;
@@ -660,7 +669,7 @@ export component AppWindow inherits Window {
                                             Text {
                                                 text: row.name;
                                                 color: #dcddde;
-                                                font-size: 12px;
+                                                font-size: 13px;
                                                 vertical-alignment: center;
                                                 overflow: elide;
                                             }
@@ -670,7 +679,7 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: row.is_best ? "[Best]" : row.score_or_detail;
                                             color: row.is_best ? #f0b132 : #dcddde;
-                                            font-size: 12px;
+                                            font-size: 13px;
                                             vertical-alignment: center;
                                             horizontal-alignment: center;
                                             width: 60px;
@@ -680,7 +689,7 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: row.path;
                                             color: #949ba4;
-                                            font-size: 11px;
+                                            font-size: 12px;
                                             vertical-alignment: center;
                                             overflow: elide;
                                             horizontal-stretch: 1;
@@ -690,7 +699,7 @@ export component AppWindow inherits Window {
                                         Text {
                                             text: row.meta_str;
                                             color: #949ba4;
-                                            font-size: 11px;
+                                            font-size: 12px;
                                             vertical-alignment: center;
                                             overflow: elide;
                                             width: 120px;
@@ -882,25 +891,25 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Selection tools section box
+                    // Selection tools section box (Fully Wired callbacks)
                     Rectangle {
                         background: #2b2d31;
                         border-color: #1f2023;
                         border-width: 1px;
                         border-radius: 4px;
-                        height: 54px;
+                        height: 56px;
 
                         VerticalLayout {
                             padding: 8px;
                             spacing: 4px;
-                            Text { text: "Selection Rules"; font-size: 10px; font-weight: 700; color: #949ba4; }
+                            Text { text: "Selection Rules"; font-size: 12px; font-weight: 700; color: #949ba4; }
                             HorizontalLayout {
                                 spacing: 8px;
                                 alignment: start;
-                                CustomButton { text: "Select All"; primary-color: #4e5058; width: 85px; }
-                                CustomButton { text: "Deselect All"; primary-color: #4e5058; width: 95px; }
-                                CustomButton { text: "Select All Except Best"; primary-color: #4e5058; width: 140px; }
-                                CustomButton { text: "Invert Selection"; primary-color: #4e5058; width: 110px; }
+                                CustomButton { text: "Select All"; primary-color: #4e5058; width: 85px; clicked => { root.trigger_selection_rule("all"); } }
+                                CustomButton { text: "Deselect All"; primary-color: #4e5058; width: 95px; clicked => { root.trigger_selection_rule("none"); } }
+                                CustomButton { text: "Select All Except Best"; primary-color: #4e5058; width: 140px; clicked => { root.trigger_selection_rule("except_best"); } }
+                                CustomButton { text: "Invert Selection"; primary-color: #4e5058; width: 110px; clicked => { root.trigger_selection_rule("invert"); } }
                             }
                         }
                     }
@@ -925,7 +934,7 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     spacing: 12px;
 
-                    Text { text: "Interactive Compare Viewport"; font-size: 14px; font-weight: 700; }
+                    Text { text: "Interactive Compare Viewport"; font-size: 15px; font-weight: 700; }
 
                     // Canvas control bar
                     HorizontalLayout {
@@ -939,7 +948,7 @@ export component AppWindow inherits Window {
                         }
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Wipe Shift:"; vertical-alignment: center; font-size: 11px; }
+                            Text { text: "Wipe Shift:"; vertical-alignment: center; font-size: 12px; }
                             Slider { value <=> root.wipe_slider_val; minimum: 0.0; maximum: 1.0; height: 24px; }
                         }
                     }
@@ -959,7 +968,7 @@ export component AppWindow inherits Window {
                             padding: 4px;
                             VerticalLayout {
                                 spacing: 2px;
-                                Text { text: "ORIGINAL"; font-size: 9px; horizontal-alignment: center; }
+                                Text { text: "ORIGINAL"; font-size: 10px; horizontal-alignment: center; }
                                 Rectangle {
                                     background: #111214;
                                     Image { source: root.image_original; image-fit: contain; }
@@ -967,7 +976,7 @@ export component AppWindow inherits Window {
                             }
                             VerticalLayout {
                                 spacing: 2px;
-                                Text { text: "DUPLICATE"; font-size: 9px; horizontal-alignment: center; }
+                                Text { text: "DUPLICATE"; font-size: 10px; horizontal-alignment: center; }
                                 Rectangle {
                                     background: #111214;
                                     Image { source: root.image_duplicate; image-fit: contain; }
@@ -1061,11 +1070,18 @@ export component AppWindow inherits Window {
                     width: 440px;
                     spacing: 12px;
 
-                    Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 11px; font-weight: 700; color: #949ba4; }
+                    // Header layout for Group Duplicates with adjust slider
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 13px; font-weight: 700; color: #949ba4; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        Text { text: "List Height:"; vertical-alignment: center; font-size: 12px; color: #858585; }
+                        Slider { value <=> root.duplicates_panel_height; minimum: 80; maximum: 350; width: 100px; height: 16px; }
+                    }
 
-                    // Duplicate Mini-List Container
+                    // Duplicate Mini-List Container (Dynamic height based on slider!)
                     Rectangle {
-                        height: 140px;
+                        height: root.duplicates_panel_height * 1px;
                         background: #111214;
                         border-color: #1f2023;
                         border-width: 1px;
@@ -1098,7 +1114,7 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: row.name;
                                         color: #dcddde;
-                                        font-size: 11px;
+                                        font-size: 12px;
                                         vertical-alignment: center;
                                         overflow: elide;
                                         horizontal-stretch: 1;
@@ -1107,7 +1123,7 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: row.is_best ? "[Best]" : row.score_or_detail;
                                         color: row.is_best ? #f0b132 : #dcddde;
-                                        font-size: 11px;
+                                        font-size: 12px;
                                         vertical-alignment: center;
                                     }
                                 }
@@ -1119,10 +1135,20 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    Text { text: "Comparison Specifications Matrix"; font-size: 11px; font-weight: 700; color: #949ba4; }
+                    // Specs Header with toggle collapse button
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text { text: "Comparison Specifications Matrix"; font-size: 13px; font-weight: 700; color: #949ba4; vertical-alignment: center; }
+                        Rectangle { horizontal-stretch: 1; }
+                        CustomButton {
+                            text: root.specs_matrix_collapsed ? "Show Matrix (▼)" : "Hide Matrix (▲)";
+                            height: 20px;
+                            clicked => { root.specs_matrix_collapsed = !root.specs_matrix_collapsed; }
+                        }
+                    }
 
-                    // Detailed Layout comparative properties table
-                    Rectangle {
+                    // Detailed Layout comparative properties table (Only visible if NOT collapsed)
+                    if !root.specs_matrix_collapsed : Rectangle {
                         border-color: #1f2023;
                         border-width: 1px;
                         background: #111214;
@@ -1134,11 +1160,11 @@ export component AppWindow inherits Window {
                                 padding: 8px;
                                 spacing: 4px;
                                 HorizontalLayout {
-                                    Text { text: "Specification"; width: 110px; font-weight: 700; color: #949ba4; font-size: 11px; }
-                                    Text { text: "Original [Best]"; font-weight: 700; color: #f0b132; font-size: 11px; }
-                                    Text { text: "Duplicate"; font-weight: 700; color: #dcddde; font-size: 11px; }
+                                    Text { text: "Specification"; width: 120px; font-weight: 700; color: #949ba4; font-size: 12px; }
+                                    Text { text: "Original [Best]"; font-weight: 700; color: #f0b132; font-size: 12px; }
+                                    Text { text: "Duplicate"; font-weight: 700; color: #dcddde; font-size: 12px; }
                                 }
-                                Rectangle { height: 1px; background: #1f2023; }
+                                Rectangle { height: 1px; background: #1f2023; vertical-stretch: 0; }
 
                                 SpecsRow { name: "File Name"; val1: root.original_meta.name; val2: root.duplicate_meta.name; }
                                 SpecsRow { name: "File Size"; val1: root.original_meta.size_str; val2: root.duplicate_meta.size_str; }
@@ -1150,9 +1176,11 @@ export component AppWindow inherits Window {
                                 SpecsRow { name: "Alpha Channel"; val1: root.original_meta.alpha; val2: root.duplicate_meta.alpha; }
                                 SpecsRow { name: "Similarity"; val1: "100.0%"; val2: root.duplicate_meta.similarity; }
 
-                                Rectangle { height: 1px; background: #1f2023; }
+                                Rectangle { height: 1px; background: #1f2023; vertical-stretch: 0; }
 
                                 SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
+
+                                Rectangle { vertical-stretch: 1; } // Clean spacer that pushes all rows to the top!
                             }
                         }
                     }
@@ -1164,13 +1192,13 @@ export component AppWindow inherits Window {
                 padding: 15px;
                 spacing: 10px;
 
-                Text { text: "System Console Logs & ONNX Compiler Diagnostics"; font-weight: 700; font-size: 13px; }
+                Text { text: "System Console Logs & ONNX Compiler Diagnostics"; font-weight: 700; font-size: 14px; }
 
                 TextEdit {
                     text <=> root.console_log;
                     read-only: true;
                     font-family: "Consolas";
-                    font-size: 11px;
+                    font-size: 12px;
                     vertical-stretch: 1;
                 }
 

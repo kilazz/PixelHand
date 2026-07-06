@@ -27,6 +27,7 @@ static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 struct AppState {
     results: Vec<ResultsRowData>,
     groups: Vec<DuplicateGroupSummary>,
+    collapsed_groups: std::collections::HashSet<i32>, // Holds indexes of collapsed groups
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -111,7 +112,7 @@ struct FileMetadata {
     hash: String,
 }
 
-/// Persistent application configuration settings structure
+/// Persistent settings structure
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct AppSettings {
     pub dir_a: String,
@@ -179,6 +180,49 @@ fn append_to_console_log(msg: &str) {
     } else {
         println!("[WARNING] {}", msg);
     }
+}
+
+/// Helper mapping to translate visible indices back to absolute internal state indices
+fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize> {
+    let mut current_visible = 0;
+    for (abs_idx, row) in state.results.iter().enumerate() {
+        if row.is_header {
+            if current_visible == visible_idx {
+                return Some(abs_idx);
+            }
+            current_visible += 1;
+        } else {
+            if !state.collapsed_groups.contains(&row.group_index) {
+                if current_visible == visible_idx {
+                    return Some(abs_idx);
+                }
+                current_visible += 1;
+            }
+        }
+    }
+    None
+}
+
+/// Synchronizes flat visible representation models in Slint based on expanded/collapsed group masks
+fn update_results_ui(ui: &AppWindow, state: &AppState) {
+    let mut slint_rows = Vec::new();
+    for row in &state.results {
+        if row.is_header {
+            let mut slint_row = convert_to_slint_row(row);
+            if state.collapsed_groups.contains(&row.group_index) {
+                slint_row.meta_str = "▶ [Collapsed] Click Header to Expand".to_string().into();
+            } else {
+                slint_row.meta_str = "▼ [Expanded] Click Header to Collapse".to_string().into();
+            }
+            slint_rows.push(slint_row);
+        } else {
+            if !state.collapsed_groups.contains(&row.group_index) {
+                slint_rows.push(convert_to_slint_row(row));
+            }
+        }
+    }
+    let results_model = ModelRc::from(std::rc::Rc::new(VecModel::from(slint_rows)));
+    ui.set_results(results_model);
 }
 
 /// Serializes and saves current window state settings to Settings.json
@@ -332,8 +376,8 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
                 },
                 size_str: format_size(file.size),
                 meta_str: format!(
-                    "{}x{} • {} • {}b",
-                    file.width, file.height, file.compression_format, file.bit_depth
+                    "{}x{} • {}",
+                    file.width, file.height, file.compression_format
                 ),
                 is_best,
                 is_checked: false,
@@ -1751,14 +1795,11 @@ async fn main() -> Result<(), slint::PlatformError> {
                 match scan_result {
                     Ok((groups, _, _)) => {
                         let mut state_lock = state_copy.lock().unwrap();
+                        state_lock.collapsed_groups.clear(); // Reset collapsed states upon new scan
                         state_lock.groups = groups.clone();
                         state_lock.results = rows.clone();
 
-                        let slint_rows: Vec<ResultsRow> =
-                            rows.iter().map(convert_to_slint_row).collect();
-                        let results_model =
-                            ModelRc::from(std::rc::Rc::new(VecModel::from(slint_rows)));
-                        ui.set_results(results_model);
+                        update_results_ui(&ui, &state_lock);
                         ui.set_status_text("Scan finished successfully!".into());
                     }
                     Err(e) => {
@@ -1774,25 +1815,37 @@ async fn main() -> Result<(), slint::PlatformError> {
     let state_clone = state.clone();
     app.on_row_checkbox_toggled(move |idx| {
         let mut lock = state_clone.lock().unwrap();
-        if let Some(row) = lock.results.get_mut(idx as usize) {
+        // Translate visible index back to absolute index to modify the correct row!
+        if let Some(abs_idx) = get_absolute_index(&lock, idx as usize)
+            && let Some(row) = lock.results.get_mut(abs_idx)
+        {
             row.is_checked = !row.is_checked;
         }
         if let Some(ui) = app_weak.upgrade() {
-            let slint_rows: Vec<ResultsRow> =
-                lock.results.iter().map(convert_to_slint_row).collect();
-            let model = ModelRc::from(std::rc::Rc::new(VecModel::from(slint_rows)));
-            ui.set_results(model);
+            update_results_ui(&ui, &lock);
         }
     });
 
     // 5. File Table Row Click Selection Callback
     let app_weak = app.as_weak();
     let state_clone = state.clone();
-    app.on_row_clicked(move |_, is_header, group_idx, path| {
+    app.on_row_clicked(move |_idx, is_header, group_idx, path| {
+        let app_copy = app_weak.clone();
+
         if is_header {
+            // Interactive collapse/expand toggle on header row click!
+            let mut lock = state_clone.lock().unwrap();
+            if lock.collapsed_groups.contains(&group_idx) {
+                lock.collapsed_groups.remove(&group_idx);
+            } else {
+                lock.collapsed_groups.insert(group_idx);
+            }
+            if let Some(ui) = app_copy.upgrade() {
+                update_results_ui(&ui, &lock);
+            }
             return;
         }
-        let app_copy = app_weak.clone();
+
         let path_str = path.to_string();
 
         let lock = state_clone.lock().unwrap();
@@ -1966,6 +2019,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                     let mut lock = state_copy.lock().unwrap();
                     lock.results.clear();
                     lock.groups.clear();
+                    lock.collapsed_groups.clear();
                 }
                 Err(e) => {
                     let error_msg = format!("Selection action failed: {}", e);
@@ -1977,7 +2031,38 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
-    // 7. Channel Toggled Callback
+    // 7. Selection Rules Trigger Callback (Processes rule, updates absolute model, regenerates UI)
+    let app_weak = app.as_weak();
+    let state_clone = state.clone();
+    app.on_trigger_selection_rule(move |rule| {
+        let mut lock = state_clone.lock().unwrap();
+        let rule_str = rule.as_str();
+
+        for row in &mut lock.results {
+            if !row.is_header {
+                match rule_str {
+                    "all" => {
+                        row.is_checked = true;
+                    }
+                    "none" => {
+                        row.is_checked = false;
+                    }
+                    "except_best" => {
+                        row.is_checked = !row.is_best;
+                    }
+                    "invert" => {
+                        row.is_checked = !row.is_checked;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if let Some(ui) = app_weak.upgrade() {
+            update_results_ui(&ui, &lock);
+        }
+    });
+
+    // 8. Channel Toggled Callback
     let app_weak = app.as_weak();
     app.on_channel_toggled(move || {
         let app_copy = app_weak.clone();
