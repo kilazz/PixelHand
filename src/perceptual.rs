@@ -1,4 +1,3 @@
-// src-tauri/src/perceptual.rs
 use image::{DynamicImage, RgbaImage};
 use image_hasher::{HashAlg, HasherConfig, ImageHash};
 use std::path::Path;

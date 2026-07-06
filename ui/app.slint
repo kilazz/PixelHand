@@ -1,0 +1,941 @@
+import { ListView, CheckBox, TextEdit, LineEdit, SpinBox, ComboBox, ScrollView, ProgressIndicator, Palette, Slider } from "std-widgets.slint";
+
+// Classic Vector Folder Icon (Internal Helper)
+component FolderIcon {
+    in property <color> fill-color: #858585;
+    width: 16px;
+    height: 16px;
+    Path {
+        width: 100%;
+        height: 100%;
+        commands: "M 1 3 L 5 3 L 7 5 L 15 5 L 15 14 L 1 14 Z";
+        fill: fill-color;
+    }
+}
+
+// Custom interactive Tab control
+component TabButton {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+
+    width: 90px;
+    height: 28px;
+
+    rect := Rectangle {
+        background: active ? #2d2d30 : #1e1f22;
+        border-color: active ? #3e3e42 : #1f2023;
+        border-width: 1px;
+        border-radius: 4px;
+
+        animate background { duration: 100ms; }
+        animate border-color { duration: 100ms; }
+
+        txt := Text {
+            text: root.text;
+            color: active ? #ffffff : #858585;
+            font-size: 11px;
+            font-weight: active ? 600 : 400;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            animate color { duration: 100ms; }
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        hover when ta.has-hover && !active: {
+            rect.background: #252526;
+            rect.border-color: #3e3e42;
+            txt.color: #cccccc;
+        }
+    ]
+}
+
+// Custom channel rendering activation buttons (R/G/B/A toggling)
+component ChannelButton {
+    in property <string> text;
+    in property <color> active-color;
+    in property <color> text-color: #ffffff;
+    in property <bool> active;
+    callback clicked;
+    width: 26px;
+    height: 26px;
+
+    rect := Rectangle {
+        background: active ? active-color : #1e1f22;
+        border-color: active ? #ffffff : #1f2023;
+        border-width: active ? 1.5px : 1px;
+        border-radius: 4px;
+
+        txt := Text {
+            text: root.text;
+            color: active ? root.text-color : #dcddde;
+            font-size: 11px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    TouchArea {
+        clicked => { clicked(); }
+    }
+}
+
+// Custom styled flat Button control
+component CustomButton {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <color> primary-color: #5865f2; // Default brand blue
+    callback clicked;
+
+    height: 26px;
+    min-width: 80px;
+
+    rect := Rectangle {
+        background: !enabled ? #2f3136 : primary-color;
+        border-radius: 3px;
+        border-width: 1px;
+        border-color: !enabled ? #1f2023 : primary-color;
+        opacity: !enabled ? 0.5 : 1.0;
+
+        animate background { duration: 100ms; }
+
+        txt := Text {
+            text: root.text;
+            color: !enabled ? #7c808a : #ffffff;
+            font-size: 11px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        hover when ta.has-hover && enabled : {
+            rect.background: primary-color.brighter(12%);
+        }
+        active when ta.pressed && enabled : {
+            rect.background: primary-color.darker(12%);
+        }
+    ]
+}
+
+// Single row of comparative specs layout
+component SpecsRow {
+    in property <string> name;
+    in property <string> val1;
+    in property <string> val2;
+    height: 20px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: name; width: 110px; color: #949ba4; font-size: 11px; vertical-alignment: center; }
+        Text { text: val1; color: #dcddde; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: val2; color: #dcddde; font-size: 11px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+    }
+}
+
+// Section title widget
+component SectionTitle {
+    in property <string> text;
+    height: 20px;
+    VerticalLayout {
+        Text {
+            text: root.text;
+            font-size: 10px;
+            font-weight: 700;
+            color: #949ba4;
+        }
+        Rectangle {
+            height: 1px;
+            background: #1f2023;
+        }
+    }
+}
+
+// Panel Section Box Layout container
+component PanelSection {
+    in property <string> title;
+    VerticalLayout {
+        spacing: 6px;
+        SectionTitle { text: root.title; }
+        @children
+    }
+}
+
+// Custom interactive Wipe comparative viewport (Clipped Layout with Root ID bindings)
+component WipeViewport {
+    in property <image> original;
+    in property <image> duplicate;
+    in property <float> wipe-val; // 0.0 to 1.0
+
+    viewport-root := Rectangle {
+        background: #111214;
+        clip: true;
+
+        // Base Layer - Original Image
+        Image {
+            source: original;
+            width: 100%;
+            height: 100%;
+            image-fit: contain;
+        }
+
+        // Overlay Clip Layer - Duplicate Image
+        Rectangle {
+            clip: true;
+            x: 0px;
+            y: 0px;
+            width: parent.width * wipe-val;
+            height: parent.height;
+
+            Image {
+                source: duplicate;
+                x: 0px;
+                y: 0px;
+                width: viewport-root.width;
+                height: viewport-root.height;
+                image-fit: contain;
+            }
+        }
+
+        // Vertical adjustment slider bar line
+        Rectangle {
+            x: parent.width * wipe-val - 1px;
+            y: 0px;
+            width: 2px;
+            height: parent.height;
+            background: #f0b132; // warning-yellow
+        }
+    }
+}
+
+export struct ResultsRow {
+    is_header: bool,
+    is_qc: bool,
+    is_ai: bool,
+    group_index: int,
+    hash_or_issue: string,
+    path: string,
+    name: string,
+    score_or_detail: string,
+    size_str: string,
+    meta_str: string,
+    is_best: bool,
+    is_checked: bool,
+}
+
+export struct SelectedFile {
+    name: string,
+    size_str: string,
+    format: string,
+    resolution: string,
+    bit_depth: string,
+    color_space: string,
+    mipmaps: string,
+    alpha: string,
+    similarity: string,
+    path: string,
+}
+
+export component AppWindow inherits Window {
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+
+    title: "PixelHand - AI Duplicate & Graphical QC Auditor";
+    min-width: 1200px;
+    min-height: 800px;
+    background: #1e1f22;
+
+    // View tab index state
+    in-out property <int> active_tab: 0; // 0: Find, 1: Settings, 3: Log
+
+    // Directory scan paths
+    in-out property <string> dir_a: "";
+    in-out property <string> dir_b: "";
+    in-out property <string> query_text: "";
+    in-out property <int> similarity_threshold: 90;
+    in-out property <int> batch_size: 128;
+    in-out property <bool> is_scanning: false;
+    in-out property <float> progress: 0.0;
+    in-out property <string> status_text: "System Ready.";
+
+    // Metadata tables data structures
+    in-out property <SelectedFile> original_meta: {
+        name: "-", size_str: "-", format: "-", resolution: "-", bit_depth: "-", color_space: "-", mipmaps: "-", alpha: "-", similarity: "-", path: ""
+    };
+    in-out property <SelectedFile> duplicate_meta: {
+        name: "-", size_str: "-", format: "-", resolution: "-", bit_depth: "-", color_space: "-", mipmaps: "-", alpha: "-", similarity: "-", path: ""
+    };
+
+    // Comparative canvas assets bindings
+    in-out property <image> image_original;
+    in-out property <image> image_duplicate;
+    in-out property <image> image_heatmap;
+
+    // Comparer canvas configuration options: 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference Heatmap
+    in-out property <int> compare_mode: 0;
+    in-out property <float> wipe_slider_val: 0.5;
+    in-out property <float> bg_alpha: 1.0;
+
+    // Channel preview filters states
+    in-out property <bool> active_r: false;
+    in-out property <bool> active_g: false;
+    in-out property <bool> active_b: false;
+    in-out property <bool> active_a: false;
+
+    // Quality Control options configuration parameters
+    in-out property <bool> qc_mode: false;
+    in-out property <bool> qc_npot: true;
+    in-out property <bool> qc_mipmaps: true;
+    in-out property <bool> qc_block_align: true;
+    in-out property <bool> qc_bit_depth: true;
+    in-out property <bool> qc_solid_colors: true;
+    in-out property <bool> qc_normals: true;
+    in-out property <string> qc_normals_tags: "";
+
+    // General options
+    in-out property <bool> ignore_hidden: true;
+    in-out property <bool> ignore_errors: true;
+    in-out property <bool> skip_system: true;
+
+    // Search options
+    in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: Simple (dHash), 2: AI Embeddings
+
+    // Project files models & console log output
+    in-out property <[ResultsRow]> results: [];
+    in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
+
+    // Coordinate variables tracking File Format filter dropdown locations
+    in-out property <length> ext_popup_x: 0px;
+    in-out property <length> ext_popup_y: 0px;
+
+    // Navigation and folder browser commands callbacks
+    callback select_folder_a();
+    callback select_folder_b();
+    callback run_scan();
+    callback trigger_action(string); // "hardlink", "reflink", "trash"
+    callback row_clicked(int, bool, int, string); // idx, is_header, group_idx, path
+    callback row_checkbox_toggled(int); // idx
+    callback channel_toggled();
+
+    ext_popup := PopupWindow {
+        x: root.ext_popup_x;
+        y: root.ext_popup_y;
+        width: 320px;
+        height: 180px;
+        close-policy: close-on-click;
+
+        Rectangle {
+            background: #2b2d31;
+            border-color: #1f2023;
+            border-width: 1px;
+            border-radius: 4px;
+
+            VerticalLayout {
+                padding: 10px; // Padding applied directly to layout to prevent warnings
+                spacing: 8px;
+                Text { text: "File Formats Selector"; font-weight: 700; color: #ffffff; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        spacing: 4px;
+                        CheckBox { text: ".png"; checked: true; }
+                        CheckBox { text: ".tga"; checked: true; }
+                        CheckBox { text: ".dds"; checked: true; }
+                        CheckBox { text: ".bmp"; checked: true; }
+                    }
+                    VerticalLayout {
+                        spacing: 4px;
+                        CheckBox { text: ".exr"; checked: true; }
+                        CheckBox { text: ".hdr"; checked: true; }
+                        CheckBox { text: ".tif"; checked: true; }
+                        CheckBox { text: ".webp"; checked: true; }
+                    }
+                }
+                Rectangle { vertical-stretch: 1; }
+                HorizontalLayout {
+                    alignment: end;
+                    CustomButton { text: "Close"; clicked => { ext_popup.close(); } }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 12px;
+
+        // Navigation Tab Bar Layout
+        HorizontalLayout {
+            spacing: 4px;
+            height: 32px;
+            TabButton { text: "Find"; active: root.active_tab == 0; clicked => { root.active_tab = 0; } }
+            TabButton { text: "Settings"; active: root.active_tab == 1; clicked => { root.active_tab = 1; } }
+            TabButton { text: "Log"; active: root.active_tab == 3; clicked => { root.active_tab = 3; } }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Rectangle {
+            background: #1e1f22;
+            vertical-stretch: 1;
+
+            // FIND TAB PANEL (Main operational window)
+            if root.active_tab == 0 : HorizontalLayout {
+                spacing: 12px;
+
+                // 1. Sidebar Config Section
+                Rectangle {
+                    width: 320px;
+                    background: #2b2d31;
+                    border-color: #1f2023;
+                    border-width: 1px;
+                    border-radius: 4px;
+
+                    ScrollView {
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 12px;
+
+                            PanelSection {
+                                title: "Scan Configuration";
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    HorizontalLayout {
+                                        Text { text: "Folder A:"; width: 60px; vertical-alignment: center; }
+                                        LineEdit { text <=> root.dir_a; placeholder-text: "Source folder path..."; horizontal-stretch: 1; }
+                                        CustomButton { text: "..."; width: 26px; clicked => { root.select_folder_a(); } }
+                                    }
+                                    if root.qc_mode : HorizontalLayout {
+                                        Text { text: "Folder B:"; width: 60px; vertical-alignment: center; }
+                                        LineEdit { text <=> root.dir_b; placeholder-text: "Comparison folder..."; horizontal-stretch: 1; }
+                                        CustomButton { text: "..."; width: 26px; clicked => { root.select_folder_b(); } }
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "Query AI:"; width: 60px; vertical-alignment: center; }
+                                        LineEdit { text <=> root.query_text; placeholder-text: "Optional text description..."; }
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "Similarity:"; width: 60px; vertical-alignment: center; }
+                                        Slider { value: root.similarity_threshold; minimum: 50; maximum: 100; }
+                                        Text { text: root.similarity_threshold + "%"; width: 36px; horizontal-alignment: right; vertical-alignment: center; }
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "Batch Sz:"; width: 60px; vertical-alignment: center; }
+                                        SpinBox { value <=> root.batch_size; minimum: 16; maximum: 1024; }
+                                    }
+                                    HorizontalLayout {
+                                        CustomButton {
+                                            text: "File Types...";
+                                            clicked => {
+                                                root.ext_popup_x = self.absolute-position.x;
+                                                root.ext_popup_y = self.absolute-position.y + self.height;
+                                                ext_popup.show();
+                                            }
+                                        }
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
+                                    CustomButton {
+                                        text: root.is_scanning ? "Processing Assets..." : "Start Scan";
+                                        primary-color: #23a55a;
+                                        enabled: !root.is_scanning;
+                                        clicked => { root.run_scan(); }
+                                    }
+                                }
+                            }
+
+                            PanelSection {
+                                title: "Quality Control (QC) Options";
+                                VerticalLayout {
+                                    spacing: 6px;
+                                    CheckBox { text: "Enable Technical QC Mode"; checked <=> root.qc_mode; }
+                                    if root.qc_mode : VerticalLayout {
+                                        spacing: 4px;
+                                        padding-left: 8px;
+                                        CheckBox { text: "Check NPOT (Power of 2)"; checked <=> root.qc_npot; }
+                                        CheckBox { text: "Check Mip-Maps"; checked <=> root.qc_mipmaps; }
+                                        CheckBox { text: "Check BlockAlignment (4px)"; checked <=> root.qc_block_align; }
+                                        CheckBox { text: "Check Bit Depth"; checked <=> root.qc_bit_depth; }
+                                        CheckBox { text: "Check Solid Colors"; checked <=> root.qc_solid_colors; }
+                                        CheckBox { text: "Validate Normal Maps"; checked <=> root.qc_normals; }
+                                        LineEdit { text <=> root.qc_normals_tags; placeholder-text: "Tags: _norm, _ddn"; enabled: root.qc_normals; }
+                                    }
+                                }
+                            }
+
+                            PanelSection {
+                                title: "Search Methods (Non-QC)";
+                                ComboBox {
+                                    model: ["Exact Match (xxHash)", "Simple Duplicates (dHash)", "AI Semantic/Visual Search"];
+                                    current-index <=> root.search_method;
+                                }
+                            }
+
+                            PanelSection {
+                                title: "Execution Provider";
+                                ComboBox {
+                                    model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
+                                    current-index: 0;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Results List Pane & Quick Action Console Section
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 8px;
+
+                    // Results Canvas
+                    VerticalLayout {
+                        spacing: 8px;
+                        vertical-stretch: 1;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text { text: "Results (" + root.results.length + " items)"; font-size: 13px; font-weight: 700; }
+                        }
+
+                        // Main List View Frame
+                        Rectangle {
+                            border-color: #1f2023;
+                            border-width: 1px;
+                            background: #2b2d31;
+                            border-radius: 4px;
+                            vertical-stretch: 1;
+
+                            if root.results.length > 0 : ListView {
+                                for row[idx] in root.results: Rectangle {
+                                    height: row.is_header ? 34px : 44px;
+                                    background: row.is_header ? #1e1f22 : (row.is_best ? #2c3e50 : (row-ta.has-hover ? #393c41 : #2b2d31));
+                                    border-color: #1f2023;
+                                    border-width: 1px;
+
+                                    row-ta := TouchArea {
+                                        clicked => {
+                                            root.row_clicked(idx, row.is_header, row.group_index, row.path);
+                                        }
+                                    }
+
+                                    // Header rendering for groups
+                                    if row.is_header : HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        spacing: 8px;
+                                        alignment: space-between;
+                                        Text {
+                                            text: "Group #" + (row.group_index + 1) + " (Hash: " + row.hash_or_issue + ")";
+                                            color: #949ba4;
+                                            font-size: 11px;
+                                            font-weight: 700;
+                                            vertical-alignment: center;
+                                        }
+                                        Text {
+                                            text: row.size_str;
+                                            color: #949ba4;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+
+                                    // Item rendering for duplicate file entries
+                                    if !row.is_header : HorizontalLayout {
+                                        padding-left: 10px;
+                                        padding-right: 10px;
+                                        spacing: 8px;
+
+                                        // Selection checkboxes
+                                        if !row.is_best : CheckBox {
+                                            checked: row.is_checked;
+                                            toggled => {
+                                                root.row_checkbox_toggled(idx);
+                                            }
+                                            width: 24px;
+                                        }
+                                        if row.is_best : Rectangle {
+                                            width: 24px;
+                                        }
+
+                                        // File layout details
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            width: 180px;
+                                            Rectangle {
+                                                width: 32px;
+                                                height: 32px;
+                                                background: #313338;
+                                                border-radius: 4px;
+                                                FolderIcon { y: 8px; x: 8px; }
+                                            }
+                                            Text {
+                                                text: row.name;
+                                                color: #dcddde;
+                                                font-size: 12px;
+                                                vertical-alignment: center;
+                                                overflow: elide;
+                                            }
+                                        }
+
+                                        // Scoring matches
+                                        Text {
+                                            text: row.is_best ? "[Best]" : row.score_or_detail;
+                                            color: row.is_best ? #f0b132 : #dcddde;
+                                            font-size: 12px;
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                            width: 60px;
+                                        }
+
+                                        // Absolute Path
+                                        Text {
+                                            text: row.path;
+                                            color: #949ba4;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            horizontal-stretch: 1;
+                                        }
+
+                                        // Formats & Mips specs metadata details
+                                        Text {
+                                            text: row.meta_str;
+                                            color: #949ba4;
+                                            font-size: 11px;
+                                            vertical-alignment: center;
+                                            overflow: elide;
+                                            width: 120px;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.results.length == 0 : Rectangle {
+                                background: #1e1f22;
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 12px;
+                                    Text {
+                                        text: "No duplicate assets loaded. Choose scan parameters in the left pane and begin auditing.";
+                                        color: #7c808a;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Selection tools section box
+                    Rectangle {
+                        background: #2b2d31;
+                        border-color: #1f2023;
+                        border-width: 1px;
+                        border-radius: 4px;
+                        height: 54px;
+
+                        VerticalLayout {
+                            padding: 8px; // Padding applied to layout instead of container to avoid warnings
+                            spacing: 4px;
+                            Text { text: "Selection Rules"; font-size: 10px; font-weight: 700; color: #949ba4; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                CustomButton { text: "Select All"; primary-color: #4e5058; }
+                                CustomButton { text: "Deselect All"; primary-color: #4e5058; }
+                                CustomButton { text: "Select All Except Best"; primary-color: #4e5058; }
+                                CustomButton { text: "Invert Selection"; primary-color: #4e5058; }
+                            }
+                        }
+                    }
+
+                    // Link actions footer section
+                    HorizontalLayout {
+                        spacing: 8px;
+                        CustomButton { text: "Replace with Hardlink"; primary-color: #5865f2; clicked => { root.trigger_action("hardlink"); } }
+                        CustomButton { text: "Replace with Reflink"; primary-color: #5865f2; clicked => { root.trigger_action("reflink"); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        CustomButton { text: "Move to Trash"; primary-color: #f23f43; clicked => { root.trigger_action("trash"); } }
+                    }
+                }
+
+                // 3. Image Compare Viewport canvas section (Right Panel)
+                Rectangle {
+                    width: 450px;
+                    background: #2b2d31;
+                    border-color: #1f2023;
+                    border-width: 1px;
+                    border-radius: 4px;
+
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 12px;
+
+                        Text { text: "Interactive Compare Viewport"; font-size: 13px; font-weight: 700; }
+
+                        // Canvas control bar
+                        HorizontalLayout {
+                            spacing: 8px;
+                            ComboBox {
+                                model: ["Side-by-Side", "Wipe Mode", "Overlay Blend", "Difference Heatmap"];
+                                current-index <=> root.compare_mode;
+                                width: 150px;
+                            }
+                            HorizontalLayout {
+                                spacing: 4px;
+                                Text { text: "Wipe Shift:"; vertical-alignment: center; font-size: 11px; }
+                                Slider { value: root.wipe_slider_val; minimum: 0.0; maximum: 1.0; }
+                            }
+                        }
+
+                        // Visual rendering canvases viewport frame
+                        Rectangle {
+                            height: 260px;
+                            background: #1e1f22;
+                            border-color: #1f2023;
+                            border-width: 1px;
+                            border-radius: 4px;
+                            clip: true;
+
+                            // Mode 1: Side-by-Side viewport
+                            if root.compare_mode == 0 : HorizontalLayout {
+                                spacing: 4px;
+                                padding: 4px;
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    Text { text: "ORIGINAL"; font-size: 9px; horizontal-alignment: center; }
+                                    Rectangle {
+                                        background: #111214;
+                                        Image { source: root.image_original; image-fit: contain; }
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 2px;
+                                    Text { text: "DUPLICATE"; font-size: 9px; horizontal-alignment: center; }
+                                    Rectangle {
+                                        background: #111214;
+                                        Image { source: root.image_duplicate; image-fit: contain; }
+                                    }
+                                }
+                            }
+
+                            // Mode 2: Wipe slider viewport
+                            if root.compare_mode == 1 : WipeViewport {
+                                original: root.image_original;
+                                duplicate: root.image_duplicate;
+                                wipe-val: root.wipe_slider_val;
+                            }
+
+                            // Mode 3: Transparency overlay blend viewport
+                            if root.compare_mode == 2 : Rectangle {
+                                background: #111214;
+                                Image {
+                                    source: root.image_original;
+                                    image-fit: contain;
+                                    opacity: 1.0 - root.wipe_slider_val;
+                                }
+                                Image {
+                                    source: root.image_duplicate;
+                                    image-fit: contain;
+                                    opacity: root.wipe_slider_val;
+                                }
+                            }
+
+                            // Mode 4: Generated difference heatmap view layer
+                            if root.compare_mode == 3 : Rectangle {
+                                background: #111214;
+                                Image {
+                                    source: root.image_heatmap;
+                                    image-fit: contain;
+                                }
+                            }
+                        }
+
+                        // RGBA channels isolation selectors triggers (Integrated Callbacks)
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
+                            ChannelButton {
+                                text: "R";
+                                active-color: #f23f43;
+                                active <=> root.active_r;
+                                clicked => {
+                                    root.active_r = !root.active_r;
+                                    if root.active_r {
+                                        root.active_g = false;
+                                        root.active_b = false;
+                                        root.active_a = false;
+                                    }
+                                    root.channel_toggled();
+                                }
+                            }
+                            ChannelButton {
+                                text: "G";
+                                active-color: #23a55a;
+                                active <=> root.active_g;
+                                clicked => {
+                                    root.active_g = !root.active_g;
+                                    if root.active_g {
+                                        root.active_r = false;
+                                        root.active_b = false;
+                                        root.active_a = false;
+                                    }
+                                    root.channel_toggled();
+                                }
+                            }
+                            ChannelButton {
+                                text: "B";
+                                active-color: #5865f2;
+                                active <=> root.active_b;
+                                clicked => {
+                                    root.active_b = !root.active_b;
+                                    if root.active_b {
+                                        root.active_r = false;
+                                        root.active_g = false;
+                                        root.active_a = false;
+                                    }
+                                    root.channel_toggled();
+                                }
+                            }
+                            ChannelButton {
+                                text: "A";
+                                active-color: #ffffff;
+                                text-color: #000000;
+                                active <=> root.active_a;
+                                clicked => {
+                                    root.active_a = !root.active_a;
+                                    if root.active_a {
+                                        root.active_r = false;
+                                        root.active_g = false;
+                                        root.active_b = false;
+                                    }
+                                    root.channel_toggled();
+                                }
+                            }
+                        }
+
+                        // Detailed layout specifications matrix comparative table (Specs comparison metadata)
+                        Rectangle {
+                            border-color: #1f2023;
+                            border-width: 1px;
+                            background: #111214;
+                            border-radius: 4px;
+                            vertical-stretch: 1;
+
+                            ScrollView {
+                                VerticalLayout {
+                                    padding: 8px; // Padding applied directly to layout inside ScrollView
+                                    spacing: 4px;
+                                    HorizontalLayout {
+                                        Text { text: "Specification"; width: 110px; font-weight: 700; color: #949ba4; font-size: 11px; }
+                                        Text { text: "Original [Best]"; font-weight: 700; color: #f0b132; font-size: 11px; }
+                                        Text { text: "Duplicate"; font-weight: 700; color: #dcddde; font-size: 11px; }
+                                    }
+                                    Rectangle { height: 1px; background: #1f2023; }
+
+                                    SpecsRow { name: "File Name"; val1: root.original_meta.name; val2: root.duplicate_meta.name; }
+                                    SpecsRow { name: "File Size"; val1: root.original_meta.size_str; val2: root.duplicate_meta.size_str; }
+                                    SpecsRow { name: "Format / Codec"; val1: root.original_meta.format; val2: root.duplicate_meta.format; }
+                                    SpecsRow { name: "Resolution"; val1: root.original_meta.resolution; val2: root.duplicate_meta.resolution; }
+                                    SpecsRow { name: "Bit Depth"; val1: root.original_meta.bit_depth; val2: root.duplicate_meta.bit_depth; }
+                                    SpecsRow { name: "Color Space"; val1: root.original_meta.color_space; val2: root.duplicate_meta.color_space; }
+                                    SpecsRow { name: "Mipmaps"; val1: root.original_meta.mipmaps; val2: root.duplicate_meta.mipmaps; }
+                                    SpecsRow { name: "Alpha Channel"; val1: root.original_meta.alpha; val2: root.duplicate_meta.alpha; }
+                                    SpecsRow { name: "Similarity"; val1: "100.0%"; val2: root.duplicate_meta.similarity; }
+
+                                    Rectangle { height: 1px; background: #1f2023; }
+
+                                    SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // SETTINGS TAB PANEL (OS Integration, logs path config & limits)
+            if root.active_tab == 1 : ScrollView {
+                VerticalLayout {
+                    padding: 20px;
+                    spacing: 20px;
+
+                    Text { text: "System Configuration Options"; font-weight: 700; font-size: 14px; }
+
+                    PanelSection {
+                        title: "Audit Settings";
+                        VerticalLayout {
+                            spacing: 8px;
+                            CheckBox { text: "Consider directories with empty files empty"; checked: true; }
+                            CheckBox { text: "Ignore hidden assets / directories during search loops"; checked <=> root.ignore_hidden; }
+                            CheckBox { text: "Ignore filesystem write errors during batch linking operations"; checked <=> root.ignore_errors; }
+                            CheckBox { text: "Skip system system assets / directory loops (Highly Recommended)"; checked <=> root.skip_system; }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: #3e3e42; }
+
+                    PanelSection {
+                        title: "Performance & Threading Settings";
+                        VerticalLayout {
+                            spacing: 8px;
+                            HorizontalLayout {
+                                Text { text: "Max Search nesting depth (-1 = Infinite):"; vertical-alignment: center; }
+                                Rectangle { horizontal-stretch: 1; }
+                                SpinBox { value: -1; minimum: -1; maximum: 128; }
+                            }
+                            HorizontalLayout {
+                                Text { text: "System IO Thread sleep cooldown duration in ms:"; vertical-alignment: center; }
+                                Rectangle { horizontal-stretch: 1; }
+                                SpinBox { value: 0; minimum: 0; maximum: 5000; }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1px; background: #3e3e42; }
+
+                    PanelSection {
+                        title: "OS System Integration";
+                        VerticalLayout {
+                            spacing: 8px;
+                            CheckBox { text: "Integrate app launcher commands to Windows explorer context menu (right click)"; }
+                            CheckBox { text: "Direct high speed MFT Scan parsing (Requires NTFS / Administrator elevated privileges)"; }
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            // LOG TAB PANEL (Console compiler output viewer)
+            if root.active_tab == 3 : VerticalLayout {
+                padding: 15px;
+                spacing: 10px;
+
+                Text { text: "System Console Logs & ONNX Compiler Diagnostics"; font-weight: 700; font-size: 13px; }
+
+                TextEdit {
+                    text <=> root.console_log;
+                    read-only: true;
+                    font-family: "Consolas";
+                    font-size: 11px;
+                    vertical-stretch: 1;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    CustomButton { text: "Export Log Output..."; primary-color: #0e639c; }
+                    CustomButton { text: "Clear Console Buffer"; primary-color: #3a3a3a; clicked => { root.console_log = "Buffer cleared."; } }
+                    Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
+    }
+}

@@ -1,7 +1,3 @@
-// =======================================================================================
-//  dds_loader.rs - Pure Rust DDS Loader supporting CryEngine and Xbox 360 formats
-// =======================================================================================
-
 use image::DynamicImage;
 use std::io::Cursor;
 

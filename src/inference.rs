@@ -1,4 +1,3 @@
-// src-tauri/src/inference.rs
 use image::DynamicImage;
 use ndarray::{Array, Array4};
 use ort::inputs;

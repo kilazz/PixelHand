@@ -1,4 +1,3 @@
-// src-tauri/src/qc.rs
 use exr::prelude::MetaData;
 use std::cmp;
 use std::convert::TryInto;

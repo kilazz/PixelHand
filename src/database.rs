@@ -1,10 +1,13 @@
-// src-tauri/src/database.rs
 use std::error::Error;
 use std::path::Path;
 use std::sync::Arc;
 
-use arrow_array::{ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, StringArray};
-use arrow_schema::{DataType, Field, Schema};
+// Imports are referenced directly from LanceDB's re-exported Arrow modules to prevent version conflicts
+use lancedb::arrow::arrow_array::{
+    ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
+};
+use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
+
 use futures::TryStreamExt;
 use lancedb::connection::Connection;
 use lancedb::index::Index;
@@ -47,9 +50,6 @@ impl DatabaseService {
     }
 
     /// Connects to (or creates) the local LanceDB database and ensures the target table exists.
-    ///
-    /// Fixes compilation issues with LanceDB v0.30 by providing the required namespace
-    /// argument for `drop_table`.
     pub async fn initialize(
         &mut self,
         db_directory: &Path,
@@ -76,7 +76,6 @@ impl DatabaseService {
 
         let table_names = db.table_names().execute().await?;
 
-        // FIX E0061: Provide the required empty namespace path argument for drop_table in LanceDB v0.30
         if table_names.contains(&table_name.to_string()) {
             let empty_ns: Vec<String> = Vec::new();
             db.drop_table(table_name, &empty_ns).await?;
@@ -155,7 +154,6 @@ impl DatabaseService {
     }
 
     /// Generates an IVF-PQ vector index on the `vector` column to accelerate nearest-neighbor lookups.
-    /// Safely skips index creation if there are fewer than 5000 rows to avoid training errors.
     pub async fn create_vector_index(&self) -> Result<(), Box<dyn Error>> {
         let table = self
             .table
