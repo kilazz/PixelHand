@@ -5,8 +5,8 @@ edition = "2024"
 description = "An AI-powered duplicate image finder, technical QC tool, and visual comparative viewer"
 
 [dependencies]
-# Slint UI Runtime
-slint = { version = "1.17.0", features = ["image-default-formats"] }
+# Slint UI Runtime with unstable-winit-030 feature enabled for native Drag and Drop
+slint = { version = "1.17.0", features = ["image-default-formats", "unstable-winit-030"] }
 
 # Tracing
 tracing = "0.1.44"
@@ -53,11 +53,11 @@ trash = "5.2.6"
 rfd = "0.17.2"
 base64 = "0.22.1"
 
-[build-dependencies]
-slint-build = "1.17.0"
-
 [patch.crates-io]
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
+
+[build-dependencies]
+slint-build = "1.17.0"
 
 [profile.release]
 lto = true

@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use xxhash_rust::xxh64::Xxh64;
 
 // Slint UI Runtime Imports
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, ModelRc, SharedPixelBuffer, VecModel};
 
 // Include Slint generated module
@@ -24,7 +25,7 @@ static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 
 #[derive(Default)]
 struct AppState {
-    results: Vec<ResultsRow>,
+    results: Vec<ResultsRowData>,
     groups: Vec<DuplicateGroupSummary>,
 }
 
@@ -82,6 +83,24 @@ pub struct FolderCompareOptions {
     pub match_by_stem: bool,
 }
 
+/// A 100% thread-safe (Send + Sync) shadow representation of Slint's ResultsRow
+#[derive(Clone)]
+pub struct ResultsRowData {
+    pub is_header: bool,
+    pub is_qc: bool,
+    pub is_ai: bool,
+    pub group_index: i32,
+    pub hash_or_issue: String,
+    pub path: String,
+    pub name: String,
+    pub score_or_detail: String,
+    pub size_str: String,
+    pub meta_str: String,
+    pub is_best: bool,
+    pub is_checked: bool,
+    pub thumbnail_data: Option<image::RgbaImage>, // Thread-safe raw pixels
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct FileMetadata {
@@ -115,6 +134,41 @@ fn convert_to_slint_image(rgba_img: &image::RgbaImage) -> slint::Image {
     slint::Image::from_rgba8(buffer)
 }
 
+/// Maps thread-safe ResultsRowData into UI-bound Slint ResultsRow on the main thread
+fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
+    let thumbnail = match &rd.thumbnail_data {
+        Some(rgba) => convert_to_slint_image(rgba),
+        None => slint::Image::default(),
+    };
+    ResultsRow {
+        is_header: rd.is_header,
+        is_qc: rd.is_qc,
+        is_ai: rd.is_ai,
+        group_index: rd.group_index,
+        hash_or_issue: rd.hash_or_issue.clone().into(),
+        path: rd.path.clone().into(),
+        name: rd.name.clone().into(),
+        score_or_detail: rd.score_or_detail.clone().into(),
+        size_str: rd.size_str.clone().into(),
+        meta_str: rd.meta_str.clone().into(),
+        is_best: rd.is_best,
+        is_checked: rd.is_checked,
+        thumbnail,
+    }
+}
+
+/// Utility helper to load and scale down image thumbnail. Returns thread-safe Option<RgbaImage>.
+fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
+    let path = PathBuf::from(path_str);
+    if let Ok(mut img) = dds_loader::open_image_with_dds_fallback(&path) {
+        if img.width() > 64 || img.height() > 64 {
+            img = img.thumbnail(64, 64);
+        }
+        return Some(img.to_rgba8());
+    }
+    None
+}
+
 /// Helper function to format bytes to human-readable size.
 fn format_size(bytes: u64) -> String {
     if bytes == 0 {
@@ -127,7 +181,7 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Maps duplicate groups to a flat representation for the Slint results model.
-fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRow> {
+fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for (g_idx, group) in groups.iter().enumerate() {
         if group.files.is_empty() {
@@ -135,50 +189,52 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRow> {
         }
 
         // Add Group Header Row
-        rows.push(ResultsRow {
+        rows.push(ResultsRowData {
             is_header: true,
             is_qc: false,
             is_ai: false,
             group_index: g_idx as i32,
-            hash_or_issue: group.hash.clone().into(),
-            path: "".into(),
-            name: "".into(),
-            score_or_detail: "".into(),
-            size_str: format_size(group.files.first().map(|f| f.size).unwrap_or(0)).into(),
-            meta_str: "".into(),
+            hash_or_issue: group.hash.clone(),
+            path: String::new(),
+            name: String::new(),
+            score_or_detail: String::new(),
+            size_str: format_size(group.files.first().map(|f| f.size).unwrap_or(0)),
+            meta_str: String::new(),
             is_best: false,
             is_checked: false,
+            thumbnail_data: None,
         });
 
         // Add Child Duplicate File Rows
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
-            rows.push(ResultsRow {
+            // Background load thumbnail to keep execution extremely fast and asynchronous
+            let thumbnail_data = load_thumbnail_for_path(&file.path);
+            rows.push(ResultsRowData {
                 is_header: false,
                 is_qc: false,
                 is_ai: false,
                 group_index: g_idx as i32,
-                hash_or_issue: "".into(),
-                path: file.path.clone().into(),
+                hash_or_issue: String::new(),
+                path: file.path.clone(),
                 name: Path::new(&file.path)
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
-                    .into_owned()
-                    .into(),
+                    .into_owned(),
                 score_or_detail: if is_best {
-                    "[Best]".into()
+                    "[Best]".to_string()
                 } else {
-                    format!("{:.1}%", file.similarity).into()
+                    format!("{:.1}%", file.similarity)
                 },
-                size_str: format_size(file.size).into(),
+                size_str: format_size(file.size),
                 meta_str: format!(
                     "{}x{} • {} • {}b",
                     file.width, file.height, file.compression_format, file.bit_depth
-                )
-                .into(),
+                ),
                 is_best,
                 is_checked: false,
+                thumbnail_data,
             });
         }
     }
@@ -186,54 +242,56 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRow> {
 }
 
 /// Maps Quality Control issues list to results row representations.
-fn map_qc_to_rows(issues: &[QcIssueSummary]) -> Vec<ResultsRow> {
+fn map_qc_to_rows(issues: &[QcIssueSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for issue in issues {
-        rows.push(ResultsRow {
+        let thumbnail_data = load_thumbnail_for_path(&issue.path);
+        rows.push(ResultsRowData {
             is_header: false,
             is_qc: true,
             is_ai: false,
             group_index: -1,
-            hash_or_issue: issue.issue.clone().into(),
-            path: issue.path.clone().into(),
+            hash_or_issue: issue.issue.clone(),
+            path: issue.path.clone(),
             name: Path::new(&issue.path)
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
-                .into_owned()
-                .into(),
-            score_or_detail: issue.issue.clone().into(),
-            size_str: "".into(),
-            meta_str: issue.details.clone().into(),
+                .into_owned(),
+            score_or_detail: issue.issue.clone(),
+            size_str: String::new(),
+            meta_str: issue.details.clone(),
             is_best: false,
             is_checked: false,
+            thumbnail_data,
         });
     }
     rows
 }
 
 /// Maps AI Search results list to results row representations.
-fn map_ai_search_to_rows(ai_results: &[AiSearchResultSummary]) -> Vec<ResultsRow> {
+fn map_ai_search_to_rows(ai_results: &[AiSearchResultSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for res in ai_results {
-        rows.push(ResultsRow {
+        let thumbnail_data = load_thumbnail_for_path(&res.path);
+        rows.push(ResultsRowData {
             is_header: false,
             is_qc: false,
             is_ai: true,
             group_index: -1,
-            hash_or_issue: "".into(),
-            path: res.path.clone().into(),
+            hash_or_issue: String::new(),
+            path: res.path.clone(),
             name: Path::new(&res.path)
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
-                .into_owned()
-                .into(),
-            score_or_detail: format!("{:.1}%", res.similarity).into(),
-            size_str: "".into(),
-            meta_str: "".into(),
+                .into_owned(),
+            score_or_detail: format!("{:.1}%", res.similarity),
+            size_str: String::new(),
+            meta_str: String::new(),
             is_best: false,
             is_checked: false,
+            thumbnail_data,
         });
     }
     rows
@@ -1352,7 +1410,7 @@ async fn main() -> Result<(), slint::PlatformError> {
         let dir_a_str = ui.get_dir_a().to_string();
         let dir_b_str = ui.get_dir_b().to_string();
         let query_text_str = ui.get_query_text().to_string();
-        let similarity = ui.get_similarity_threshold() as f32;
+        let similarity = ui.get_similarity_threshold();
         let batch_sz = ui.get_batch_size() as usize;
 
         let qc_mode_active = ui.get_qc_mode();
@@ -1466,24 +1524,32 @@ async fn main() -> Result<(), slint::PlatformError> {
                 }
             };
 
+            // Build dynamic row objects in background task to prevent event-loop freezing
+            let rows = match &scan_result {
+                Ok((groups, qc_issues, ai_results)) => {
+                    if !qc_issues.is_empty() {
+                        map_qc_to_rows(qc_issues)
+                    } else if !ai_results.is_empty() {
+                        map_ai_search_to_rows(ai_results)
+                    } else {
+                        map_groups_to_rows(groups)
+                    }
+                }
+                Err(_) => Vec::new(),
+            };
+
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_is_scanning(false);
                 match scan_result {
-                    Ok((groups, qc_issues, ai_results)) => {
+                    Ok((groups, _, _)) => {
                         let mut state_lock = state_copy.lock().unwrap();
                         state_lock.groups = groups.clone();
-
-                        let rows = if !qc_issues.is_empty() {
-                            map_qc_to_rows(&qc_issues)
-                        } else if !ai_results.is_empty() {
-                            map_ai_search_to_rows(&ai_results)
-                        } else {
-                            map_groups_to_rows(&groups)
-                        };
-
                         state_lock.results = rows.clone();
 
-                        let results_model = ModelRc::from(std::rc::Rc::new(VecModel::from(rows)));
+                        let slint_rows: Vec<ResultsRow> =
+                            rows.iter().map(convert_to_slint_row).collect();
+                        let results_model =
+                            ModelRc::from(std::rc::Rc::new(VecModel::from(slint_rows)));
                         ui.set_results(results_model);
                         ui.set_status_text("Scan finished successfully!".into());
                     }
@@ -1495,26 +1561,26 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
-    // 4. File Table Checkbox Toggled Callback
+    // 4. File Table Checkbox Toggled Callback (Synchronous UI callback execution thread)
     let app_weak = app.as_weak();
     let state_clone = state.clone();
     app.on_row_checkbox_toggled(move |idx| {
-        let app_copy = app_weak.clone();
         let mut lock = state_clone.lock().unwrap();
         if let Some(row) = lock.results.get_mut(idx as usize) {
             row.is_checked = !row.is_checked;
         }
-        let updated_rows = lock.results.clone();
-        let _ = app_copy.upgrade_in_event_loop(move |ui| {
-            let model = ModelRc::from(std::rc::Rc::new(VecModel::from(updated_rows)));
+        if let Some(ui) = app_weak.upgrade() {
+            let slint_rows: Vec<ResultsRow> =
+                lock.results.iter().map(convert_to_slint_row).collect();
+            let model = ModelRc::from(std::rc::Rc::new(VecModel::from(slint_rows)));
             ui.set_results(model);
-        });
+        }
     });
 
     // 5. File Table Row Click Selection Callback
     let app_weak = app.as_weak();
     let state_clone = state.clone();
-    app.on_row_clicked(move |_idx, is_header, group_idx, path| {
+    app.on_row_clicked(move |_, is_header, group_idx, path| {
         if is_header {
             return;
         }
@@ -1577,6 +1643,16 @@ async fn main() -> Result<(), slint::PlatformError> {
         ui.set_original_meta(o_meta);
         ui.set_duplicate_meta(d_meta);
 
+        // Map duplicates list to Slint right-hand compare miniature ListView
+        let mut group_files = Vec::new();
+        for row in &lock.results {
+            if !row.is_header && row.group_index == group_idx {
+                group_files.push(convert_to_slint_row(row));
+            }
+        }
+        let selected_model = ModelRc::from(std::rc::Rc::new(VecModel::from(group_files)));
+        ui.set_selected_group_files(selected_model);
+
         let channel = get_current_active_channel(&ui).to_string();
         let compare_mode = ui.get_compare_mode();
 
@@ -1628,14 +1704,14 @@ async fn main() -> Result<(), slint::PlatformError> {
 
                 for row in &lock.results {
                     if !row.is_header && row.is_checked {
-                        checked_files.push(row.path.to_string());
+                        checked_files.push(row.path.clone());
 
                         // Find the original path inside the matching duplicate group
                         let group = lock.groups.get(row.group_index as usize);
                         if let Some(g) = group
                             && let Some(orig) = g.files.first()
                         {
-                            pairs.push((orig.path.clone(), row.path.to_string()));
+                            pairs.push((orig.path.clone(), row.path.clone()));
                         }
                     }
                 }
@@ -1715,6 +1791,21 @@ async fn main() -> Result<(), slint::PlatformError> {
                 });
             }
         });
+    });
+
+    // Register OS system-level Drag & Drop file handler to load image models instantly
+    let app_weak_dnd = app.as_weak();
+    app.window().on_winit_window_event(move |_window, event| {
+        if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
+            let path_str = path_buf.to_string_lossy().to_string();
+            let app_copy = app_weak_dnd.clone();
+            let _ = app_copy.upgrade_in_event_loop(move |ui| {
+                ui.set_query_text(path_str.clone().into());
+                ui.set_search_method(2); // Auto switch to AI Visual Search
+                ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
+            });
+        }
+        slint::winit_030::EventResult::Propagate
     });
 
     // Launch main UI event loop
