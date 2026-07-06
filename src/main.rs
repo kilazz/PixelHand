@@ -62,6 +62,26 @@ pub struct AiSearchResultSummary {
     pub similarity: f32,
 }
 
+#[derive(Clone)]
+pub struct QcScanOptions {
+    pub check_npot: bool,
+    pub check_mipmaps: bool,
+    pub check_block_align: bool,
+    pub check_bit_depth: bool,
+    pub validate_normals: bool,
+    pub normals_tags: String,
+    pub check_solid: bool,
+}
+
+#[derive(Clone)]
+pub struct FolderCompareOptions {
+    pub check_size_bloat: bool,
+    pub check_alpha: bool,
+    pub check_color_space: bool,
+    pub check_compression: bool,
+    pub match_by_stem: bool,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct FileMetadata {
@@ -459,13 +479,7 @@ async fn run_exact_scan(
 /// Absolute technical quality control auditor scan execution.
 async fn run_qc_scan_internal(
     directory: String,
-    check_npot: bool,
-    check_mipmaps: bool,
-    check_block_align: bool,
-    check_bit_depth: bool,
-    validate_normals: bool,
-    normals_tags: String,
-    check_solid: bool,
+    options: QcScanOptions,
     extensions: Vec<String>,
 ) -> Result<Vec<QcIssueSummary>, String> {
     let path = PathBuf::from(directory);
@@ -502,10 +516,10 @@ async fn run_qc_scan_internal(
 
             let abs_issues = qc::check_absolute(
                 &qc_meta,
-                check_npot,
-                check_block_align,
-                check_mipmaps,
-                check_bit_depth,
+                options.check_npot,
+                options.check_block_align,
+                options.check_mipmaps,
+                options.check_bit_depth,
             );
             for issue in abs_issues {
                 file_issues.push(QcIssueSummary {
@@ -515,7 +529,9 @@ async fn run_qc_scan_internal(
                 });
             }
 
-            if check_solid && let Some((issue, details)) = qc::check_solid_texture(p) {
+            if options.check_solid
+                && let Some((issue, details)) = qc::check_solid_texture(p)
+            {
                 file_issues.push(QcIssueSummary {
                     path: p.to_string_lossy().to_string(),
                     issue,
@@ -523,12 +539,13 @@ async fn run_qc_scan_internal(
                 });
             }
 
-            if validate_normals {
+            if options.validate_normals {
                 let path_str = p.to_string_lossy().to_lowercase();
-                let should_check = if normals_tags.is_empty() {
+                let should_check = if options.normals_tags.is_empty() {
                     true
                 } else {
-                    normals_tags
+                    options
+                        .normals_tags
                         .split(',')
                         .map(|t| t.trim().to_lowercase())
                         .filter(|t| !t.is_empty())
@@ -554,11 +571,7 @@ async fn run_qc_scan_internal(
 async fn run_folder_compare(
     directory_a: String,
     directory_b: String,
-    check_size_bloat: bool,
-    check_alpha: bool,
-    check_color_space: bool,
-    check_compression: bool,
-    match_by_stem: bool,
+    options: FolderCompareOptions,
     extensions: Vec<String>,
 ) -> Result<Vec<QcIssueSummary>, String> {
     let path_a = PathBuf::from(directory_a);
@@ -584,13 +597,13 @@ async fn run_folder_compare(
 
     let mut map_a = HashMap::new();
     for p in &files_a {
-        map_a.insert(get_key(p, match_by_stem), p.clone());
+        map_a.insert(get_key(p, options.match_by_stem), p.clone());
     }
 
     let mut issues = Vec::new();
 
     for p_b in &files_b {
-        let key = get_key(p_b, match_by_stem);
+        let key = get_key(p_b, options.match_by_stem);
         if let Some(p_a) = map_a.get(&key) {
             let size_a = fs::metadata(p_a).map(|m| m.len()).unwrap_or(0);
             let size_b = fs::metadata(p_b).map(|m| m.len()).unwrap_or(0);
@@ -640,10 +653,10 @@ async fn run_folder_compare(
             let rel_issues = qc::check_relative(
                 &meta_a,
                 &meta_b,
-                check_size_bloat,
-                check_alpha,
-                check_color_space,
-                check_compression,
+                options.check_size_bloat,
+                options.check_alpha,
+                options.check_color_space,
+                options.check_compression,
             );
 
             for issue in rel_issues {
@@ -1175,19 +1188,18 @@ async fn main() -> Result<(), slint::PlatformError> {
                     ".tif".to_string(),
                     ".tiff".to_string(),
                 ];
-                match run_qc_scan_internal(
-                    dir,
+
+                let qc_opts = QcScanOptions {
                     check_npot,
                     check_mipmaps,
-                    check_block,
-                    check_bit,
+                    check_block_align: check_block,
+                    check_bit_depth: check_bit,
                     validate_normals,
-                    "".to_string(),
-                    false,
-                    default_exts,
-                )
-                .await
-                {
+                    normals_tags: "".to_string(),
+                    check_solid: false,
+                };
+
+                match run_qc_scan_internal(dir, qc_opts, default_exts).await {
                     Ok(results) => {
                         println!(
                             "[SUCCESS] QC Scan Completed! Found {} issues:",
@@ -1372,34 +1384,30 @@ async fn main() -> Result<(), slint::PlatformError> {
         tokio::spawn(async move {
             let scan_result = if qc_mode_active {
                 if !dir_b_str.trim().is_empty() {
-                    let res = run_folder_compare(
-                        dir_a_str,
-                        dir_b_str,
-                        true, // check_size_bloat
-                        true, // check_alpha
-                        true, // check_color_space
-                        true, // check_compression
-                        true, // match_by_stem
-                        default_exts,
-                    )
-                    .await;
+                    let compare_opts = FolderCompareOptions {
+                        check_size_bloat: true,
+                        check_alpha: true,
+                        check_color_space: true,
+                        check_compression: true,
+                        match_by_stem: true,
+                    };
+                    let res =
+                        run_folder_compare(dir_a_str, dir_b_str, compare_opts, default_exts).await;
                     match res {
                         Ok(issues) => Ok((Vec::new(), issues, Vec::new())),
                         Err(e) => Err(e),
                     }
                 } else {
-                    let res = run_qc_scan_internal(
-                        dir_a_str,
+                    let qc_opts = QcScanOptions {
                         check_npot,
                         check_mipmaps,
-                        check_block,
-                        check_bit,
+                        check_block_align: check_block,
+                        check_bit_depth: check_bit,
                         validate_normals,
                         normals_tags,
                         check_solid,
-                        default_exts,
-                    )
-                    .await;
+                    };
+                    let res = run_qc_scan_internal(dir_a_str, qc_opts, default_exts).await;
                     match res {
                         Ok(issues) => Ok((Vec::new(), issues, Vec::new())),
                         Err(e) => Err(e),
@@ -1591,16 +1599,15 @@ async fn main() -> Result<(), slint::PlatformError> {
                 });
             }
 
-            if compare_mode == 3 {
-                if let Ok(diff_path) = calculate_diff_internal(&orig_path, &dup_path).await {
-                    if let Ok(diff_img) = image::open(&diff_path) {
-                        let raw_diff = diff_img.to_rgba8();
-                        let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
-                            let slint_diff = convert_to_slint_image(&raw_diff);
-                            ui.set_image_heatmap(slint_diff);
-                        });
-                    }
-                }
+            if compare_mode == 3
+                && let Ok(diff_path) = calculate_diff_internal(&orig_path, &dup_path).await
+                && let Ok(diff_img) = image::open(&diff_path)
+            {
+                let raw_diff = diff_img.to_rgba8();
+                let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
+                    let slint_diff = convert_to_slint_image(&raw_diff);
+                    ui.set_image_heatmap(slint_diff);
+                });
             }
         });
     });
@@ -1625,10 +1632,10 @@ async fn main() -> Result<(), slint::PlatformError> {
 
                         // Find the original path inside the matching duplicate group
                         let group = lock.groups.get(row.group_index as usize);
-                        if let Some(g) = group {
-                            if let Some(orig) = g.files.first() {
-                                pairs.push((orig.path.clone(), row.path.to_string()));
-                            }
+                        if let Some(g) = group
+                            && let Some(orig) = g.files.first()
+                        {
+                            pairs.push((orig.path.clone(), row.path.to_string()));
                         }
                     }
                 }

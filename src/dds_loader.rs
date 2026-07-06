@@ -341,7 +341,7 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
             perform_xbox_endian_swap(&mut pixel_data, info.fourcc);
         }
 
-        // Construct a clean, standard DDS file
+        // Construct a clean, standard DDS file buffer in memory
         let mut clean = Vec::with_capacity(128 + pixel_data.len());
         clean.extend_from_slice(b"DDS ");
 
@@ -418,14 +418,35 @@ pub fn open_image_with_dds_fallback<P: AsRef<std::path::Path>>(
     path: P,
 ) -> Result<DynamicImage, String> {
     let path_ref = path.as_ref();
-    if path_ref
+
+    // Extract the file extension and convert it to lower case
+    let ext = path_ref
         .extension()
-        .is_some_and(|ext| ext.to_string_lossy().to_ascii_lowercase() == "dds")
-    {
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if ext == "dds" {
+        // Parse DDS (handles standard, Xbox 360, and CryEngine specific unswizzling)
         let file = std::fs::File::open(path_ref).map_err(|e| e.to_string())?;
         let mmap = unsafe { memmap2::Mmap::map(&file).map_err(|e| e.to_string())? };
         decode_dds_bytes(&mmap)
+    } else if ext == "exr" {
+        // Custom pipeline for EXR: Read raw float pixels and apply ACES Filmic Tonemapping
+        let (hdr_pixels, width, height) = crate::tonemapper::load_exr_rgba(path_ref)
+            .map_err(|e| format!("EXR Load error: {}", e))?;
+
+        let ldr_img = crate::tonemapper::tonemap_hdr_to_ldr_rgba(
+            &hdr_pixels,
+            width,
+            height,
+            crate::tonemapper::TonemapOperator::AcesFilmic,
+            1.0, // Default exposure value
+        )
+        .map_err(|e| format!("Tonemap error: {}", e))?;
+
+        Ok(DynamicImage::ImageRgba8(ldr_img))
     } else {
+        // Standard fallback for PNG, JPEG, TGA, BMP, TIFF, WEBP etc.
         image::open(path_ref).map_err(|e| e.to_string())
     }
 }

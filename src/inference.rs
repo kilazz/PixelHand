@@ -245,6 +245,7 @@ impl InferenceEngine {
     }
 
     /// Generates L2-normalized embeddings for a given image
+    #[allow(dead_code)]
     pub fn encode_image(
         &self,
         img: &DynamicImage,
