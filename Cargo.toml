@@ -56,6 +56,9 @@ base64 = "0.22.1"
 [build-dependencies]
 slint-build = "1.17.0"
 
+[patch.crates-io]
+esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
+
 [profile.release]
 lto = true
 codegen-units = 1
