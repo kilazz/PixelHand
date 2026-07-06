@@ -83,7 +83,7 @@ pub struct FolderCompareOptions {
     pub match_by_stem: bool,
 }
 
-/// A 100% thread-safe (Send + Sync) shadow representation of Slint's ResultsRow
+/// A thread-safe shadow representation of Slint's ResultsRow
 #[derive(Clone)]
 pub struct ResultsRowData {
     pub is_header: bool,
@@ -109,6 +109,110 @@ struct FileMetadata {
     width: usize,
     height: usize,
     hash: String,
+}
+
+/// Persistent application configuration settings structure
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct AppSettings {
+    pub dir_a: String,
+    pub dir_b: String,
+    pub query_text: String,
+    pub similarity_threshold: f32,
+    pub batch_size: i32,
+    pub search_method: i32,
+    pub qc_mode: bool,
+    pub qc_npot: bool,
+    pub qc_mipmaps: bool,
+    pub qc_block_align: bool,
+    pub qc_bit_depth: bool,
+    pub qc_solid_colors: bool,
+    pub qc_normals: bool,
+    pub qc_normals_tags: String,
+    pub ext_png: bool,
+    pub ext_tga: bool,
+    pub ext_dds: bool,
+    pub ext_bmp: bool,
+    pub ext_exr: bool,
+    pub ext_hdr: bool,
+    pub ext_tif: bool,
+    pub ext_webp: bool,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            dir_a: String::new(),
+            dir_b: String::new(),
+            query_text: String::new(),
+            similarity_threshold: 90.0,
+            batch_size: 128,
+            search_method: 0,
+            qc_mode: false,
+            qc_npot: true,
+            qc_mipmaps: true,
+            qc_block_align: true,
+            qc_bit_depth: true,
+            qc_solid_colors: true,
+            qc_normals: true,
+            qc_normals_tags: String::new(),
+            ext_png: true,
+            ext_tga: true,
+            ext_dds: true,
+            ext_bmp: true,
+            ext_exr: true,
+            ext_hdr: true,
+            ext_tif: true,
+            ext_webp: true,
+        }
+    }
+}
+
+/// Helper function to safely append warnings or logs directly to the Slint UI console,
+/// falling back to std::out printing if UI is not active.
+fn append_to_console_log(msg: &str) {
+    if let Some(app_weak) = APP_HANDLE.get() {
+        let msg_clone = msg.to_string();
+        let _ = app_weak.upgrade_in_event_loop(move |ui| {
+            let current_log = ui.get_console_log().to_string();
+            ui.set_console_log(format!("{}\n{}", current_log, msg_clone).into());
+        });
+    } else {
+        println!("[WARNING] {}", msg);
+    }
+}
+
+/// Serializes and saves current window state settings to Settings.json
+fn save_current_settings(ui: &AppWindow) {
+    let settings = AppSettings {
+        dir_a: ui.get_dir_a().to_string(),
+        dir_b: ui.get_dir_b().to_string(),
+        query_text: ui.get_query_text().to_string(),
+        similarity_threshold: ui.get_similarity_threshold(),
+        batch_size: ui.get_batch_size(),
+        search_method: ui.get_search_method(),
+        qc_mode: ui.get_qc_mode(),
+        qc_npot: ui.get_qc_npot(),
+        qc_mipmaps: ui.get_qc_mipmaps(),
+        qc_block_align: ui.get_qc_block_align(),
+        qc_bit_depth: ui.get_qc_bit_depth(),
+        qc_solid_colors: ui.get_qc_solid_colors(),
+        qc_normals: ui.get_qc_normals(),
+        qc_normals_tags: ui.get_qc_normals_tags().to_string(),
+        ext_png: ui.get_ext_png(),
+        ext_tga: ui.get_ext_tga(),
+        ext_dds: ui.get_ext_dds(),
+        ext_bmp: ui.get_ext_bmp(),
+        ext_exr: ui.get_ext_exr(),
+        ext_hdr: ui.get_ext_hdr(),
+        ext_tif: ui.get_ext_tif(),
+        ext_webp: ui.get_ext_webp(),
+    };
+    if let Ok(dir) = get_portable_app_data_dir() {
+        let path = dir.join("Settings.json");
+        if let Ok(serialized) = serde_json::to_string_pretty(&settings) {
+            let _ = fs::write(path, serialized);
+        }
+    }
 }
 
 /// Locates or creates the persistent data storage directory next to the executable.
@@ -208,7 +312,6 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
         // Add Child Duplicate File Rows
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
-            // Background load thumbnail to keep execution extremely fast and asynchronous
             let thumbnail_data = load_thumbnail_for_path(&file.path);
             rows.push(ResultsRowData {
                 is_header: false,
@@ -351,6 +454,7 @@ impl UnionFind {
 /// Cache item for storing decoded images in memory.
 struct DecodedCacheItem {
     mtime: std::time::SystemTime,
+    last_accessed: std::time::Instant,
     image: image::RgbaImage,
 }
 
@@ -371,10 +475,15 @@ async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::R
     let cache_mutex = DECODED_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache_mutex.lock().ok()?;
 
-    let has_valid_cache = cache
-        .get(path)
-        .map(|item| item.mtime == current_mtime)
-        .unwrap_or(false);
+    if let Some(item) = cache.get_mut(path) {
+        if item.mtime == current_mtime {
+            item.last_accessed = std::time::Instant::now();
+        } else {
+            cache.remove(path);
+        }
+    }
+
+    let has_valid_cache = cache.contains_key(path);
 
     if !has_valid_cache {
         let mut img = dds_loader::open_image_with_dds_fallback(&p).ok()?;
@@ -382,28 +491,30 @@ async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::R
             img = img.thumbnail(512, 512);
         }
         let rgba = img.to_rgba8();
+
+        // Evict least-recently accessed cache items if size >= 16 limit
+        if cache.len() >= 16 {
+            let mut oldest_key: Option<String> = None;
+            let mut oldest_time = std::time::Instant::now();
+            for (k, item) in cache.iter() {
+                if item.last_accessed < oldest_time {
+                    oldest_time = item.last_accessed;
+                    oldest_key = Some(k.clone());
+                }
+            }
+            if let Some(k) = oldest_key {
+                cache.remove(&k);
+            }
+        }
+
         cache.insert(
             path.to_string(),
             DecodedCacheItem {
                 mtime: current_mtime,
+                last_accessed: std::time::Instant::now(),
                 image: rgba,
             },
         );
-
-        if cache.len() > 16 {
-            cache.clear();
-            let mut img = dds_loader::open_image_with_dds_fallback(&p).ok()?;
-            if img.width() > 512 || img.height() > 512 {
-                img = img.thumbnail(512, 512);
-            }
-            cache.insert(
-                path.to_string(),
-                DecodedCacheItem {
-                    mtime: current_mtime,
-                    image: img.to_rgba8(),
-                },
-            );
-        }
     }
 
     let cached_item = cache.get(path)?;
@@ -458,7 +569,11 @@ async fn run_exact_scan(
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path, &extensions);
+    let (paths, warnings) = discover_files(&path, &extensions);
+    for warn in warnings {
+        append_to_console_log(&warn);
+    }
+
     let metadata_list: Vec<FileMetadata> = paths
         .par_iter()
         .filter_map(|p| {
@@ -544,7 +659,10 @@ async fn run_qc_scan_internal(
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path, &extensions);
+    let (paths, warnings) = discover_files(&path, &extensions);
+    for warn in warnings {
+        append_to_console_log(&warn);
+    }
 
     let issues: Vec<QcIssueSummary> = paths
         .par_iter()
@@ -638,8 +756,14 @@ async fn run_folder_compare(
         return Err("Both target paths must be valid directories".into());
     }
 
-    let files_a = discover_files(&path_a, &extensions);
-    let files_b = discover_files(&path_b, &extensions);
+    let (files_a, warnings_a) = discover_files(&path_a, &extensions);
+    for warn in warnings_a {
+        append_to_console_log(&warn);
+    }
+    let (files_b, warnings_b) = discover_files(&path_b, &extensions);
+    for warn in warnings_b {
+        append_to_console_log(&warn);
+    }
 
     let get_key = |p: &Path, by_stem: bool| -> String {
         if by_stem {
@@ -746,7 +870,10 @@ async fn run_perceptual_scan_internal(
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path, &extensions);
+    let (paths, warnings) = discover_files(&path, &extensions);
+    for warn in warnings {
+        append_to_console_log(&warn);
+    }
 
     let ana_type = match analysis_type.as_str() {
         "Luminance" => perceptual::AnalysisType::Luminance,
@@ -877,7 +1004,10 @@ async fn run_ai_duplicate_scan(
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path, &extensions);
+    let (paths, warnings) = discover_files(&path, &extensions);
+    for warn in warnings {
+        append_to_console_log(&warn);
+    }
     let app_dir = get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
     let model_dir = app_dir
@@ -1103,7 +1233,7 @@ async fn create_hardlinks(pairs: Vec<(String, String)>) -> Result<(), String> {
     Ok(())
 }
 
-/// Converts chosen duplicate paths into reflinks (Copy-on-Write fallback to hardlink).
+/// Converts chosen duplicate paths into reflinks (with conventional copy backup)
 async fn create_reflinks(pairs: Vec<(String, String)>) -> Result<(), String> {
     for (source_str, target_str) in pairs {
         let source = PathBuf::from(source_str);
@@ -1114,31 +1244,46 @@ async fn create_reflinks(pairs: Vec<(String, String)>) -> Result<(), String> {
         if target.exists() {
             fs::remove_file(&target).map_err(|e| e.to_string())?;
         }
-        fs::hard_link(&source, &target).map_err(|e| format!("Failed to link file: {}", e))?;
+        reflink_copy::reflink_or_copy(&source, &target)
+            .map_err(|e| format!("Failed to create reflink/copy: {}", e))?;
     }
     Ok(())
 }
 
-fn discover_files(root: &Path, extensions: &[String]) -> Vec<PathBuf> {
-    walkdir::WalkDir::new(root)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-        .map(|e| e.into_path())
-        .filter(|p| {
-            if let Some(ext) = p.extension() {
-                let ext_str = ext.to_string_lossy().to_lowercase();
-                let lower_ext = if ext_str.starts_with('.') {
-                    ext_str.clone()
-                } else {
-                    format!(".{}", ext_str)
-                };
-                extensions.contains(&lower_ext) || extensions.contains(&ext_str)
-            } else {
-                false
+fn discover_files(root: &Path, extensions: &[String]) -> (Vec<PathBuf>, Vec<String>) {
+    let mut files = Vec::new();
+    let mut warnings = Vec::new();
+    for entry in walkdir::WalkDir::new(root) {
+        match entry {
+            Ok(e) => {
+                if e.file_type().is_file() {
+                    let p = e.into_path();
+                    if let Some(ext) = p.extension() {
+                        let ext_str = ext.to_string_lossy().to_lowercase();
+                        let lower_ext = if ext_str.starts_with('.') {
+                            ext_str.clone()
+                        } else {
+                            format!(".{}", ext_str)
+                        };
+                        if extensions.contains(&lower_ext) || extensions.contains(&ext_str) {
+                            files.push(p);
+                        }
+                    }
+                }
             }
-        })
-        .collect()
+            Err(err) => {
+                let path_str = err
+                    .path()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown path".to_string());
+                warnings.push(format!(
+                    "Access Warning: cannot read {} ({})",
+                    path_str, err
+                ));
+            }
+        }
+    }
+    (files, warnings)
 }
 
 fn calculate_xxhash(path: &Path) -> Result<String, std::io::Error> {
@@ -1299,6 +1444,48 @@ async fn main() -> Result<(), slint::PlatformError> {
     let app = AppWindow::new()?;
     let _ = APP_HANDLE.set(app.as_weak());
 
+    // Load settings on startup
+    let settings_path = get_portable_app_data_dir()
+        .map(|d| d.join("Settings.json"))
+        .ok();
+
+    let loaded_settings = if let Some(ref path) = settings_path
+        && path.exists()
+    {
+        if let Ok(content) = fs::read_to_string(path) {
+            serde_json::from_str::<AppSettings>(&content).unwrap_or_default()
+        } else {
+            AppSettings::default()
+        }
+    } else {
+        AppSettings::default()
+    };
+
+    // Apply saved settings to window properties
+    app.set_dir_a(loaded_settings.dir_a.clone().into());
+    app.set_dir_b(loaded_settings.dir_b.clone().into());
+    app.set_query_text(loaded_settings.query_text.clone().into());
+    app.set_similarity_threshold(loaded_settings.similarity_threshold);
+    app.set_batch_size(loaded_settings.batch_size);
+    app.set_search_method(loaded_settings.search_method);
+    app.set_qc_mode(loaded_settings.qc_mode);
+    app.set_qc_npot(loaded_settings.qc_npot);
+    app.set_qc_mipmaps(loaded_settings.qc_mipmaps);
+    app.set_qc_block_align(loaded_settings.qc_block_align);
+    app.set_qc_bit_depth(loaded_settings.qc_bit_depth);
+    app.set_qc_solid_colors(loaded_settings.qc_solid_colors);
+    app.set_qc_normals(loaded_settings.qc_normals);
+    app.set_qc_normals_tags(loaded_settings.qc_normals_tags.clone().into());
+
+    app.set_ext_png(loaded_settings.ext_png);
+    app.set_ext_tga(loaded_settings.ext_tga);
+    app.set_ext_dds(loaded_settings.ext_dds);
+    app.set_ext_bmp(loaded_settings.ext_bmp);
+    app.set_ext_exr(loaded_settings.ext_exr);
+    app.set_ext_hdr(loaded_settings.ext_hdr);
+    app.set_ext_tif(loaded_settings.ext_tif);
+    app.set_ext_webp(loaded_settings.ext_webp);
+
     // Auto-download models on startup!
     let app_weak_startup = app.as_weak();
     tokio::spawn(async move {
@@ -1380,6 +1567,7 @@ async fn main() -> Result<(), slint::PlatformError> {
             let path_str = folder.to_string_lossy().to_string();
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_dir_a(path_str.into());
+                save_current_settings(&ui);
             });
         }
     });
@@ -1395,6 +1583,7 @@ async fn main() -> Result<(), slint::PlatformError> {
             let path_str = folder.to_string_lossy().to_string();
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_dir_b(path_str.into());
+                save_current_settings(&ui);
             });
         }
     });
@@ -1407,6 +1596,8 @@ async fn main() -> Result<(), slint::PlatformError> {
         let state_copy = state_clone.clone();
 
         let ui = app_copy.unwrap();
+        save_current_settings(&ui); // Save current settings locally inside Settings.json upon starting scans
+
         let dir_a_str = ui.get_dir_a().to_string();
         let dir_b_str = ui.get_dir_b().to_string();
         let query_text_str = ui.get_query_text().to_string();
@@ -1423,18 +1614,35 @@ async fn main() -> Result<(), slint::PlatformError> {
         let normals_tags = ui.get_qc_normals_tags().to_string();
         let method = ui.get_search_method();
 
-        let default_exts = vec![
-            ".png".to_string(),
-            ".jpg".to_string(),
-            ".jpeg".to_string(),
-            ".tga".to_string(),
-            ".dds".to_string(),
-            ".exr".to_string(),
-            ".hdr".to_string(),
-            ".tif".to_string(),
-            ".tiff".to_string(),
-            ".webp".to_string(),
-        ];
+        // Build dynamic formats array from CheckBox states
+        let mut default_exts = Vec::new();
+        if ui.get_ext_png() {
+            default_exts.push(".png".to_string());
+            default_exts.push(".jpg".to_string());
+            default_exts.push(".jpeg".to_string());
+        }
+        if ui.get_ext_tga() {
+            default_exts.push(".tga".to_string());
+        }
+        if ui.get_ext_dds() {
+            default_exts.push(".dds".to_string());
+        }
+        if ui.get_ext_bmp() {
+            default_exts.push(".bmp".to_string());
+        }
+        if ui.get_ext_exr() {
+            default_exts.push(".exr".to_string());
+        }
+        if ui.get_ext_hdr() {
+            default_exts.push(".hdr".to_string());
+        }
+        if ui.get_ext_tif() {
+            default_exts.push(".tif".to_string());
+            default_exts.push(".tiff".to_string());
+        }
+        if ui.get_ext_webp() {
+            default_exts.push(".webp".to_string());
+        }
 
         ui.set_is_scanning(true);
         ui.set_status_text("Initializing graphical scan...".into());
@@ -1615,7 +1823,12 @@ async fn main() -> Result<(), slint::PlatformError> {
             resolution: format!("{}x{}", original.width, original.height).into(),
             bit_depth: format!("{}-bit", original.bit_depth).into(),
             color_space: original.color_space.clone().into(),
-            mipmaps: original.mipmap_count.to_string().into(),
+            mipmaps: (if original.mipmap_count <= 1 {
+                "No".to_string()
+            } else {
+                original.mipmap_count.to_string()
+            })
+            .into(),
             alpha: (if original.has_alpha { "Yes" } else { "No" }).into(),
             similarity: "-".into(),
             path: original.path.clone().into(),
@@ -1633,7 +1846,12 @@ async fn main() -> Result<(), slint::PlatformError> {
             resolution: format!("{}x{}", duplicate.width, duplicate.height).into(),
             bit_depth: format!("{}-bit", duplicate.bit_depth).into(),
             color_space: duplicate.color_space.clone().into(),
-            mipmaps: duplicate.mipmap_count.to_string().into(),
+            mipmaps: (if duplicate.mipmap_count <= 1 {
+                "No".to_string()
+            } else {
+                duplicate.mipmap_count.to_string()
+            })
+            .into(),
             alpha: (if duplicate.has_alpha { "Yes" } else { "No" }).into(),
             similarity: format!("{:.1}%", duplicate.similarity).into(),
             path: duplicate.path.clone().into(),
@@ -1722,7 +1940,6 @@ async fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
 
-            // Clone the `action` string for the closure so it can still be used in the match
             let action_clone1 = action.clone();
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_status_text(format!("Processing selection: {}...", action_clone1).into());
@@ -1824,7 +2041,10 @@ async fn run_ai_search(
     if !path.is_dir() {
         return Err("The specified path is not a valid directory".into());
     }
-    let paths = discover_files(&path, &extensions);
+    let (paths, warnings) = discover_files(&path, &extensions);
+    for warn in warnings {
+        append_to_console_log(&warn);
+    }
     let app_dir = get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
     let model_dir = app_dir

@@ -31,6 +31,15 @@ struct AnalyzedHeaderInfo {
     is_compressed: bool,
 }
 
+#[inline]
+fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+    bytes
+        .get(offset..offset + 4)?
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
+}
+
 fn is_xbox_360_format(fourcc: u32) -> bool {
     matches!(
         fourcc,
@@ -181,27 +190,28 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
     if dds_bytes.len() < 128 {
         return Err("Input data too small for a DDS file".to_string());
     }
-    if &dds_bytes[0..4] != b"DDS " {
+    if dds_bytes.get(0..4) != Some(b"DDS ") {
         return Err("Not a DDS file (missing 'DDS ' magic number)".to_string());
     }
 
-    let dw_size = u32::from_le_bytes(dds_bytes[4..8].try_into().unwrap());
+    let dw_size = read_u32_le(dds_bytes, 4).ok_or("Failed to read header size")?;
     if dw_size != 124 {
         return Err("Invalid DDS header size".to_string());
     }
 
-    let height = u32::from_le_bytes(dds_bytes[12..16].try_into().unwrap());
-    let width = u32::from_le_bytes(dds_bytes[16..20].try_into().unwrap());
+    let height = read_u32_le(dds_bytes, 12).ok_or("Failed to read height")?;
+    let width = read_u32_le(dds_bytes, 16).ok_or("Failed to read width")?;
 
     // Pixel format (offset 76)
-    let pf_size = u32::from_le_bytes(dds_bytes[76..80].try_into().unwrap());
+    let pf_size = read_u32_le(dds_bytes, 76).ok_or("Failed to read pixel format size")?;
     if pf_size != 32 {
         return Err("Invalid DDS_PIXELFORMAT size".to_string());
     }
 
-    let pf_flags = u32::from_le_bytes(dds_bytes[80..84].try_into().unwrap());
-    let mut pf_fourcc = u32::from_le_bytes(dds_bytes[84..88].try_into().unwrap());
-    let pf_rgb_bitcount = u32::from_le_bytes(dds_bytes[88..92].try_into().unwrap());
+    let pf_flags = read_u32_le(dds_bytes, 80).ok_or("Failed to read pixel format flags")?;
+    let mut pf_fourcc = read_u32_le(dds_bytes, 84).ok_or("Failed to read pixel format FourCC")?;
+    let pf_rgb_bitcount =
+        read_u32_le(dds_bytes, 88).ok_or("Failed to read pixel format bitcount")?;
 
     let is_xbox = is_xbox_360_format(pf_fourcc);
     if is_xbox {
@@ -222,7 +232,7 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
             if dds_bytes.len() < header_size {
                 return Err("DX10 header out of bounds".to_string());
             }
-            let dxgi = u32::from_le_bytes(dds_bytes[128..132].try_into().unwrap());
+            let dxgi = read_u32_le(dds_bytes, 128).ok_or("Failed to read DX10 DXGI format")?;
             // DXGI Formats: BC1=71, BC2=74, BC3=77, BC4=80, BC5=83
             if dxgi == 71 || dxgi == 72 || dxgi == 80 || dxgi == 81 {
                 is_compressed = true;
@@ -263,11 +273,7 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
     let mut is_swizzled = false;
 
     if data_ptr_offset + 4 <= dds_bytes.len() {
-        let marker = u32::from_le_bytes(
-            dds_bytes[data_ptr_offset..data_ptr_offset + 4]
-                .try_into()
-                .unwrap(),
-        );
+        let marker = read_u32_le(dds_bytes, data_ptr_offset).ok_or("Failed to read marker")?;
         if marker == FOURCC_CRYF || marker == FOURCC_FYRC {
             is_swizzled = marker == FOURCC_CRYF;
             data_ptr_offset += if marker == FOURCC_CRYF { 8 } else { 4 };
@@ -292,7 +298,6 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
         let bpp = pf_rgb_bitcount as usize;
         let p = (width as usize * bpp).div_ceil(8);
         let sp = p * height as usize;
-        let _elem_bytes = 16 * bpp / 8;
         (p, sp)
     };
 
@@ -331,9 +336,12 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
                 .min(info.pixel_data_offset + info.slice_pitch);
             let mut raw_pixels = vec![0u8; info.slice_pitch];
             let bytes_to_copy = limit.saturating_sub(info.pixel_data_offset);
-            raw_pixels[0..bytes_to_copy].copy_from_slice(
-                &dds_bytes[info.pixel_data_offset..info.pixel_data_offset + bytes_to_copy],
-            );
+
+            if let Some(src_slice) =
+                dds_bytes.get(info.pixel_data_offset..info.pixel_data_offset + bytes_to_copy)
+            {
+                raw_pixels[0..bytes_to_copy].copy_from_slice(src_slice);
+            }
             raw_pixels
         };
 
@@ -394,8 +402,9 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
 
         clean.extend_from_slice(&dds_header);
 
-        if info.fourcc == FOURCC_DX10 && dds_bytes.len() >= 148 {
-            let dx10_header = &dds_bytes[128..148];
+        if info.fourcc == FOURCC_DX10
+            && let Some(dx10_header) = dds_bytes.get(128..148)
+        {
             clean.extend_from_slice(dx10_header);
         }
 

@@ -52,6 +52,7 @@ reqwest = { version = "0.13.4", default-features = false, features = ["rustls", 
 trash = "5.2.6"
 rfd = "0.17.2"
 base64 = "0.22.1"
+reflink-copy = "0.1.30"
 
 [patch.crates-io]
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
@@ -60,8 +61,8 @@ esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "mai
 slint-build = "1.17.0"
 
 [profile.release]
-lto = true
-codegen-units = 1
-strip = true
 opt-level = 3
+lto = "fat"
+codegen-units = 1
 panic = "abort"
+strip = true

@@ -53,7 +53,7 @@ component TabButton {
     in property <bool> active;
     callback clicked;
 
-    width: 75px;
+    width: 90px;
     height: 24px;
 
     rect := Rectangle {
@@ -68,7 +68,7 @@ component TabButton {
         txt := Text {
             text: root.text;
             color: active ? #ffffff : #858585;
-            font-size: 10.5px;
+            font-size: 11px;
             font-weight: active ? 600 : 400;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -96,8 +96,8 @@ component ChannelButton {
     in property <color> text-color: #ffffff;
     in property <bool> active;
     callback clicked;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
 
     rect := Rectangle {
         background: active ? active-color : #1e1f22;
@@ -108,7 +108,7 @@ component ChannelButton {
         txt := Text {
             text: root.text;
             color: active ? root.text-color : #dcddde;
-            font-size: 10px;
+            font-size: 11px;
             font-weight: 700;
             horizontal-alignment: center;
             vertical-alignment: center;
@@ -168,7 +168,7 @@ component SpecsRow {
     in property <string> name;
     in property <string> val1;
     in property <string> val2;
-    height: 20px;
+    height: 22px;
     HorizontalLayout {
         spacing: 8px;
         Text { text: name; width: 110px; color: #949ba4; font-size: 11px; vertical-alignment: center; }
@@ -291,8 +291,8 @@ export component AppWindow inherits Window {
     min-height: 800px;
     background: #1e1f22;
 
-    // View tab index state
-    in-out property <int> active_tab: 0; // 0: Find, 1: Log
+    // View tab index state (0: Find, 1: Compare, 2: Log)
+    in-out property <int> active_tab: 0;
 
     // Directory scan paths
     in-out property <string> dir_a: "";
@@ -303,6 +303,16 @@ export component AppWindow inherits Window {
     in-out property <bool> is_scanning: false;
     in-out property <float> progress: 0.0;
     in-out property <string> status_text: "System Ready. Drop images or write path.";
+
+    // Active file format selections (Binds to CheckBoxes inside File Types pop-up)
+    in-out property <bool> ext_png: true;
+    in-out property <bool> ext_tga: true;
+    in-out property <bool> ext_dds: true;
+    in-out property <bool> ext_bmp: true;
+    in-out property <bool> ext_exr: true;
+    in-out property <bool> ext_hdr: true;
+    in-out property <bool> ext_tif: true;
+    in-out property <bool> ext_webp: true;
 
     // Metadata tables data structures
     in-out property <SelectedFile> original_meta: {
@@ -344,7 +354,7 @@ export component AppWindow inherits Window {
     in-out property <bool> skip_system: true;
 
     // Search options
-    in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: Simple (dHash), 2: AI Embeddings
+    in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: dHash, 2: AI Embeddings
 
     // UI layouts states
     in-out property <bool> results_grid_mode: false;
@@ -388,17 +398,17 @@ export component AppWindow inherits Window {
                     spacing: 12px;
                     VerticalLayout {
                         spacing: 4px;
-                        CheckBox { text: ".png"; checked: true; }
-                        CheckBox { text: ".tga"; checked: true; }
-                        CheckBox { text: ".dds"; checked: true; }
-                        CheckBox { text: ".bmp"; checked: true; }
+                        CheckBox { text: ".png"; checked <=> root.ext_png; }
+                        CheckBox { text: ".tga"; checked <=> root.ext_tga; }
+                        CheckBox { text: ".dds"; checked <=> root.ext_dds; }
+                        CheckBox { text: ".bmp"; checked <=> root.ext_bmp; }
                     }
                     VerticalLayout {
                         spacing: 4px;
-                        CheckBox { text: ".exr"; checked: true; }
-                        CheckBox { text: ".hdr"; checked: true; }
-                        CheckBox { text: ".tif"; checked: true; }
-                        CheckBox { text: ".webp"; checked: true; }
+                        CheckBox { text: ".exr"; checked <=> root.ext_exr; }
+                        CheckBox { text: ".hdr"; checked <=> root.ext_hdr; }
+                        CheckBox { text: ".tif"; checked <=> root.ext_tif; }
+                        CheckBox { text: ".webp"; checked <=> root.ext_webp; }
                     }
                 }
                 Rectangle { vertical-stretch: 1; }
@@ -419,7 +429,8 @@ export component AppWindow inherits Window {
             spacing: 4px;
             height: 32px;
             TabButton { text: "Find"; active: root.active_tab == 0; clicked => { root.active_tab = 0; } }
-            TabButton { text: "Log"; active: root.active_tab == 1; clicked => { root.active_tab = 1; } }
+            TabButton { text: "Compare"; active: root.active_tab == 1; clicked => { root.active_tab = 1; } }
+            TabButton { text: "Log"; active: root.active_tab == 2; clicked => { root.active_tab = 2; } }
             Rectangle { horizontal-stretch: 1; }
         }
 
@@ -427,7 +438,7 @@ export component AppWindow inherits Window {
             background: #1e1f22;
             vertical-stretch: 1;
 
-            // FIND TAB PANEL (Main operational window)
+            // ------------------ TAB 0: FIND (Results List/Grid & Sidebar) ------------------
             if root.active_tab == 0 : HorizontalLayout {
                 spacing: 12px;
 
@@ -447,34 +458,40 @@ export component AppWindow inherits Window {
                             PanelSection {
                                 title: "Scan Configuration";
                                 VerticalLayout {
-                                    spacing: 6px;
+                                    spacing: 8px;
                                     HorizontalLayout {
-                                        Text { text: "Folder A:"; width: 60px; vertical-alignment: center; }
-                                        LineEdit { text <=> root.dir_a; placeholder-text: "Source folder path..."; horizontal-stretch: 1; }
-                                        CustomButton { text: "..."; width: 26px; clicked => { root.select_folder_a(); } }
+                                        spacing: 6px;
+                                        Text { text: "Folder A:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        LineEdit { text <=> root.dir_a; placeholder-text: "Source folder path..."; horizontal-stretch: 1; height: 24px; }
+                                        CustomButton { text: "..."; width: 26px; height: 24px; clicked => { root.select_folder_a(); } }
                                     }
                                     if root.qc_mode : HorizontalLayout {
-                                        Text { text: "Folder B:"; width: 60px; vertical-alignment: center; }
-                                        LineEdit { text <=> root.dir_b; placeholder-text: "Comparison folder..."; horizontal-stretch: 1; }
-                                        CustomButton { text: "..."; width: 26px; clicked => { root.select_folder_b(); } }
+                                        spacing: 6px;
+                                        Text { text: "Folder B:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        LineEdit { text <=> root.dir_b; placeholder-text: "Comparison folder..."; horizontal-stretch: 1; height: 24px; }
+                                        CustomButton { text: "..."; width: 26px; height: 24px; clicked => { root.select_folder_b(); } }
                                     }
                                     HorizontalLayout {
-                                        Text { text: "Query AI:"; width: 60px; vertical-alignment: center; }
-                                        LineEdit { text <=> root.query_text; placeholder-text: "Optional text or path..."; }
+                                        spacing: 6px;
+                                        Text { text: "Query AI:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        LineEdit { text <=> root.query_text; placeholder-text: "Optional text or path..."; height: 24px; }
                                     }
                                     HorizontalLayout {
-                                        Text { text: "Similarity:"; width: 60px; vertical-alignment: center; }
-                                        Slider { value <=> root.similarity_threshold; minimum: 50; maximum: 100; } // Bidirectional binding
-                                        Text { text: Math.round(root.similarity_threshold) + "%"; width: 36px; horizontal-alignment: right; vertical-alignment: center; }
+                                        spacing: 6px;
+                                        Text { text: "Similarity:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        Slider { value <=> root.similarity_threshold; minimum: 50; maximum: 100; height: 24px; } // Bidirectional binding
+                                        Text { text: Math.round(root.similarity_threshold) + "%"; width: 36px; horizontal-alignment: right; vertical-alignment: center; font-size: 11px; }
                                     }
                                     HorizontalLayout {
-                                        Text { text: "Batch Sz:"; width: 60px; vertical-alignment: center; }
-                                        SpinBox { value <=> root.batch_size; minimum: 16; maximum: 1024; }
+                                        spacing: 6px;
+                                        Text { text: "Batch Sz:"; width: 60px; vertical-alignment: center; font-size: 11px; }
+                                        SpinBox { value <=> root.batch_size; minimum: 16; maximum: 1024; height: 24px; }
                                     }
                                     HorizontalLayout {
                                         CustomButton {
                                             text: "File Types...";
-                                            width: 95px;
+                                            width: 100px;
+                                            height: 24px;
                                             clicked => {
                                                 root.ext_popup_x = self.absolute-position.x;
                                                 root.ext_popup_y = self.absolute-position.y + self.height;
@@ -487,7 +504,7 @@ export component AppWindow inherits Window {
                                         text: root.is_scanning ? "Processing Assets..." : "Start Scan";
                                         primary-color: #23a55a;
                                         enabled: !root.is_scanning;
-                                        height: 24px;
+                                        height: 28px;
                                         clicked => { root.run_scan(); }
                                     }
                                 }
@@ -497,17 +514,17 @@ export component AppWindow inherits Window {
                                 title: "Quality Control (QC) Options";
                                 VerticalLayout {
                                     spacing: 6px;
-                                    CheckBox { text: "Enable Technical QC Mode"; checked <=> root.qc_mode; }
+                                    CheckBox { text: "Enable Technical QC Mode"; checked <=> root.qc_mode; height: 20px; }
                                     if root.qc_mode : VerticalLayout {
                                         spacing: 4px;
                                         padding-left: 8px;
-                                        CheckBox { text: "Check NPOT (Power of 2)"; checked <=> root.qc_npot; }
-                                        CheckBox { text: "Check Mip-Maps"; checked <=> root.qc_mipmaps; }
-                                        CheckBox { text: "Check BlockAlignment (4px)"; checked <=> root.qc_block_align; }
-                                        CheckBox { text: "Check Bit Depth"; checked <=> root.qc_bit_depth; }
-                                        CheckBox { text: "Check Solid Colors"; checked <=> root.qc_solid_colors; }
-                                        CheckBox { text: "Validate Normal Maps"; checked <=> root.qc_normals; }
-                                        LineEdit { text <=> root.qc_normals_tags; placeholder-text: "Tags: _norm, _ddn"; enabled: root.qc_normals; }
+                                        CheckBox { text: "Check NPOT (Power of 2)"; checked <=> root.qc_npot; height: 20px; }
+                                        CheckBox { text: "Check Mip-Maps"; checked <=> root.qc_mipmaps; height: 20px; }
+                                        CheckBox { text: "Check BlockAlignment (4px)"; checked <=> root.qc_block_align; height: 20px; }
+                                        CheckBox { text: "Check Bit Depth"; checked <=> root.qc_bit_depth; height: 20px; }
+                                        CheckBox { text: "Check Solid Colors"; checked <=> root.qc_solid_colors; height: 20px; }
+                                        CheckBox { text: "Validate Normal Maps"; checked <=> root.qc_normals; height: 20px; }
+                                        LineEdit { text <=> root.qc_normals_tags; placeholder-text: "Tags: _norm, _ddn"; enabled: root.qc_normals; height: 24px; }
                                     }
                                 }
                             }
@@ -517,7 +534,7 @@ export component AppWindow inherits Window {
                                 ComboBox {
                                     model: ["Exact Match (xxHash)", "Simple Duplicates (dHash)", "AI Semantic/Visual Search"];
                                     current-index <=> root.search_method;
-                                    height: 24px; // Force compact height
+                                    height: 24px;
                                 }
                             }
 
@@ -526,11 +543,10 @@ export component AppWindow inherits Window {
                                 ComboBox {
                                     model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
                                     current-index: 0;
-                                    height: 24px; // Force compact height
+                                    height: 24px;
                                 }
                             }
 
-                            // Absorbs all remaining vertical layout space to prevent combo-boxes stretching!
                             Rectangle { vertical-stretch: 1; }
                         }
                     }
@@ -553,6 +569,7 @@ export component AppWindow inherits Window {
                                 spacing: 6px;
                                 CustomButton {
                                     text: root.results_grid_mode ? "List Mode (☰)" : "Grid Mode (⊞)";
+                                    height: 24px;
                                     clicked => { root.results_grid_mode = !root.results_grid_mode; }
                                 }
                             }
@@ -577,6 +594,9 @@ export component AppWindow inherits Window {
                                     row-ta := TouchArea {
                                         clicked => {
                                             root.row_clicked(idx, row.is_header, row.group_index, row.path);
+                                            if (!row.is_header) {
+                                                root.active_tab = 1; // Auto switch to comparison tab on image selection!
+                                            }
                                         }
                                     }
 
@@ -628,13 +648,13 @@ export component AppWindow inherits Window {
                                                 path: row.path;
                                                 show_corners: true;
                                                 corner_clicked(path, chan) => {
-                                                    // Dynamic corner isolation channel trigger
                                                     if chan == "R" { root.active_r = !root.active_r; root.active_g = false; root.active_b = false; root.active_a = false; }
                                                     if chan == "G" { root.active_g = !root.active_g; root.active_r = false; root.active_b = false; root.active_a = false; }
                                                     if chan == "B" { root.active_b = !root.active_b; root.active_r = false; root.active_g = false; root.active_a = false; }
                                                     if chan == "A" { root.active_a = !root.active_a; root.active_r = false; root.active_g = false; root.active_b = false; }
                                                     root.channel_toggled();
                                                     root.row_clicked(idx, false, row.group_index, row.path);
+                                                    root.active_tab = 1; // Auto switch to comparison tab
                                                 }
                                             }
                                             Text {
@@ -704,7 +724,10 @@ export component AppWindow inherits Window {
                                                 border-radius: 6px;
 
                                                 TouchArea {
-                                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
+                                                    clicked => {
+                                                        root.row_clicked(idx, false, row.group_index, row.path);
+                                                        root.active_tab = 1; // Auto switch to comparison tab
+                                                    }
                                                 }
 
                                                 VerticalLayout {
@@ -754,7 +777,10 @@ export component AppWindow inherits Window {
                                                 border-radius: 6px;
 
                                                 TouchArea {
-                                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
+                                                    clicked => {
+                                                        root.row_clicked(idx, false, row.group_index, row.path);
+                                                        root.active_tab = 1; // Auto switch to comparison tab
+                                                    }
                                                 }
 
                                                 VerticalLayout {
@@ -804,7 +830,10 @@ export component AppWindow inherits Window {
                                                 border-radius: 6px;
 
                                                 TouchArea {
-                                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
+                                                    clicked => {
+                                                        root.row_clicked(idx, false, row.group_index, row.path);
+                                                        root.active_tab = 1; // Auto switch to comparison tab
+                                                    }
                                                 }
 
                                                 VerticalLayout {
@@ -862,7 +891,7 @@ export component AppWindow inherits Window {
                         height: 54px;
 
                         VerticalLayout {
-                            padding: 8px; // Padding applied to layout instead of container to avoid warnings
+                            padding: 8px;
                             spacing: 4px;
                             Text { text: "Selection Rules"; font-size: 10px; font-weight: 700; color: #949ba4; }
                             HorizontalLayout {
@@ -885,257 +914,253 @@ export component AppWindow inherits Window {
                         CustomButton { text: "Move to Trash"; primary-color: #f23f43; width: 105px; clicked => { root.trigger_action("trash"); } }
                     }
                 }
+            }
 
-                // 3. Image Compare Viewport canvas section (Right Panel)
-                Rectangle {
-                    width: 450px;
-                    background: #2b2d31;
-                    border-color: #1f2023;
-                    border-width: 1px;
-                    border-radius: 4px;
+            // ------------------ TAB 1: COMPARE (Large Side-by-Side Canvas) ------------------
+            if root.active_tab == 1 : HorizontalLayout {
+                spacing: 12px;
 
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 12px;
+                // Visual rendering canvases viewport frame (Left Large Panel)
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: 12px;
 
-                        Text { text: "Interactive Compare Viewport"; font-size: 13px; font-weight: 700; }
+                    Text { text: "Interactive Compare Viewport"; font-size: 14px; font-weight: 700; }
 
-                        // Canvas control bar
+                    // Canvas control bar
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 28px;
+                        ComboBox {
+                            model: ["Side-by-Side", "Wipe Mode", "Overlay Blend", "Difference Heatmap"];
+                            current-index <=> root.compare_mode;
+                            width: 160px;
+                            height: 24px;
+                        }
                         HorizontalLayout {
                             spacing: 8px;
-                            ComboBox {
-                                model: ["Side-by-Side", "Wipe Mode", "Overlay Blend", "Difference Heatmap"];
-                                current-index <=> root.compare_mode;
-                                width: 150px;
-                                height: 24px; // Force compact height
-                            }
-                            HorizontalLayout {
-                                spacing: 4px;
-                                Text { text: "Wipe Shift:"; vertical-alignment: center; font-size: 11px; }
-                                Slider { value: root.wipe_slider_val; minimum: 0.0; maximum: 1.0; }
-                            }
+                            Text { text: "Wipe Shift:"; vertical-alignment: center; font-size: 11px; }
+                            Slider { value <=> root.wipe_slider_val; minimum: 0.0; maximum: 1.0; height: 24px; }
                         }
+                    }
 
-                        // Visual rendering canvases viewport frame
-                        Rectangle {
-                            height: 260px;
-                            background: #1e1f22;
-                            border-color: #1f2023;
-                            border-width: 1px;
-                            border-radius: 4px;
-                            clip: true;
+                    // Previews Viewport area (Takes max available vertical space)
+                    Rectangle {
+                        background: #111214;
+                        border-color: #1f2023;
+                        border-width: 1px;
+                        border-radius: 4px;
+                        clip: true;
+                        vertical-stretch: 1;
 
-                            // Mode 1: Side-by-Side viewport
-                            if root.compare_mode == 0 : HorizontalLayout {
-                                spacing: 4px;
-                                padding: 4px;
-                                VerticalLayout {
-                                    spacing: 2px;
-                                    Text { text: "ORIGINAL"; font-size: 9px; horizontal-alignment: center; }
-                                    Rectangle {
-                                        background: #111214;
-                                        Image { source: root.image_original; image-fit: contain; }
-                                    }
-                                }
-                                VerticalLayout {
-                                    spacing: 2px;
-                                    Text { text: "DUPLICATE"; font-size: 9px; horizontal-alignment: center; }
-                                    Rectangle {
-                                        background: #111214;
-                                        Image { source: root.image_duplicate; image-fit: contain; }
-                                    }
+                        // Mode 1: Side-by-Side viewport
+                        if root.compare_mode == 0 : HorizontalLayout {
+                            spacing: 4px;
+                            padding: 4px;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "ORIGINAL"; font-size: 9px; horizontal-alignment: center; }
+                                Rectangle {
+                                    background: #111214;
+                                    Image { source: root.image_original; image-fit: contain; }
                                 }
                             }
-
-                            // Mode 2: Wipe slider viewport
-                            if root.compare_mode == 1 : WipeViewport {
-                                original: root.image_original;
-                                duplicate: root.image_duplicate;
-                                wipe-val: root.wipe_slider_val;
-                            }
-
-                            // Mode 3: Transparency overlay blend viewport
-                            if root.compare_mode == 2 : Rectangle {
-                                background: #111214;
-                                Image {
-                                    source: root.image_original;
-                                    image-fit: contain;
-                                    opacity: 1.0 - root.wipe_slider_val;
-                                }
-                                Image {
-                                    source: root.image_duplicate;
-                                    image-fit: contain;
-                                    opacity: root.wipe_slider_val;
-                                }
-                            }
-
-                            // Mode 4: Generated difference heatmap view layer
-                            if root.compare_mode == 3 : Rectangle {
-                                background: #111214;
-                                Image {
-                                    source: root.image_heatmap;
-                                    image-fit: contain;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text { text: "DUPLICATE"; font-size: 9px; horizontal-alignment: center; }
+                                Rectangle {
+                                    background: #111214;
+                                    Image { source: root.image_duplicate; image-fit: contain; }
                                 }
                             }
                         }
 
-                        // RGBA channels isolation selectors triggers
-                        HorizontalLayout {
-                            spacing: 6px;
+                        // Mode 2: Wipe slider viewport
+                        if root.compare_mode == 1 : WipeViewport {
+                            original: root.image_original;
+                            duplicate: root.image_duplicate;
+                            wipe-val: root.wipe_slider_val;
+                        }
+
+                        // Mode 3: Transparency overlay blend viewport
+                        if root.compare_mode == 2 : Rectangle {
+                            background: #111214;
+                            Image {
+                                source: root.image_original;
+                                image-fit: contain;
+                                opacity: 1.0 - root.wipe_slider_val;
+                            }
+                            Image {
+                                source: root.image_duplicate;
+                                image-fit: contain;
+                                opacity: root.wipe_slider_val;
+                            }
+                        }
+
+                        // Mode 4: Generated difference heatmap view layer
+                        if root.compare_mode == 3 : Rectangle {
+                            background: #111214;
+                            Image {
+                                source: root.image_heatmap;
+                                image-fit: contain;
+                            }
+                        }
+                    }
+
+                    // RGBA channels isolation selectors triggers
+                    HorizontalLayout {
+                        spacing: 6px;
+                        height: 28px;
+                        alignment: center;
+                        ChannelButton {
+                            text: "R";
+                            active-color: #f23f43;
+                            active <=> root.active_r;
+                            clicked => {
+                                root.active_r = !root.active_r;
+                                if root.active_r { root.active_g = false; root.active_b = false; root.active_a = false; }
+                                root.channel_toggled();
+                            }
+                        }
+                        ChannelButton {
+                            text: "G";
+                            active-color: #23a55a;
+                            active <=> root.active_g;
+                            clicked => {
+                                root.active_g = !root.active_g;
+                                if root.active_g { root.active_r = false; root.active_b = false; root.active_a = false; }
+                                root.channel_toggled();
+                            }
+                        }
+                        ChannelButton {
+                            text: "B";
+                            active-color: #5865f2;
+                            active <=> root.active_b;
+                            clicked => {
+                                root.active_b = !root.active_b;
+                                if root.active_b { root.active_r = false; root.active_g = false; root.active_a = false; }
+                                root.channel_toggled();
+                            }
+                        }
+                        ChannelButton {
+                            text: "A";
+                            active-color: #ffffff;
+                            text-color: #000000;
+                            active <=> root.active_a;
+                            clicked => {
+                                root.active_a = !root.active_a;
+                                if root.active_a { root.active_r = false; root.active_g = false; root.active_b = false; }
+                                root.channel_toggled();
+                            }
+                        }
+                    }
+                }
+
+                // Specifications tables & Group Details (Right Panel)
+                VerticalLayout {
+                    width: 440px;
+                    spacing: 12px;
+
+                    Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 11px; font-weight: 700; color: #949ba4; }
+
+                    // Duplicate Mini-List Container
+                    Rectangle {
+                        height: 140px;
+                        background: #111214;
+                        border-color: #1f2023;
+                        border-width: 1px;
+                        border-radius: 4px;
+
+                        if root.selected_group_files.length > 0 : ListView {
+                            for row[idx] in root.selected_group_files : Rectangle {
+                                height: 38px;
+                                background: (row.path == root.duplicate_meta.path) ? #2c3e50 : (right-row-ta.has-hover ? #393c41 : #111214);
+                                border-radius: 4px;
+
+                                right-row-ta := TouchArea {
+                                    clicked => {
+                                        root.row_clicked(idx, false, row.group_index, row.path);
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    padding-right: 6px;
+                                    spacing: 8px;
+                                    alignment: space-between;
+
+                                    InteractiveThumbnail {
+                                        source: row.thumbnail;
+                                        path: row.path;
+                                        show_corners: false;
+                                    }
+
+                                    Text {
+                                        text: row.name;
+                                        color: #dcddde;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    Text {
+                                        text: row.is_best ? "[Best]" : row.score_or_detail;
+                                        color: row.is_best ? #f0b132 : #dcddde;
+                                        font-size: 11px;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                        if root.selected_group_files.length == 0 : VerticalLayout {
                             alignment: center;
-                            ChannelButton {
-                                text: "R";
-                                active-color: #f23f43;
-                                active <=> root.active_r;
-                                clicked => {
-                                    root.active_r = !root.active_r;
-                                    if root.active_r {
-                                        root.active_g = false;
-                                        root.active_b = false;
-                                        root.active_a = false;
-                                    }
-                                    root.channel_toggled();
-                                }
-                            }
-                            ChannelButton {
-                                text: "G";
-                                active-color: #23a55a;
-                                active <=> root.active_g;
-                                clicked => {
-                                    root.active_g = !root.active_g;
-                                    if root.active_g {
-                                        root.active_r = false;
-                                        root.active_b = false;
-                                        root.active_a = false;
-                                    }
-                                    root.channel_toggled();
-                                }
-                            }
-                            ChannelButton {
-                                text: "B";
-                                active-color: #5865f2;
-                                active <=> root.active_b;
-                                clicked => {
-                                    root.active_b = !root.active_b;
-                                    if root.active_b {
-                                        root.active_r = false;
-                                        root.active_g = false;
-                                        root.active_a = false;
-                                    }
-                                    root.channel_toggled();
-                                }
-                            }
-                            ChannelButton {
-                                text: "A";
-                                active-color: #ffffff;
-                                text-color: #000000;
-                                active <=> root.active_a;
-                                clicked => {
-                                    root.active_a = !root.active_a;
-                                    if root.active_a {
-                                        root.active_r = false;
-                                        root.active_g = false;
-                                        root.active_b = false;
-                                    }
-                                    root.channel_toggled();
-                                }
-                            }
+                            Text { text: "No duplicates selected."; color: #7c808a; horizontal-alignment: center; font-size: 11px; }
                         }
+                    }
 
-                        // Group Duplicates Mini-List Container below comparative viewport
-                        Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 11px; font-weight: 700; color: #949ba4; }
-                        Rectangle {
-                            height: 100px;
-                            background: #111214;
-                            border-color: #1f2023;
-                            border-width: 1px;
-                            border-radius: 4px;
+                    Text { text: "Comparison Specifications Matrix"; font-size: 11px; font-weight: 700; color: #949ba4; }
 
-                            if root.selected_group_files.length > 0 : ListView {
-                                for row[idx] in root.selected_group_files : Rectangle {
-                                    height: 38px;
-                                    background: (row.path == root.duplicate_meta.path) ? #2c3e50 : (right-row-ta.has-hover ? #393c41 : #111214);
-                                    border-radius: 4px;
+                    // Detailed Layout comparative properties table
+                    Rectangle {
+                        border-color: #1f2023;
+                        border-width: 1px;
+                        background: #111214;
+                        border-radius: 4px;
+                        vertical-stretch: 1;
 
-                                    right-row-ta := TouchArea {
-                                        clicked => {
-                                            root.row_clicked(idx, false, row.group_index, row.path);
-                                        }
-                                    }
-
-                                    HorizontalLayout {
-                                        padding-left: 6px;
-                                        padding-right: 6px;
-                                        spacing: 8px;
-                                        alignment: space-between;
-
-                                        InteractiveThumbnail {
-                                            source: row.thumbnail;
-                                            path: row.path;
-                                            show_corners: false;
-                                        }
-
-                                        Text {
-                                            text: row.name;
-                                            color: #dcddde;
-                                            font-size: 11px;
-                                            vertical-alignment: center;
-                                            overflow: elide;
-                                            horizontal-stretch: 1;
-                                        }
-
-                                        Text {
-                                            text: row.is_best ? "[Best]" : row.score_or_detail;
-                                            color: row.is_best ? #f0b132 : #dcddde;
-                                            font-size: 11px;
-                                            vertical-alignment: center;
-                                        }
-                                    }
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 8px;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    Text { text: "Specification"; width: 110px; font-weight: 700; color: #949ba4; font-size: 11px; }
+                                    Text { text: "Original [Best]"; font-weight: 700; color: #f0b132; font-size: 11px; }
+                                    Text { text: "Duplicate"; font-weight: 700; color: #dcddde; font-size: 11px; }
                                 }
-                            }
-                        }
+                                Rectangle { height: 1px; background: #1f2023; }
 
-                        // Detailed layout specifications matrix comparative table
-                        Rectangle {
-                            border-color: #1f2023;
-                            border-width: 1px;
-                            background: #111214;
-                            border-radius: 4px;
-                            vertical-stretch: 1;
+                                SpecsRow { name: "File Name"; val1: root.original_meta.name; val2: root.duplicate_meta.name; }
+                                SpecsRow { name: "File Size"; val1: root.original_meta.size_str; val2: root.duplicate_meta.size_str; }
+                                SpecsRow { name: "Format / Codec"; val1: root.original_meta.format; val2: root.duplicate_meta.format; }
+                                SpecsRow { name: "Resolution"; val1: root.original_meta.resolution; val2: root.duplicate_meta.resolution; }
+                                SpecsRow { name: "Bit Depth"; val1: root.original_meta.bit_depth; val2: root.duplicate_meta.bit_depth; }
+                                SpecsRow { name: "Color Space"; val1: root.original_meta.color_space; val2: root.duplicate_meta.color_space; }
+                                SpecsRow { name: "Mipmaps"; val1: root.original_meta.mipmaps; val2: root.duplicate_meta.mipmaps; }
+                                SpecsRow { name: "Alpha Channel"; val1: root.original_meta.alpha; val2: root.duplicate_meta.alpha; }
+                                SpecsRow { name: "Similarity"; val1: "100.0%"; val2: root.duplicate_meta.similarity; }
 
-                            ScrollView {
-                                VerticalLayout {
-                                    padding: 8px; // Padding applied directly to layout inside ScrollView
-                                    spacing: 4px;
-                                    HorizontalLayout {
-                                        Text { text: "Specification"; width: 110px; font-weight: 700; color: #949ba4; font-size: 11px; }
-                                        Text { text: "Original [Best]"; font-weight: 700; color: #f0b132; font-size: 11px; }
-                                        Text { text: "Duplicate"; font-weight: 700; color: #dcddde; font-size: 11px; }
-                                    }
-                                    Rectangle { height: 1px; background: #1f2023; }
+                                Rectangle { height: 1px; background: #1f2023; }
 
-                                    SpecsRow { name: "File Name"; val1: root.original_meta.name; val2: root.duplicate_meta.name; }
-                                    SpecsRow { name: "File Size"; val1: root.original_meta.size_str; val2: root.duplicate_meta.size_str; }
-                                    SpecsRow { name: "Format / Codec"; val1: root.original_meta.format; val2: root.duplicate_meta.format; }
-                                    SpecsRow { name: "Resolution"; val1: root.original_meta.resolution; val2: root.duplicate_meta.resolution; }
-                                    SpecsRow { name: "Bit Depth"; val1: root.original_meta.bit_depth; val2: root.duplicate_meta.bit_depth; }
-                                    SpecsRow { name: "Color Space"; val1: root.original_meta.color_space; val2: root.duplicate_meta.color_space; }
-                                    SpecsRow { name: "Mipmaps"; val1: root.original_meta.mipmaps; val2: root.duplicate_meta.mipmaps; }
-                                    SpecsRow { name: "Alpha Channel"; val1: root.original_meta.alpha; val2: root.duplicate_meta.alpha; }
-                                    SpecsRow { name: "Similarity"; val1: "100.0%"; val2: root.duplicate_meta.similarity; }
-
-                                    Rectangle { height: 1px; background: #1f2023; }
-
-                                    SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
-                                }
+                                SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
                             }
                         }
                     }
                 }
             }
 
-            // LOG TAB PANEL (Console compiler output viewer)
-            if root.active_tab == 1 : VerticalLayout {
+            // ------------------ TAB 2: LOG (Console Output) ------------------
+            if root.active_tab == 2 : VerticalLayout {
                 padding: 15px;
                 spacing: 10px;
 

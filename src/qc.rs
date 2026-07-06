@@ -17,6 +17,20 @@ pub struct QcImageMetadata {
     pub mipmap_count: u32,
 }
 
+#[inline]
+fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
+    bytes
+        .get(offset..offset + 4)?
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
+}
+
+#[inline]
+fn is_power_of_two(n: u32) -> bool {
+    n != 0 && (n & (n - 1)) == 0
+}
+
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
     let ext = path
         .extension()
@@ -39,18 +53,16 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
     let mut mipmap_count = 1;
 
     if ext == "dds" {
-        // Read file bytes
+        // Read file bytes safely without panics
         let bytes = fs::read(path).map_err(|e| e.to_string())?;
         if bytes.len() >= 128 {
-            // Read width, height
-            let height = u32::from_le_bytes(bytes[12..16].try_into().unwrap());
-            let width = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
-            w = width;
-            h = height;
+            h = read_u32_le(&bytes, 12).unwrap_or(h);
+            w = read_u32_le(&bytes, 16).unwrap_or(w);
 
             // Mipmap count is at bytes 28..32
-            let dw_flags = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-            let mips = u32::from_le_bytes(bytes[28..32].try_into().unwrap());
+            let dw_flags = read_u32_le(&bytes, 8).unwrap_or(0);
+            let mips = read_u32_le(&bytes, 28).unwrap_or(0);
+
             // Check DDSD_MIPMAPCOUNT flag: 0x20000
             if (dw_flags & 0x20000) != 0 && mips > 0 {
                 mipmap_count = mips;
@@ -59,25 +71,28 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
             }
 
             // Pixel format flags (bytes 80..84)
-            let pf_flags = u32::from_le_bytes(bytes[80..84].try_into().unwrap());
+            let pf_flags = read_u32_le(&bytes, 80).unwrap_or(0);
+
             // Check DDPF_ALPHAPIXELS: 0x1, DDPF_ALPHA: 0x2
             if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
                 has_alpha = true;
             }
 
-            let pf_fourcc = u32::from_le_bytes(bytes[84..88].try_into().unwrap());
+            let pf_fourcc = read_u32_le(&bytes, 84).unwrap_or(0);
             if pf_fourcc != 0 {
-                let fourcc_str = String::from_utf8_lossy(&bytes[84..88]).to_string();
-                compression_format = fourcc_str.trim().to_string();
-                if compression_format == "DXT3" || compression_format == "DXT5" {
-                    has_alpha = true;
+                if let Some(fourcc_bytes) = bytes.get(84..88) {
+                    let fourcc_str = String::from_utf8_lossy(fourcc_bytes).to_string();
+                    compression_format = fourcc_str.trim().to_string();
+                    if compression_format == "DXT3" || compression_format == "DXT5" {
+                        has_alpha = true;
+                    }
                 }
 
                 if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
-                    let dxgi_format = u32::from_le_bytes(bytes[128..132].try_into().unwrap());
+                    let dxgi_format = read_u32_le(&bytes, 128).unwrap_or(0);
                     compression_format = format!("DX10 (DXGI {})", dxgi_format);
-                    // Standard DXGI formats with alpha
-                    // e.g., BC1 usually no, BC2/BC3/BC7 yes
+
+                    // Standard DXGI formats with alpha (e.g., BC1 usually no, BC2/BC3/BC7 yes)
                     if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
                         has_alpha = true;
                     }
@@ -89,8 +104,9 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
                 }
             } else {
                 compression_format = "Uncompressed".to_string();
+
                 // Check if RGB or RGBA uncompressed
-                let rgb_bit_count = u32::from_le_bytes(bytes[88..92].try_into().unwrap());
+                let rgb_bit_count = read_u32_le(&bytes, 88).unwrap_or(0);
                 bit_depth = rgb_bit_count / 4;
                 if bit_depth == 0 {
                     bit_depth = 8;
@@ -111,6 +127,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
                     if channel_name == "A" || channel_name == "alpha" {
                         has_alpha = true;
                     }
+
                     // check sample type
                     let sample_type_str = format!("{:?}", channel.sample_type);
                     if sample_type_str.contains("F32") || sample_type_str.contains("U32") {
@@ -132,7 +149,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
         color_space = "Linear".to_string();
         compression_format = "Radiance HDR".to_string();
     } else {
-        // Standard formats PNG, JPEG, TGA
+        // Standard formats PNG, JPEG, TGA, WEBP, etc.
         if let Ok(img) = image::open(path) {
             let color = img.color();
             let has_alpha_val = matches!(
@@ -159,7 +176,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
             };
         }
 
-        // Linear normal maps rule
+        // Linear normal maps naming conventions rules
         let path_lower = path.to_string_lossy().to_lowercase();
         if path_lower.contains("normal")
             || path_lower.contains("_n.")
@@ -180,11 +197,6 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, String> {
         bit_depth,
         mipmap_count,
     })
-}
-
-#[inline]
-fn is_power_of_two(n: u32) -> bool {
-    n != 0 && (n & (n - 1)) == 0
 }
 
 pub fn check_normal_map_integrity(
