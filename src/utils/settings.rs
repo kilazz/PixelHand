@@ -26,6 +26,7 @@ pub fn save_settings(ui: &AppWindow) {
         similarity_threshold: ui.get_similarity_threshold(),
         batch_size: ui.get_batch_size(),
         search_method: ui.get_search_method(),
+        execution_provider: ui.get_execution_provider(),
         qc_mode: ui.get_qc_mode(),
         qc_npot: ui.get_qc_npot(),
         qc_mipmaps: ui.get_qc_mipmaps(),

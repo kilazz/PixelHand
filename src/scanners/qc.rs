@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 
 use crate::core::qc::{
     check_absolute, check_normal_map_integrity, check_relative, check_solid_texture,
@@ -11,10 +12,8 @@ use crate::core::qc::{
 use crate::state::QcIssueSummary;
 use crate::utils::helpers::discover_files;
 
-// Re-export the core diff-map calculator for the GUI controller
 pub use crate::core::qc::calculate_diff_map;
 
-/// Orchestrates absolute technical image audits over the local file directory.
 pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
     let path = PathBuf::from(params.dir_a);
     if !path.is_dir() {
@@ -26,9 +25,15 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
         crate::app::append_to_console_log(&warn);
     }
 
+    let cancel_token = params.cancel_token.clone();
+
     let issues: Vec<QcIssueSummary> = paths
         .par_iter()
         .flat_map(|p| {
+            if cancel_token.load(Ordering::Relaxed) {
+                return Vec::new();
+            }
+
             let mut file_issues = Vec::new();
             let (w, h) = match imagesize::size(p) {
                 Ok(dim) => (dim.width, dim.height),
@@ -53,12 +58,11 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     mipmap_count: 1,
                 });
 
-            // Standard dimension bounds validations
             let abs_issues = check_absolute(
                 &qc_meta,
                 params.qc_npot,
-                params.qc_block_align,
                 params.qc_mipmaps,
+                params.qc_block_align,
                 params.qc_bit_depth,
             );
             for issue in abs_issues {
@@ -69,7 +73,6 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 });
             }
 
-            // Solid texture audits
             if params.qc_solid_colors
                 && let Some((issue, details)) = check_solid_texture(p)
             {
@@ -80,7 +83,6 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 });
             }
 
-            // Normal map integrity validations
             if params.qc_normals {
                 let path_str = p.to_string_lossy().to_lowercase();
                 let should_check = if params.qc_normals_tags.is_empty() {
@@ -105,10 +107,14 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
             file_issues
         })
         .collect();
+
+    if params.cancel_token.load(Ordering::Relaxed) {
+        return Err(anyhow!("Scan cancelled by user."));
+    }
+
     Ok(issues)
 }
 
-/// Compares asset modifications between Folder B and Folder A to discover relative regressions.
 pub async fn run_folder_compare(
     directory_a: String,
     directory_b: String,
@@ -191,7 +197,6 @@ pub async fn run_folder_compare(
                     mipmap_count: 1,
                 });
 
-            // Perform comparative check rules between folder B and A versions
             let rel_issues = check_relative(&meta_a, &meta_b, true, true, true, true);
             for issue in rel_issues {
                 issues.push(QcIssueSummary {

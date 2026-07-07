@@ -14,7 +14,7 @@ struct DecodedCacheItem {
 static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
 
 /// Extracts a chosen pixel channel in grayscale to display in the comparative viewport.
-/// Uses a custom MRU (Most Recently Used) caching strategy.
+/// Uses a custom MRU (Most Recently Used) caching strategy at 100% original resolution.
 pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::RgbaImage> {
     let p = PathBuf::from(path);
     if !p.is_file() {
@@ -38,14 +38,11 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     }
 
     if !cache.contains_key(path) {
-        let mut img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p).ok()?;
-        if img.width() > 512 || img.height() > 512 {
-            // Use `resize` instead of `resize_exact` to preserve the aspect ratio
-            img = img.resize(512, 512, image::imageops::FilterType::Triangle);
-        }
+        // Load image at 100% full original resolution (no downscaling!)
+        let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p).ok()?;
 
-        // Evict least-recently accessed cache items if size limit reached
-        if cache.len() >= 16 {
+        // Reduce cache limit to 4 items to strictly bound RAM usage when using full-res 4K/8K images
+        if cache.len() >= 4 {
             let mut oldest_key = None;
             let mut oldest_time = std::time::Instant::now();
             for (k, item) in cache.iter() {

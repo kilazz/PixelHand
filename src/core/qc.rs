@@ -288,16 +288,10 @@ pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String
     None
 }
 
+/// Helper to run visual difference mapping at 100% original resolution and save output to disk
 pub async fn calculate_diff_map(file1: &str, file2: &str) -> Result<String> {
-    let mut img1 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file1)?;
-    let mut img2 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file2)?;
-
-    if img1.width() > 1024 || img1.height() > 1024 {
-        img1 = img1.thumbnail(1024, 1024);
-    }
-    if img2.width() > 1024 || img2.height() > 1024 {
-        img2 = img2.thumbnail(1024, 1024);
-    }
+    let img1 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file1)?;
+    let img2 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file2)?;
 
     let diff =
         super::tonemapper::calculate_difference_map(&img1.to_rgba8(), &img2.to_rgba8(), true)?;

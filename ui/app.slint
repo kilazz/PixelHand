@@ -449,6 +449,7 @@ export component AppWindow inherits Window {
 
     // Search options
     in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: dHash, 2: AI Embeddings
+    in-out property <int> execution_provider: 0;
 
     // UI layouts states
     in-out property <bool> results_grid_mode: false;
@@ -466,6 +467,8 @@ export component AppWindow inherits Window {
     callback select_folder_a();
     callback select_folder_b();
     callback run_scan();
+    callback cancel_scan();
+    callback open_file_in_viewer(string);
     callback trigger_action(string); // "hardlink", "reflink", "trash"
     callback row_clicked(int, bool, int, string); // idx, is_header, group_idx, path
     callback row_checkbox_toggled(int); // idx
@@ -737,11 +740,16 @@ export component AppWindow inherits Window {
                                     }
 
                                     CustomButton {
-                                        text: root.is_scanning ? "Processing Assets..." : "Start Scan";
-                                        primary-color: #23a55a;
-                                        enabled: !root.is_scanning;
+                                        text: root.is_scanning ? "Stop / Cancel Scan" : "Start Scan";
+                                        primary-color: root.is_scanning ? #f23f43 : #23a55a;
                                         height: 28px;
-                                        clicked => { root.run_scan(); }
+                                        clicked => {
+                                            if root.is_scanning {
+                                                root.cancel_scan();
+                                            } else {
+                                                root.run_scan();
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -822,7 +830,7 @@ export component AppWindow inherits Window {
                                 title: "Execution Provider";
                                 ComboBox {
                                     model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
-                                    current-index: 0;
+                                    current-index <=> root.execution_provider;
                                     height: 24px;
                                 }
                             }
@@ -1328,7 +1336,7 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
                                 spacing: 4px;
                                 Text {
-                                    text: "ORIGINAL";
+                                    text: "ORIGINAL (Double-click to open)";
                                     font-size: 11px;
                                     font-weight: 700;
                                     horizontal-alignment: center;
@@ -1358,6 +1366,12 @@ export component AppWindow inherits Window {
                                         width: 100%;
                                         height: 100%;
                                     }
+
+                                    TouchArea {
+                                        double-clicked => {
+                                            root.open_file_in_viewer(root.original_meta.path);
+                                        }
+                                    }
                                 }
                             }
 
@@ -1365,7 +1379,7 @@ export component AppWindow inherits Window {
                                 horizontal-stretch: 1;
                                 spacing: 4px;
                                 Text {
-                                    text: "DUPLICATE";
+                                    text: "DUPLICATE (Double-click to open)";
                                     font-size: 11px;
                                     font-weight: 700;
                                     horizontal-alignment: center;
@@ -1393,6 +1407,12 @@ export component AppWindow inherits Window {
                                         image-fit: contain;
                                         width: 100%;
                                         height: 100%;
+                                    }
+
+                                    TouchArea {
+                                        double-clicked => {
+                                            root.open_file_in_viewer(root.duplicate_meta.path);
+                                        }
                                     }
                                 }
                             }
@@ -1428,7 +1448,7 @@ export component AppWindow inherits Window {
                         }
 
                         // Mode 3: Transparency overlay blend viewport (Full stretch adaptive bounds)
-                            if root.compare_mode == 2: VerticalLayout {
+                        if root.compare_mode == 2: VerticalLayout {
                             spacing: 4px;
                             Text {
                                 text: "OVERLAY BLEND";

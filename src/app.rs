@@ -2,9 +2,10 @@
 use anyhow::{Context, Result};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-// Import state store settings (SelectedFile is locally brought into scope by include_modules)
+// Import state store settings
 use crate::scanners;
 use crate::state::{AppSettings, AppState};
 use crate::utils;
@@ -15,6 +16,26 @@ slint::include_modules!();
 // Global handle to push logs directly to the UI console from any thread
 pub static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 
+/// Custom writer that captures all tracing events, sending them to Slint Log Tab.
+struct UiLogWriter;
+impl std::io::Write for UiLogWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if let Ok(s) = std::str::from_utf8(buf) {
+            append_to_console_log(s.trim_end());
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for UiLogWriter {
+    type Writer = UiLogWriter;
+    fn make_writer(&self) -> Self::Writer {
+        UiLogWriter
+    }
+}
+
 /// Appends a message to the Slint UI log console safely from any thread.
 pub fn append_to_console_log(msg: &str) {
     if let Some(app_weak) = APP_HANDLE.get() {
@@ -24,35 +45,36 @@ pub fn append_to_console_log(msg: &str) {
             ui.set_console_log(format!("{}\n{}", current_log, msg_clone).into());
         });
     } else {
-        println!("[WARNING] {}", msg);
+        println!("[CONSOLE] {}", msg);
     }
 }
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    // Thread-safe state holder for the list updates
-    let state = Arc::new(Mutex::new(AppState::default()));
+    // Init tracing to pipe ALL app/library warnings directly to our Log tab
+    tracing_subscriber::fmt()
+        .with_writer(UiLogWriter)
+        .with_env_filter("info,ort=warn") // Show info from us, warnings from ONNX Runtime
+        .init();
 
-    // Instantiate Slint AppWindow
+    let state = Arc::new(Mutex::new(AppState::default()));
+    let cancel_token = Arc::new(AtomicBool::new(false)); // Scan cancellation flag
+
     let app = AppWindow::new().context("Failed to initialize Slint UI Window")?;
     let _ = APP_HANDLE.set(app.as_weak());
 
-    // Load persistent settings
     let loaded_settings = utils::settings::load_settings().unwrap_or_default();
     apply_settings_to_ui(&app, &loaded_settings);
 
-    // Generate checkerboard texture for transparent backgrounds
     let checkerboard = utils::ui::generate_checkerboard();
     app.set_checkerboard_pattern(checkerboard);
 
-    // Auto-download AI models on startup
     trigger_startup_model_download(app.as_weak());
 
     // ---------------------------------------------------------
     // BIND CALLBACKS
     // ---------------------------------------------------------
 
-    // 1. Browse Folder A
     let app_weak = app.as_weak();
     app.on_select_folder_a(move || {
         if let Some(folder) = rfd::FileDialog::new()
@@ -67,7 +89,6 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // 2. Browse Folder B
     let app_weak = app.as_weak();
     app.on_select_folder_b(move || {
         if let Some(folder) = rfd::FileDialog::new()
@@ -82,23 +103,24 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // 3. Scan Runner Callback
     let app_weak = app.as_weak();
     let state_clone = state.clone();
+    let cancel_token_clone = cancel_token.clone();
     app.on_run_scan(move || {
         let app_copy = app_weak.clone();
         let state_copy = state_clone.clone();
         let ui = app_copy.unwrap();
 
-        utils::settings::save_settings(&ui); // Save current settings locally
+        utils::settings::save_settings(&ui);
 
-        // Extract parameters from UI
-        let params = scanners::ScanParams::from_ui(&ui);
+        // Reset cancellation
+        cancel_token_clone.store(false, Ordering::Relaxed);
+        let params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
 
         ui.set_is_scanning(true);
-        ui.set_status_text("Initializing graphical scan...".into());
+        ui.set_status_text("Scanning assets...".into());
+        tracing::info!("Starting scan on directory: {}", params.dir_a);
 
-        // Spawn background task to prevent freezing the UI
         tokio::spawn(async move {
             let scan_result = scanners::execute_scan(params).await;
 
@@ -113,16 +135,35 @@ pub fn run_gui() -> Result<()> {
 
                         utils::ui::update_results_ui(&ui, &state_lock);
                         ui.set_status_text("Scan finished successfully!".into());
+                        tracing::info!("Scan completed.");
                     }
                     Err(e) => {
-                        ui.set_status_text(format!("Scan failed: {}", e).into());
+                        ui.set_status_text(format!("Scan stopped: {}", e).into());
+                        tracing::warn!("Scan interrupted: {}", e);
                     }
                 }
             });
         });
     });
 
-    // 4. File Table Checkbox Toggled Callback
+    // Cancel Button callback implementation
+    let cancel_token_cancel = cancel_token.clone();
+    app.on_cancel_scan(move || {
+        cancel_token_cancel.store(true, Ordering::Relaxed);
+        tracing::warn!("User requested scan cancellation. Waiting for threads to stop...");
+    });
+
+    // Open Original Image File callback implementation
+    app.on_open_file_in_viewer(move |path| {
+        let path_str = path.to_string();
+        if !path_str.is_empty() {
+            tracing::info!("Opening file in default viewer: {}", path_str);
+            if let Err(e) = open::that(&path_str) {
+                tracing::error!("Failed to open file: {}", e);
+            }
+        }
+    });
+
     let app_weak = app.as_weak();
     let state_clone = state.clone();
     app.on_row_checkbox_toggled(move |idx| {
@@ -137,14 +178,12 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // 5. File Table Row Click Selection Callback (Expand/Collapse & Viewports)
     let app_weak = app.as_weak();
     let state_clone = state.clone();
     app.on_row_clicked(move |_idx, is_header, group_idx, path| {
         let app_copy = app_weak.clone();
 
         if is_header {
-            // Interactive collapse/expand toggle on header row click
             let mut lock = state_clone.lock().unwrap();
             if lock.collapsed_groups.contains(&group_idx) {
                 lock.collapsed_groups.remove(&group_idx);
@@ -174,12 +213,9 @@ pub fn run_gui() -> Result<()> {
         };
 
         let ui = app_copy.unwrap();
-
-        // Update Specifications Matrix
         ui.set_original_meta(utils::ui::build_selected_file_meta(original, true));
         ui.set_duplicate_meta(utils::ui::build_selected_file_meta(duplicate, false));
 
-        // Map duplicates list to Slint right-hand compare miniature ListView
         let mut group_files = Vec::new();
         for row in &lock.results {
             if !row.is_header && row.group_index == group_idx {
@@ -187,8 +223,6 @@ pub fn run_gui() -> Result<()> {
             }
         }
         ui.set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(group_files))));
-
-        // Load images into viewports
         trigger_viewport_update(
             app_weak.clone(),
             original.path.clone(),
@@ -196,7 +230,6 @@ pub fn run_gui() -> Result<()> {
         );
     });
 
-    // 6. Hardlink / Reflink / Trash Actions Handler
     let app_weak = app.as_weak();
     let state_copy = state.clone();
     app.on_trigger_action(move |action_type| {
@@ -232,12 +265,14 @@ pub fn run_gui() -> Result<()> {
                     lock.groups.clear();
                     lock.collapsed_groups.clear();
                 }
-                Err(e) => ui.set_status_text(format!("Action failed: {}", e).into()),
+                Err(e) => {
+                    ui.set_status_text(format!("Action failed: {}", e).into());
+                    tracing::error!("Action failed: {}", e);
+                }
             });
         });
     });
 
-    // 7. Selection Rules Trigger Callback
     let app_weak = app.as_weak();
     let state_clone = state.clone();
     app.on_trigger_selection_rule(move |rule| {
@@ -248,12 +283,10 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // 8. Channel Toggled Callback
     let app_weak = app.as_weak();
     app.on_channel_toggled(move || {
         let app_copy = app_weak.clone();
         let ui = app_copy.unwrap();
-
         let orig_path = ui.get_original_meta().path.to_string();
         let dup_path = ui.get_duplicate_meta().path.to_string();
 
@@ -262,7 +295,6 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // 9. OS System-level Drag & Drop handler (Native winit)
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
         if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
@@ -270,25 +302,18 @@ pub fn run_gui() -> Result<()> {
             let app_copy = app_weak_dnd.clone();
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_query_text(path_str.clone().into());
-                ui.set_search_method(2); // Auto switch to AI Visual Search
+                ui.set_search_method(2);
                 ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
             });
         }
         slint::winit_030::EventResult::Propagate
     });
 
-    // Launch main UI event loop
     app.run()
         .context("Slint event loop terminated with an error")?;
-
     Ok(())
 }
 
-// ---------------------------------------------------------
-// PRIVATE HELPER FUNCTIONS
-// ---------------------------------------------------------
-
-/// Syncs the loaded `AppSettings` struct to the Slint UI Window properties
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_dir_a(settings.dir_a.clone().into());
     app.set_dir_b(settings.dir_b.clone().into());
@@ -296,6 +321,7 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_similarity_threshold(settings.similarity_threshold);
     app.set_batch_size(settings.batch_size);
     app.set_search_method(settings.search_method);
+    app.set_execution_provider(settings.execution_provider);
     app.set_qc_mode(settings.qc_mode);
     app.set_qc_npot(settings.qc_npot);
     app.set_qc_mipmaps(settings.qc_mipmaps);
@@ -315,7 +341,6 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_duplicates_panel_height(settings.duplicates_panel_height);
 }
 
-/// Dispatches a background task to download required HuggingFace ONNX models
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     tokio::spawn(async move {
         match crate::core::downloader::verify_and_download_models(app_weak.clone()).await {
@@ -328,13 +353,13 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
             Err(e) => {
                 let _ = app_weak.upgrade_in_event_loop(move |ui| {
                     ui.set_status_text(format!("Model verification failed: {}", e).into());
+                    tracing::error!("Model download failed: {}", e);
                 });
             }
         }
     });
 }
 
-/// Spawns a background task to load images, apply channel filters, and calculate diff maps
 fn trigger_viewport_update(app_weak: slint::Weak<AppWindow>, orig_path: String, dup_path: String) {
     let ui = app_weak.unwrap();
     let channel = utils::ui::get_current_active_channel(&ui).to_string();
@@ -342,22 +367,18 @@ fn trigger_viewport_update(app_weak: slint::Weak<AppWindow>, orig_path: String, 
     let app_weak_clone = app_weak.clone();
 
     tokio::spawn(async move {
-        // Load original
         if let Some(raw_orig) = utils::cache::get_channel_preview_image(&orig_path, &channel).await
         {
             let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
                 ui.set_image_original(utils::ui::convert_to_slint_image(&raw_orig));
             });
         }
-
-        // Load duplicate
         if let Some(raw_dup) = utils::cache::get_channel_preview_image(&dup_path, &channel).await {
             let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
                 ui.set_image_duplicate(utils::ui::convert_to_slint_image(&raw_dup));
             });
         }
 
-        // Calculate and load Heatmap Diff if needed
         if compare_mode == 3
             && let Ok(diff_path) =
                 crate::scanners::qc::calculate_diff_map(&orig_path, &dup_path).await

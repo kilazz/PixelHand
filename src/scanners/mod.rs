@@ -4,9 +4,12 @@ pub mod exact;
 pub mod perceptual;
 pub mod qc;
 
-use crate::state::{DuplicateGroupSummary, ResultsRowData};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
 /// All configuration parameters compiled from the UI panel
 pub struct ScanParams {
@@ -16,6 +19,7 @@ pub struct ScanParams {
     pub similarity: f32,
     pub batch_size: usize,
     pub search_method: i32, // 0: Exact, 1: Perceptual, 2: AI
+    pub execution_provider: String,
     pub qc_mode: bool,
     pub qc_npot: bool,
     pub qc_mipmaps: bool,
@@ -26,11 +30,12 @@ pub struct ScanParams {
     pub qc_normals_tags: String,
     pub extensions: Vec<String>,
     pub perceptual_channel: String,
+    pub cancel_token: Arc<AtomicBool>,
 }
 
 impl ScanParams {
     /// Compiles current state of Slint checkboxes and input fields into ScanParams
-    pub fn from_ui(ui: &crate::app::AppWindow) -> Self {
+    pub fn from_ui(ui: &crate::app::AppWindow, cancel_token: Arc<AtomicBool>) -> Self {
         let mut extensions = Vec::new();
         if ui.get_ext_png() {
             extensions.push(".png".to_string());
@@ -73,6 +78,15 @@ impl ScanParams {
             "Composite".to_string()
         };
 
+        // Decipher selected Execution Provider index
+        let execution_provider = match ui.get_execution_provider() {
+            1 => "DirectML".to_string(),
+            2 => "CUDA".to_string(),
+            3 => "TensorRT".to_string(),
+            4 => "CoreML".to_string(),
+            _ => "CPU".to_string(),
+        };
+
         Self {
             dir_a: ui.get_dir_a().to_string(),
             dir_b: ui.get_dir_b().to_string(),
@@ -80,6 +94,7 @@ impl ScanParams {
             similarity: ui.get_similarity_threshold(),
             batch_size: ui.get_batch_size() as usize,
             search_method: ui.get_search_method(),
+            execution_provider,
             qc_mode: ui.get_qc_mode(),
             qc_npot: ui.get_qc_npot(),
             qc_mipmaps: ui.get_qc_mipmaps(),
@@ -90,6 +105,7 @@ impl ScanParams {
             qc_normals_tags: ui.get_qc_normals_tags().to_string(),
             extensions,
             perceptual_channel,
+            cancel_token,
         }
     }
 }
@@ -129,7 +145,7 @@ pub async fn execute_scan(
         Ok((groups, rows))
     } else {
         // Exact Byte-match (xxHash64)
-        let groups = exact::run_exact_scan(params.dir_a, params.extensions).await?;
+        let groups = exact::run_exact_scan(params).await?;
         let rows = map_groups_to_rows(&groups);
         Ok((groups, rows))
     }

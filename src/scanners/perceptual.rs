@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 
 use crate::core::perceptual::{
     AnalysisType, calculate_hamming_distance, calculate_perceptual_hashes,
@@ -23,7 +24,6 @@ pub async fn run_perceptual_scan_internal(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Map string param to internal engine's AnalysisType enum
     let ana_type = match params.perceptual_channel.as_str() {
         "R" => AnalysisType::R,
         "G" => AnalysisType::G,
@@ -33,9 +33,15 @@ pub async fn run_perceptual_scan_internal(
         _ => AnalysisType::Composite,
     };
 
+    let cancel_token = params.cancel_token.clone();
+
     let hashes: Vec<(PathBuf, String)> = paths
         .par_iter()
         .filter_map(|p| {
+            if cancel_token.load(Ordering::Relaxed) {
+                return None;
+            }
+
             let res = calculate_perceptual_hashes(p, ana_type, true)?;
             Some((p.clone(), res.dhash))
         })
@@ -48,6 +54,10 @@ pub async fn run_perceptual_scan_internal(
     let max_dist = (((100.0 - params.similarity) / 100.0) * 64.0).round() as u32;
 
     for i in 0..hashes.len() {
+        if params.cancel_token.load(Ordering::Relaxed) {
+            return Err(anyhow!("Scan cancelled by user."));
+        }
+
         if visited[i] {
             continue;
         }

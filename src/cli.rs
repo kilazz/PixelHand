@@ -74,7 +74,28 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         ".tiff".to_string(),
     ];
 
-    match exact::run_exact_scan(dir, default_exts).await {
+    let params = ScanParams {
+        dir_a: dir,
+        dir_b: String::new(),
+        query_text: String::new(),
+        similarity: 100.0,
+        batch_size: 128,
+        search_method: 0,
+        qc_mode: false,
+        qc_npot: false,
+        qc_mipmaps: false,
+        qc_block_align: false,
+        qc_bit_depth: false,
+        qc_solid_colors: false,
+        qc_normals: false,
+        qc_normals_tags: String::new(),
+        extensions: default_exts,
+        perceptual_channel: "Composite".to_string(),
+        execution_provider: "CPU".to_string(),
+        cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+
+    match exact::run_exact_scan(params).await {
         Ok(results) => {
             println!(
                 "[SUCCESS] Exact Scan Completed! Found {} duplicate groups:",
@@ -140,6 +161,8 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         qc_normals_tags: String::new(),
         extensions: default_exts,
         perceptual_channel: "Composite".to_string(),
+        execution_provider: "CPU".to_string(),
+        cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     match qc::run_qc_scan_internal(params).await {

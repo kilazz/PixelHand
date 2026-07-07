@@ -3,6 +3,7 @@ use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::database::{DatabaseService, DbRecord};
@@ -31,20 +32,28 @@ pub async fn run_ai_duplicate_scan(
 
     let mut db = DatabaseService::new();
     db.initialize(&db_dir, "images", 512).await?;
-    let engine = InferenceEngine::new(&model_dir, 512, 4, "CPU")?;
+
+    let engine = InferenceEngine::new(&model_dir, 512, 4, &params.execution_provider)?;
 
     let mut records = Vec::new();
     let chunks: Vec<&[PathBuf]> = paths.chunks(params.batch_size).collect();
 
+    let cancel_token = params.cancel_token.clone();
+
     for chunk in chunks {
-        // Parallel load & immediate scale-down to protect RAM allocations
+        if cancel_token.load(Ordering::Relaxed) {
+            return Err(anyhow!("Scan cancelled by user."));
+        }
+
         let loaded_images: Vec<(PathBuf, image::DynamicImage)> = chunk
             .par_iter()
             .filter_map(|p| {
+                if cancel_token.load(Ordering::Relaxed) {
+                    return None;
+                }
+
                 let mut img =
                     crate::format_loaders::dds_loader::open_image_with_dds_fallback(p).ok()?;
-
-                // Prevent OOM spikes by downscaling heavily before collecting
                 if img.width() > 512 || img.height() > 512 {
                     img = img.resize_exact(512, 512, image::imageops::FilterType::Triangle);
                 }
@@ -77,7 +86,6 @@ pub async fn run_ai_duplicate_scan(
     let dist_threshold = 1.0 - (params.similarity / 100.0);
     let mut uf = crate::utils::clustering::UnionFind::new(records.len());
 
-    // Vector Similarity Search utilizing LanceDB
     {
         use futures::StreamExt;
         let query_items: Vec<(usize, Vec<f32>)> = records
@@ -97,6 +105,10 @@ pub async fn run_ai_duplicate_scan(
             .buffer_unordered(16);
 
         while let Some(res) = query_stream.next().await {
+            if params.cancel_token.load(Ordering::Relaxed) {
+                return Err(anyhow!("Scan cancelled by user."));
+            }
+
             let (src_idx, matches) = res?;
             for m in matches {
                 if let Some(target_idx) = records.iter().position(|r| r.path == m.path)
@@ -113,6 +125,10 @@ pub async fn run_ai_duplicate_scan(
     let mut results = Vec::new();
 
     for (root_idx, member_indices) in groups {
+        if params.cancel_token.load(Ordering::Relaxed) {
+            return Err(anyhow!("Scan cancelled by user."));
+        }
+
         if member_indices.len() < 2 {
             continue;
         }
@@ -213,15 +229,25 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
 
     let mut db = DatabaseService::new();
     db.initialize(&db_dir, "images", 512).await?;
-    let engine = InferenceEngine::new(&model_dir, 512, 4, "CPU")?;
+
+    let engine = InferenceEngine::new(&model_dir, 512, 4, &params.execution_provider)?;
 
     let mut records = Vec::new();
     let chunks: Vec<&[PathBuf]> = paths.chunks(params.batch_size).collect();
 
+    let cancel_token = params.cancel_token.clone();
+
     for chunk in chunks {
+        if cancel_token.load(Ordering::Relaxed) {
+            return Err(anyhow!("Scan cancelled by user."));
+        }
+
         let loaded_images: Vec<(PathBuf, image::DynamicImage)> = chunk
             .par_iter()
             .filter_map(|p| {
+                if cancel_token.load(Ordering::Relaxed) {
+                    return None;
+                }
                 let mut img =
                     crate::format_loaders::dds_loader::open_image_with_dds_fallback(p).ok()?;
                 if img.width() > 512 || img.height() > 512 {

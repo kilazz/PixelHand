@@ -2,6 +2,6 @@
 pub mod models;
 pub mod store;
 
-// Re-export everything so other files can just do `use crate::state::AppState;`
+// Re-export commonly used types for easier access
 pub use models::*;
 pub use store::*;

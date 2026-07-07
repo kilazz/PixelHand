@@ -58,6 +58,8 @@ reflink-copy = "0.1.30"
 anyhow = "1.0.103"
 thiserror = "2.0.18"
 
+open = "5.3.6"
+
 [patch.crates-io]
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
 

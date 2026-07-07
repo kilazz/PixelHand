@@ -1,39 +1,33 @@
 // src/scanners/exact.rs
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 
 use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::{calculate_xxhash, discover_files};
 
-#[derive(Debug, Clone)]
-struct FileMetadata {
-    path: PathBuf,
-    size: u64,
-    width: usize,
-    height: usize,
-    hash: String,
-}
-
-pub async fn run_exact_scan(
-    directory: String,
-    extensions: Vec<String>,
-) -> Result<Vec<DuplicateGroupSummary>> {
-    let path = PathBuf::from(directory);
+pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
+    let path = PathBuf::from(params.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    let (paths, warnings) = discover_files(&path, &extensions);
+    let (paths, warnings) = discover_files(&path, &params.extensions);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
     }
 
+    let cancel_token = params.cancel_token.clone();
+
     let metadata_list: Vec<FileMetadata> = paths
         .par_iter()
         .filter_map(|p| {
+            if cancel_token.load(Ordering::Relaxed) {
+                return None;
+            }
+
             let metadata = fs::metadata(p).ok()?;
             let size = metadata.len();
             if size == 0 {
@@ -54,6 +48,10 @@ pub async fn run_exact_scan(
         })
         .collect();
 
+    if params.cancel_token.load(Ordering::Relaxed) {
+        return Err(anyhow!("Scan cancelled by user."));
+    }
+
     let mut groups: HashMap<String, Vec<FileMetadata>> = HashMap::new();
     for meta in metadata_list {
         groups.entry(meta.hash.clone()).or_default().push(meta);
@@ -61,7 +59,7 @@ pub async fn run_exact_scan(
 
     let mut dups: Vec<(String, Vec<FileMetadata>)> =
         groups.into_iter().filter(|(_, f)| f.len() > 1).collect();
-    dups.sort_by(|a, b| b.1[0].size.cmp(&a.1[0].size)); // Sort largest files first
+    dups.sort_by(|a, b| b.1[0].size.cmp(&a.1[0].size));
 
     let mut results = Vec::new();
     for (hash, files) in dups {
@@ -107,3 +105,14 @@ pub async fn run_exact_scan(
     }
     Ok(results)
 }
+
+#[derive(Debug, Clone)]
+struct FileMetadata {
+    path: PathBuf,
+    size: u64,
+    width: usize,
+    height: usize,
+    hash: String,
+}
+
+use std::collections::HashMap;
