@@ -28,7 +28,7 @@
 
 ## Tech Stack
 *   **Core GUI Engine**: [Slint UI](https://slint.dev/)
-*   **Machine Learning**: `ort` ([ONNX Runtime](https://onnxruntime.ai/))
+*   **Machine Learning**: [ONNX Runtime](https://onnxruntime.ai/)
 *   **Vector Database**: [LanceDB](https://lancedb.com/)
 *   **Image Processing & Format Parsing**: Native Rust `image`, `image_dds`, `ddsfile`, and `exr` crates with custom hardware-mapped unswizzlers (Morton Z-order curve decoding).
 
