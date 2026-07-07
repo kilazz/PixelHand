@@ -184,6 +184,34 @@ fn append_to_console_log(msg: &str) {
     }
 }
 
+/// Generates a tile-able checkerboard pattern inside memory directly
+fn generate_checkerboard() -> slint::Image {
+    let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(32, 32);
+    let pixels = buffer.make_mut_slice(); // Удалено лишнее "mut"
+    for y in 0..32 {
+        for x in 0..32 {
+            let idx = y * 32 + x;
+            let is_dark_square = (x / 8 + y / 8) % 2 == 0;
+            if is_dark_square {
+                pixels[idx] = slint::Rgba8Pixel {
+                    r: 43,
+                    g: 45,
+                    b: 49,
+                    a: 255,
+                }; // Dark slate grey
+            } else {
+                pixels[idx] = slint::Rgba8Pixel {
+                    r: 60,
+                    g: 63,
+                    b: 65,
+                    a: 255,
+                }; // Light slate grey
+            }
+        }
+    }
+    slint::Image::from_rgba8(buffer)
+}
+
 /// Helper mapping to translate visible indices back to absolute internal state indices
 fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize> {
     let mut current_visible = 0;
@@ -1533,6 +1561,10 @@ async fn main() -> Result<(), slint::PlatformError> {
     app.set_ext_tif(loaded_settings.ext_tif);
     app.set_ext_webp(loaded_settings.ext_webp);
     app.set_duplicates_panel_height(loaded_settings.duplicates_panel_height);
+
+    // Generate checkerboard texture for transparent backgrounds
+    let checkerboard = generate_checkerboard();
+    app.set_checkerboard_pattern(checkerboard);
 
     // Auto-download models on startup!
     let app_weak_startup = app.as_weak();

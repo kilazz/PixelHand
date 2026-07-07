@@ -5,6 +5,7 @@ component InteractiveThumbnail {
     in property <image> source;
     in property <string> path;
     in property <bool> show_corners: false;
+    in property <image> checkerboard; // Checkerboard texture background
     callback corner_clicked(string, string); // path, channel
 
     width: 32px;
@@ -14,6 +15,15 @@ component InteractiveThumbnail {
         background: #111214;
         border-radius: 4px;
         clip: true;
+
+        // Tiled Checkerboard Background
+        Image {
+            source: checkerboard;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
 
         Image {
             source: source;
@@ -205,15 +215,25 @@ component PanelSection {
     }
 }
 
-// Custom interactive Wipe comparative viewport
+// Custom interactive Wipe comparative viewport (Enforces perfect square-aligned rendering!)
 component WipeViewport {
     in property <image> original;
     in property <image> duplicate;
     in property <float> wipe-val; // 0.0 to 1.0
+    in property <image> checkerboard;
 
     viewport-root := Rectangle {
         background: #111214;
         clip: true;
+
+        // Checkerboard background
+        Image {
+            source: checkerboard;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
 
         // Base Layer - Original Image
         Image {
@@ -313,6 +333,9 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_hdr: true;
     in-out property <bool> ext_tif: true;
     in-out property <bool> ext_webp: true;
+
+    // Global checkerboard pattern loaded from Rust
+    in-out property <image> checkerboard_pattern;
 
     // Draggable Splitter Properties (Type Length for Native Layout operations)
     in-out property <length> duplicates_panel_height: 180px;
@@ -655,6 +678,7 @@ export component AppWindow inherits Window {
                                                 source: row.thumbnail;
                                                 path: row.path;
                                                 show_corners: true;
+                                                checkerboard: root.checkerboard_pattern; // Back checkerboard tile!
                                                 corner_clicked(path, chan) => {
                                                     if chan == "R" { root.active_r = !root.active_r; root.active_g = false; root.active_b = false; root.active_a = false; }
                                                     if chan == "G" { root.active_g = !root.active_g; root.active_r = false; root.active_b = false; root.active_a = false; }
@@ -745,6 +769,7 @@ export component AppWindow inherits Window {
                                                         source: row.thumbnail;
                                                         path: row.path;
                                                         show_corners: false;
+                                                        checkerboard: root.checkerboard_pattern; // Back checkerboard tile!
                                                         width: 115px;
                                                         height: 95px;
                                                     }
@@ -798,6 +823,7 @@ export component AppWindow inherits Window {
                                                         source: row.thumbnail;
                                                         path: row.path;
                                                         show_corners: false;
+                                                        checkerboard: root.checkerboard_pattern; // Back checkerboard tile!
                                                         width: 115px;
                                                         height: 95px;
                                                     }
@@ -851,6 +877,7 @@ export component AppWindow inherits Window {
                                                         source: row.thumbnail;
                                                         path: row.path;
                                                         show_corners: false;
+                                                        checkerboard: root.checkerboard_pattern; // Back checkerboard tile!
                                                         width: 115px;
                                                         height: 95px;
                                                     }
@@ -952,65 +979,171 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Previews Viewport area (Takes max available vertical space)
-                    Rectangle {
+                    viewport_root := Rectangle {
                         background: #111214;
                         border-color: #1f2023;
                         border-width: 1px;
                         border-radius: 4px;
                         clip: true;
                         vertical-stretch: 1;
+                        horizontal-stretch: 1;
 
-                        // Mode 1: Side-by-Side viewport
+                        // Unified constraint calculation formulas to guarantee identical square rendering!
+                        property <length> max_col_width: (self.width - 32px) / 2;
+                        property <length> max_col_height: self.height - 40px;
+                        property <length> uniform_square_size: max_col_width < max_col_height ? max_col_width : max_col_height;
+
+                        // Mode 1: Side-by-Side viewport (Enforced square-aligned rendering!)
                         if root.compare_mode == 0 : HorizontalLayout {
-                            spacing: 4px;
-                            padding: 4px;
+                            spacing: 12px;
+                            alignment: center;
                             VerticalLayout {
-                                spacing: 2px;
-                                Text { text: "ORIGINAL"; font-size: 10px; horizontal-alignment: center; }
+                                spacing: 4px;
+                                alignment: center;
+                                Text { text: "ORIGINAL"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
                                 Rectangle {
+                                    width: viewport_root.uniform_square_size;
+                                    height: self.width;
                                     background: #111214;
+                                    border-color: #3e3e42;
+                                    border-width: 1px;
+                                    border-radius: 4px;
+                                    clip: true;
+
+                                    // Checkerboard background
+                                    Image {
+                                        source: root.checkerboard_pattern;
+                                        horizontal-tiling: repeat;
+                                        vertical-tiling: repeat;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
+
+                                    // Foreground scaled Image
                                     Image { source: root.image_original; image-fit: contain; }
                                 }
                             }
                             VerticalLayout {
-                                spacing: 2px;
-                                Text { text: "DUPLICATE"; font-size: 10px; horizontal-alignment: center; }
+                                spacing: 4px;
+                                alignment: center;
+                                Text { text: "DUPLICATE"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
                                 Rectangle {
+                                    width: viewport_root.uniform_square_size;
+                                    height: self.width;
                                     background: #111214;
+                                    border-color: #3e3e42;
+                                    border-width: 1px;
+                                    border-radius: 4px;
+                                    clip: true;
+
+                                    // Checkerboard background
+                                    Image {
+                                        source: root.checkerboard_pattern;
+                                        horizontal-tiling: repeat;
+                                        vertical-tiling: repeat;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
                                     Image { source: root.image_duplicate; image-fit: contain; }
                                 }
                             }
                         }
 
-                        // Mode 2: Wipe slider viewport
-                        if root.compare_mode == 1 : WipeViewport {
-                            original: root.image_original;
-                            duplicate: root.image_duplicate;
-                            wipe-val: root.wipe_slider_val;
+                        // Mode 2: Wipe slider viewport (Centered matching square container)
+                        if root.compare_mode == 1 : VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Text { text: "WIPE COMPARE (ORIGINAL / DUPLICATE)"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+
+                            Rectangle {
+                                width: viewport_root.uniform_square_size;
+                                height: self.width;
+                                background: #111214;
+                                border-color: #3e3e42;
+                                border-width: 1px;
+                                border-radius: 4px;
+                                clip: true;
+
+                                WipeViewport {
+                                    original: root.image_original;
+                                    duplicate: root.image_duplicate;
+                                    wipe-val: root.wipe_slider_val;
+                                    checkerboard: root.checkerboard_pattern;
+                                    width: 100%;
+                                    height: 100%;
+                                }
+                            }
                         }
 
-                        // Mode 3: Transparency overlay blend viewport
-                        if root.compare_mode == 2 : Rectangle {
-                            background: #111214;
-                            Image {
-                                source: root.image_original;
-                                image-fit: contain;
-                                opacity: 1.0 - root.wipe_slider_val;
-                            }
-                            Image {
-                                source: root.image_duplicate;
-                                image-fit: contain;
-                                opacity: root.wipe_slider_val;
+                        // Mode 3: Transparency overlay blend viewport (Centered matching square container)
+                        if root.compare_mode == 2 : VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Text { text: "OVERLAY BLEND"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+
+                            Rectangle {
+                                width: viewport_root.uniform_square_size;
+                                height: self.width;
+                                background: #111214;
+                                border-color: #3e3e42;
+                                border-width: 1px;
+                                border-radius: 4px;
+                                clip: true;
+
+                                Image {
+                                    source: root.checkerboard_pattern;
+                                    horizontal-tiling: repeat;
+                                    vertical-tiling: repeat;
+                                    width: 100%;
+                                    height: 100%;
+                                }
+
+                                Image {
+                                    source: root.image_original;
+                                    image-fit: contain;
+                                    width: 100%;
+                                    height: 100%;
+                                    opacity: 1.0 - root.wipe_slider_val;
+                                }
+                                Image {
+                                    source: root.image_duplicate;
+                                    image-fit: contain;
+                                    width: 100%;
+                                    height: 100%;
+                                    opacity: root.wipe_slider_val;
+                                }
                             }
                         }
 
-                        // Mode 4: Generated difference heatmap view layer
-                        if root.compare_mode == 3 : Rectangle {
-                            background: #111214;
-                            Image {
-                                source: root.image_heatmap;
-                                image-fit: contain;
+                        // Mode 4: Generated difference heatmap view layer (Centered matching square container)
+                        if root.compare_mode == 3 : VerticalLayout {
+                            alignment: center;
+                            spacing: 4px;
+                            Text { text: "DIFFERENCE HEATMAP"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+
+                            Rectangle {
+                                width: viewport_root.uniform_square_size;
+                                height: self.width;
+                                background: #111214;
+                                border-color: #3e3e42;
+                                border-width: 1px;
+                                border-radius: 4px;
+                                clip: true;
+
+                                Image {
+                                    source: root.checkerboard_pattern;
+                                    horizontal-tiling: repeat;
+                                    vertical-tiling: repeat;
+                                    width: 100%;
+                                    height: 100%;
+                                }
+
+                                Image {
+                                    source: root.image_heatmap;
+                                    image-fit: contain;
+                                    width: 100%;
+                                    height: 100%;
+                                }
                             }
                         }
                     }
@@ -1102,6 +1235,7 @@ export component AppWindow inherits Window {
                                         source: row.thumbnail;
                                         path: row.path;
                                         show_corners: false;
+                                        checkerboard: root.checkerboard_pattern; // Back checkerboard tile!
                                     }
 
                                     Text {
@@ -1185,7 +1319,7 @@ export component AppWindow inherits Window {
 
                                 SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
 
-                                Rectangle { vertical-stretch: 1; } // Absorb unused space and push everything to top cleanly!
+                                Rectangle { vertical-stretch: 1; } // Clean spacer that pushes all rows to the top!
                             }
                         }
                     }
