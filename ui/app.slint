@@ -1329,59 +1329,118 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         horizontal-stretch: 1;
 
-                        // Mode 1: Side-by-Side viewport (Geometrically locked and perfectly equal!)
-                        if root.compare_mode == 0: HorizontalLayout {
-                            width: parent.width;
-                            height: parent.height;
-                            spacing: 12px;
-                            VerticalLayout {
-                                horizontal-stretch: 1;
-                                spacing: 4px;
-                                Text {
-                                    text: "ORIGINAL (Double-click to open)";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                }
+                        // Mode 1: Side-by-Side viewport (Strict Absolute Geometry!)
+                        if root.compare_mode == 0: Rectangle {
+                            width: 100%;
+                            height: 100%;
 
-                                Rectangle {
-                                    vertical-stretch: 1;
-                                    background: #111214;
-                                    border-color: #3e3e42;
-                                    border-width: 1px;
-                                    border-radius: 4px;
-                                    clip: true;
+                            // Left Panel (Original)
+                            Rectangle {
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width / 2 - 6px;
+                                height: parent.height;
 
-                                    // Checkerboard background
-                                    Image {
-                                        source: root.checkerboard_pattern;
-                                        horizontal-tiling: repeat;
-                                        vertical-tiling: repeat;
-                                        width: 100%;
-                                        height: 100%;
+                                VerticalLayout {
+                                    width: 100%;
+                                    height: 100%;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "ORIGINAL (Double-click to open)";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
                                     }
 
-                                    // Foreground scaled Image
-                                    Image {
-                                        source: root.image_original;
-                                        image-fit: contain;
-                                        width: 100%;
-                                        height: 100%;
-                                    }
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: #111214;
+                                        border-color: #3e3e42;
+                                        border-width: 1px;
+                                        border-radius: 4px;
+                                        clip: true;
 
-                                    TouchArea {
-                                        double-clicked => {
-                                            root.open_file_in_viewer(root.original_meta.path);
+                                        Image {
+                                            source: root.checkerboard_pattern;
+                                            horizontal-tiling: repeat;
+                                            vertical-tiling: repeat;
+                                            width: 100%;
+                                            height: 100%;
+                                        }
+
+                                        Image {
+                                            source: root.image_original;
+                                            image-fit: contain;
+                                            width: 100%;
+                                            height: 100%;
+                                        }
+
+                                        TouchArea {
+                                            double-clicked => { root.open_file_in_viewer(root.original_meta.path); }
                                         }
                                     }
                                 }
                             }
 
+                            // Right Panel (Duplicate)
+                            Rectangle {
+                                x: parent.width / 2 + 6px;
+                                y: 0px;
+                                width: parent.width / 2 - 6px;
+                                height: parent.height;
+
+                                VerticalLayout {
+                                    width: 100%;
+                                    height: 100%;
+                                    spacing: 4px;
+                                    Text {
+                                        text: "DUPLICATE (Double-click to open)";
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        horizontal-alignment: center;
+                                    }
+
+                                    Rectangle {
+                                        vertical-stretch: 1;
+                                        background: #111214;
+                                        border-color: #3e3e42;
+                                        border-width: 1px;
+                                        border-radius: 4px;
+                                        clip: true;
+
+                                        Image {
+                                            source: root.checkerboard_pattern;
+                                            horizontal-tiling: repeat;
+                                            vertical-tiling: repeat;
+                                            width: 100%;
+                                            height: 100%;
+                                        }
+
+                                        Image {
+                                            source: root.image_duplicate;
+                                            image-fit: contain;
+                                            width: 100%;
+                                            height: 100%;
+                                        }
+
+                                        TouchArea {
+                                            double-clicked => { root.open_file_in_viewer(root.duplicate_meta.path); }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Mode 2: Wipe slider viewport
+                        if root.compare_mode == 1: Rectangle {
+                            width: 100%;
+                            height: 100%;
                             VerticalLayout {
-                                horizontal-stretch: 1;
+                                width: 100%;
+                                height: 100%;
                                 spacing: 4px;
                                 Text {
-                                    text: "DUPLICATE (Double-click to open)";
+                                    text: "WIPE COMPARE (ORIGINAL / DUPLICATE)";
                                     font-size: 11px;
                                     font-weight: 700;
                                     horizontal-alignment: center;
@@ -1394,12 +1453,51 @@ export component AppWindow inherits Window {
                                     border-width: 1px;
                                     border-radius: 4px;
                                     clip: true;
+                                    WipeViewport {
+                                        original: root.image_original;
+                                        duplicate: root.image_duplicate;
+                                        wipe-val: root.wipe_slider_val;
+                                        checkerboard: root.checkerboard_pattern;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
+                                }
+                            }
+                        }
 
-                                    // Checkerboard background
+                        // Mode 3: Transparency overlay blend viewport
+                        if root.compare_mode == 2: Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            VerticalLayout {
+                                width: 100%;
+                                height: 100%;
+                                spacing: 4px;
+                                Text {
+                                    text: "OVERLAY BLEND";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    background: #111214;
+                                    border-color: #3e3e42;
+                                    border-width: 1px;
+                                    border-radius: 4px;
+                                    clip: true;
                                     Image {
                                         source: root.checkerboard_pattern;
                                         horizontal-tiling: repeat;
                                         vertical-tiling: repeat;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
+
+                                    Image {
+                                        source: root.image_original;
+                                        image-fit: contain;
                                         width: 100%;
                                         height: 100%;
                                     }
@@ -1409,126 +1507,48 @@ export component AppWindow inherits Window {
                                         image-fit: contain;
                                         width: 100%;
                                         height: 100%;
-                                    }
-
-                                    TouchArea {
-                                        double-clicked => {
-                                            root.open_file_in_viewer(root.duplicate_meta.path);
-                                        }
+                                        opacity: root.wipe_slider_val;
                                     }
                                 }
                             }
                         }
 
-                        // Mode 2: Wipe slider viewport (Fits perfectly to edge-to-edge area)
-                        if root.compare_mode == 1: VerticalLayout {
-                            width: parent.width;
-                            height: parent.height;
-                            spacing: 4px;
-                            Text {
-                                text: "WIPE COMPARE (ORIGINAL / DUPLICATE)";
-                                font-size: 11px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-
-                            Rectangle {
-                                vertical-stretch: 1;
-                                background: #111214;
-                                border-color: #3e3e42;
-                                border-width: 1px;
-                                border-radius: 4px;
-                                clip: true;
-
-                                WipeViewport {
-                                    original: root.image_original;
-                                    duplicate: root.image_duplicate;
-                                    wipe-val: root.wipe_slider_val;
-                                    checkerboard: root.checkerboard_pattern;
-                                    width: 100%;
-                                    height: 100%;
-                                }
-                            }
-                        }
-
-                        // Mode 3: Transparency overlay blend viewport (Full stretch adaptive bounds)
-                        if root.compare_mode == 2: VerticalLayout {
-                            width: parent.width;
-                            height: parent.height;
-                            spacing: 4px;
-                            Text {
-                                text: "OVERLAY BLEND";
-                                font-size: 11px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-
-                            Rectangle {
-                                vertical-stretch: 1;
-                                background: #111214;
-                                border-color: #3e3e42;
-                                border-width: 1px;
-                                border-radius: 4px;
-                                clip: true;
-
-                                Image {
-                                    source: root.checkerboard_pattern;
-                                    horizontal-tiling: repeat;
-                                    vertical-tiling: repeat;
-                                    width: 100%;
-                                    height: 100%;
+                        // Mode 4: Generated difference heatmap view layer
+                        if root.compare_mode == 3: Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            VerticalLayout {
+                                width: 100%;
+                                height: 100%;
+                                spacing: 4px;
+                                Text {
+                                    text: "DIFFERENCE HEATMAP";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
                                 }
 
-                                Image {
-                                    source: root.image_original;
-                                    image-fit: contain;
-                                    width: 100%;
-                                    height: 100%;
-                                }
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    background: #111214;
+                                    border-color: #3e3e42;
+                                    border-width: 1px;
+                                    border-radius: 4px;
+                                    clip: true;
+                                    Image {
+                                        source: root.checkerboard_pattern;
+                                        horizontal-tiling: repeat;
+                                        vertical-tiling: repeat;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
 
-                                Image {
-                                    source: root.image_duplicate;
-                                    image-fit: contain;
-                                    width: 100%;
-                                    height: 100%;
-                                    opacity: root.wipe_slider_val;
-                                }
-                            }
-                        }
-
-                        // Mode 4: Generated difference heatmap view layer (Full stretch adaptive bounds)
-                        if root.compare_mode == 3: VerticalLayout {
-                            width: parent.width;
-                            height: parent.height;
-                            spacing: 4px;
-                            Text {
-                                text: "DIFFERENCE HEATMAP";
-                                font-size: 11px;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-
-                            Rectangle {
-                                vertical-stretch: 1;
-                                background: #111214;
-                                border-color: #3e3e42;
-                                border-width: 1px;
-                                border-radius: 4px;
-                                clip: true;
-
-                                Image {
-                                    source: root.checkerboard_pattern;
-                                    horizontal-tiling: repeat;
-                                    vertical-tiling: repeat;
-                                    width: 100%;
-                                    height: 100%;
-                                }
-
-                                Image {
-                                    source: root.image_heatmap;
-                                    image-fit: contain;
-                                    width: 100%;
-                                    height: 100%;
+                                    Image {
+                                        source: root.image_heatmap;
+                                        image-fit: contain;
+                                        width: 100%;
+                                        height: 100%;
+                                    }
                                 }
                             }
                         }
