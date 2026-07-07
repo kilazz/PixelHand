@@ -1,0 +1,162 @@
+// src/cli.rs
+use anyhow::{Result, anyhow};
+
+use crate::scanners::{ScanParams, exact, qc};
+
+/// Main CLI entry point.
+/// Parses inputs and executes audits entirely in the console.
+pub async fn run(args: Vec<String>) -> Result<()> {
+    println!("==================================================");
+    println!("           PixelHand - CLI Auditor Mode           ");
+    println!("==================================================");
+
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        print_help();
+        return Ok(());
+    }
+
+    // 1. Process Byte-Exact Scan Routing
+    if let Some(pos) = args.iter().position(|arg| arg == "--scan-exact") {
+        if pos + 1 < args.len() {
+            let dir = args[pos + 1].clone();
+            run_exact_cli_scan(dir).await?;
+        } else {
+            return Err(anyhow!("Missing directory path for --scan-exact"));
+        }
+        return Ok(());
+    }
+
+    // 2. Process Quality Control (QC) Routing
+    if let Some(pos) = args.iter().position(|arg| arg == "--scan-qc") {
+        if pos + 1 < args.len() {
+            let dir = args[pos + 1].clone();
+            run_qc_cli_scan(dir, &args).await?;
+        } else {
+            return Err(anyhow!("Missing directory path for --scan-qc"));
+        }
+        return Ok(());
+    }
+
+    println!("[ERROR] Unknown CLI arguments. Use -h or --help for instructions.");
+    Ok(())
+}
+
+// ---------------------------------------------------------
+// PRIVATE CLI ROUTINES
+// ---------------------------------------------------------
+
+/// Prints the CLI usage menu.
+fn print_help() {
+    println!("Usage:");
+    println!("  pixelhand -c --scan-exact <directory_path>");
+    println!("  pixelhand -c --scan-qc <directory_path> [options]");
+    println!("\nQC Options:");
+    println!("  --check-npot          Verify if dimensions are Non-Power-of-Two");
+    println!("  --check-mipmaps       Verify if mipmaps are generated");
+    println!("  --check-block         Verify if dimensions are 4px block aligned");
+    println!("  --check-bit           Verify bit depths");
+    println!("  --validate-normals    Validate typical normal maps format");
+}
+
+/// Executes a byte-exact xxHash scan and prints results.
+async fn run_exact_cli_scan(dir: String) -> Result<()> {
+    println!("[CLI] Running Byte-Exact Scan (xxHash64) on: {}\n", dir);
+
+    let default_exts = vec![
+        ".png".to_string(),
+        ".jpg".to_string(),
+        ".jpeg".to_string(),
+        ".tga".to_string(),
+        ".dds".to_string(),
+        ".exr".to_string(),
+        ".hdr".to_string(),
+        ".tif".to_string(),
+        ".tiff".to_string(),
+    ];
+
+    match exact::run_exact_scan(dir, default_exts).await {
+        Ok(results) => {
+            println!(
+                "[SUCCESS] Exact Scan Completed! Found {} duplicate groups:",
+                results.len()
+            );
+            for (idx, group) in results.iter().enumerate() {
+                println!("  Group #{} (Hash: {})", idx + 1, group.hash);
+                for file in &group.files {
+                    println!(
+                        "    - {} (Size: {} bytes, Dim: {}x{})",
+                        file.path, file.size, file.width, file.height
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[ERROR] Exact Scan Failed: {}", e);
+        }
+    }
+    Ok(())
+}
+
+/// Executes a technical QC audit based on command parameters and prints results.
+async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
+    let check_npot = args.iter().any(|arg| arg == "--check-npot");
+    let check_mipmaps = args.iter().any(|arg| arg == "--check-mipmaps");
+    let check_block = args.iter().any(|arg| arg == "--check-block");
+    let check_bit = args.iter().any(|arg| arg == "--check-bit");
+    let validate_normals = args.iter().any(|arg| arg == "--validate-normals");
+
+    println!("[CLI] Running Technical Quality Control Scan on: {}", dir);
+    println!(
+        "      Options: NPOT={}, Mipmaps={}, BlockAlign={}, BitDepth={}, Normals={}\n",
+        check_npot, check_mipmaps, check_block, check_bit, validate_normals
+    );
+
+    let default_exts = vec![
+        ".png".to_string(),
+        ".jpg".to_string(),
+        ".jpeg".to_string(),
+        ".tga".to_string(),
+        ".dds".to_string(),
+        ".exr".to_string(),
+        ".hdr".to_string(),
+        ".tif".to_string(),
+        ".tiff".to_string(),
+    ];
+
+    let params = ScanParams {
+        dir_a: dir,
+        dir_b: String::new(),
+        query_text: String::new(),
+        similarity: 90.0,
+        batch_size: 128,
+        search_method: 0,
+        qc_mode: true,
+        qc_npot: check_npot,
+        qc_mipmaps: check_mipmaps,
+        qc_block_align: check_block,
+        qc_bit_depth: check_bit,
+        qc_solid_colors: false,
+        qc_normals: validate_normals,
+        qc_normals_tags: String::new(),
+        extensions: default_exts,
+        perceptual_channel: "Composite".to_string(),
+    };
+
+    match qc::run_qc_scan_internal(params).await {
+        Ok(results) => {
+            println!(
+                "[SUCCESS] QC Scan Completed! Found {} issues:",
+                results.len()
+            );
+            for issue in results {
+                println!("  - File: {}", issue.path);
+                println!("    Issue: {}", issue.issue);
+                println!("    Details: {}", issue.details);
+            }
+        }
+        Err(e) => {
+            eprintln!("[ERROR] QC Scan Failed: {}", e);
+        }
+    }
+    Ok(())
+}

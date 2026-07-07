@@ -1,8 +1,9 @@
-use std::error::Error;
+// src/core/database.rs
+use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::Arc;
 
-// Imports are referenced directly from LanceDB's re-exported Arrow modules to prevent version conflicts
+// Imports are referenced directly from LanceDB's re-exported Arrow modules
 use lancedb::arrow::arrow_array::{
     ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
 };
@@ -40,7 +41,6 @@ pub struct DatabaseService {
 }
 
 impl DatabaseService {
-    /// Creates a new, uninitialized DatabaseService instance.
     pub fn new() -> Self {
         Self {
             db: None,
@@ -55,11 +55,13 @@ impl DatabaseService {
         db_directory: &Path,
         table_name: &str,
         dim: usize,
-    ) -> Result<(), Box<dyn Error>> {
+    ) -> Result<()> {
         let db_path_str = db_directory.to_string_lossy().to_string();
-        let db = lancedb::connect(&db_path_str).execute().await?;
+        let db = lancedb::connect(&db_path_str)
+            .execute()
+            .await
+            .context("Failed to connect to LanceDB")?;
 
-        // Define the rigid Apache Arrow schema
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", DataType::Utf8, false),
             Field::new(
@@ -81,7 +83,6 @@ impl DatabaseService {
             db.drop_table(table_name, &empty_ns).await?;
         }
 
-        // Create a fresh table with the defined schema to start a clean scanning session
         let empty_batch = RecordBatch::new_empty(schema.clone());
         let table = db
             .create_table(table_name, vec![empty_batch])
@@ -96,11 +97,11 @@ impl DatabaseService {
     }
 
     /// Converts records into Apache Arrow RecordBatches and appends them to the LanceDB table.
-    pub async fn add_batch(&self, records: &[DbRecord]) -> Result<(), Box<dyn Error>> {
+    pub async fn add_batch(&self, records: &[DbRecord]) -> Result<()> {
         let table = self
             .table
             .as_ref()
-            .ok_or("Database table is not initialized")?;
+            .context("Database table is not initialized")?;
         if records.is_empty() {
             return Ok(());
         }
@@ -119,7 +120,6 @@ impl DatabaseService {
             Field::new("channel", DataType::Utf8, false),
         ]));
 
-        // Build Arrow columnar arrays from the flat DbRecords
         let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
         let id_array = Arc::new(StringArray::from(ids)) as ArrayRef;
 
@@ -129,13 +129,11 @@ impl DatabaseService {
         let channels: Vec<&str> = records.iter().map(|r| r.channel.as_str()).collect();
         let channel_array = Arc::new(StringArray::from(channels)) as ArrayRef;
 
-        // Flatten vectors to load them into the FixedSizeList array layout
         let mut flat_vectors = Vec::with_capacity(records.len() * self.dim);
         for r in records {
             flat_vectors.extend_from_slice(&r.vector);
         }
         let values_array = Float32Array::from(flat_vectors);
-
         let value_field = Arc::new(Field::new("item", DataType::Float32, true));
         let vector_array = Arc::new(FixedSizeListArray::try_new(
             value_field,
@@ -148,18 +146,19 @@ impl DatabaseService {
             schema,
             vec![id_array, vector_array, path_array, channel_array],
         )?;
-
         table.add(vec![batch]).execute().await?;
         Ok(())
     }
 
-    /// Generates an IVF-PQ vector index on the `vector` column to accelerate nearest-neighbor lookups.
-    pub async fn create_vector_index(&self) -> Result<(), Box<dyn Error>> {
+    /// Generates an IVF-PQ vector index to accelerate nearest-neighbor lookups.
+    pub async fn create_vector_index(&self) -> Result<()> {
         let table = self
             .table
             .as_ref()
-            .ok_or("Database table is not initialized")?;
+            .context("Database table is not initialized")?;
         let row_count = table.count_rows(None).await?;
+
+        // Safety net: K-means IVF indexing crashes if there aren't enough rows to form clusters
         if row_count < 5000 {
             return Ok(());
         }
@@ -171,16 +170,16 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Performs a high-speed vector similarity search using cosine metrics.
+    /// Performs a high-speed vector similarity search using Cosine metrics.
     pub async fn search_similarity(
         &self,
         query_vector: &[f32],
         limit: usize,
-    ) -> Result<Vec<SearchResult>, Box<dyn Error>> {
+    ) -> Result<Vec<SearchResult>> {
         let table = self
             .table
             .as_ref()
-            .ok_or("Database table is not initialized")?;
+            .context("Database table is not initialized")?;
         let query_result = table
             .query()
             .nearest_to(query_vector)?
@@ -195,14 +194,12 @@ impl DatabaseService {
                 continue;
             }
 
-            // Downcast columns back to Arrow native array representations
             let paths_array = batch
                 .column(2)
                 .as_any()
                 .downcast_ref::<StringArray>()
-                .ok_or("Failed to downcast path")?;
+                .context("Failed to downcast path column")?;
 
-            // Retrieve the dynamic `_distance` column appended by LanceDB
             let distance_col_idx = batch
                 .schema()
                 .index_of("_distance")
@@ -211,7 +208,7 @@ impl DatabaseService {
                 .column(distance_col_idx)
                 .as_any()
                 .downcast_ref::<Float32Array>()
-                .ok_or("Failed to downcast distance")?;
+                .context("Failed to downcast distance column")?;
 
             for i in 0..batch.num_rows() {
                 results.push(SearchResult {

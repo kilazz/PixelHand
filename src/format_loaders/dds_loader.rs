@@ -1,5 +1,10 @@
+// src/format_loaders/dds_loader.rs
+use anyhow::{Context, Result, anyhow};
 use image::DynamicImage;
+use rayon::prelude::*;
+use std::borrow::Cow;
 use std::io::Cursor;
+use std::path::Path;
 
 const FOURCC_DXT1: u32 = u32::from_le_bytes(*b"DXT1");
 const FOURCC_DXT2: u32 = u32::from_le_bytes(*b"DXT2");
@@ -74,12 +79,13 @@ fn unswizzle_block_linear(
     width: u32,
     height: u32,
     block_bytes: usize,
-) -> Result<(), String> {
+) -> Result<()> {
     let block_width = width.div_ceil(4);
     let block_height = height.div_ceil(4);
     let required_size = (block_width as usize) * (block_height as usize) * block_bytes;
+
     if src.len() < required_size || dst.len() < required_size {
-        return Err("Buffer too small for unswizzle operation".to_string());
+        return Err(anyhow!("Buffer too small for unswizzle operation"));
     }
 
     let log_w = if block_width > 1 {
@@ -94,7 +100,6 @@ fn unswizzle_block_linear(
     };
     let min_log = std::cmp::min(log_w, log_h);
 
-    use rayon::prelude::*;
     let row_bytes = (block_width as usize) * block_bytes;
 
     dst.par_chunks_mut(row_bytes)
@@ -119,6 +124,7 @@ fn unswizzle_block_linear(
 
                 let src_offset = (swizzled_index as usize) * block_bytes;
                 let dst_offset = (x as usize) * block_bytes;
+
                 if src_offset + block_bytes <= src.len()
                     && dst_offset + block_bytes <= row_chunk.len()
                 {
@@ -131,27 +137,22 @@ fn unswizzle_block_linear(
 }
 
 fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
-    use rayon::prelude::*;
-    if format_fourcc == FOURCC_DXT1
-        || format_fourcc == FOURCC_ATI1
-        || format_fourcc == FOURCC_BC4U
-        || format_fourcc == FOURCC_BC4S
-    {
-        let block_size = 8;
-        data.par_chunks_mut(block_size).for_each(|chunk| {
+    if matches!(
+        format_fourcc,
+        FOURCC_DXT1 | FOURCC_ATI1 | FOURCC_BC4U | FOURCC_BC4S
+    ) {
+        data.par_chunks_mut(8).for_each(|chunk| {
             if chunk.len() >= 4 {
                 chunk.swap(0, 1);
                 chunk.swap(2, 3);
             }
         });
-    } else if format_fourcc == FOURCC_DXT2
-        || format_fourcc == FOURCC_DXT3
-        || format_fourcc == FOURCC_DXT4
-        || format_fourcc == FOURCC_DXT5
-    {
-        let block_size = 16;
+    } else if matches!(
+        format_fourcc,
+        FOURCC_DXT2 | FOURCC_DXT3 | FOURCC_DXT4 | FOURCC_DXT5
+    ) {
         let is_bc3 = format_fourcc == FOURCC_DXT4 || format_fourcc == FOURCC_DXT5;
-        data.par_chunks_mut(block_size).for_each(|chunk| {
+        data.par_chunks_mut(16).for_each(|chunk| {
             if chunk.len() >= 12 {
                 chunk.swap(8, 9);
                 chunk.swap(10, 11);
@@ -162,12 +163,8 @@ fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
                 }
             }
         });
-    } else if format_fourcc == FOURCC_ATI2
-        || format_fourcc == FOURCC_BC5U
-        || format_fourcc == FOURCC_BC5S
-    {
-        let block_size = 16;
-        data.par_chunks_mut(block_size).for_each(|chunk| {
+    } else if matches!(format_fourcc, FOURCC_ATI2 | FOURCC_BC5U | FOURCC_BC5S) {
+        data.par_chunks_mut(16).for_each(|chunk| {
             if chunk.len() >= 16 {
                 chunk.swap(2, 3);
                 chunk.swap(4, 5);
@@ -186,32 +183,31 @@ fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
     }
 }
 
-fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
+fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo> {
     if dds_bytes.len() < 128 {
-        return Err("Input data too small for a DDS file".to_string());
+        return Err(anyhow!("Input data too small for a DDS file"));
     }
     if dds_bytes.get(0..4) != Some(b"DDS ") {
-        return Err("Not a DDS file (missing 'DDS ' magic number)".to_string());
+        return Err(anyhow!("Not a DDS file (missing 'DDS ' magic number)"));
     }
 
-    let dw_size = read_u32_le(dds_bytes, 4).ok_or("Failed to read header size")?;
+    let dw_size = read_u32_le(dds_bytes, 4).context("Failed to read header size")?;
     if dw_size != 124 {
-        return Err("Invalid DDS header size".to_string());
+        return Err(anyhow!("Invalid DDS header size"));
     }
 
-    let height = read_u32_le(dds_bytes, 12).ok_or("Failed to read height")?;
-    let width = read_u32_le(dds_bytes, 16).ok_or("Failed to read width")?;
+    let height = read_u32_le(dds_bytes, 12).context("Failed to read height")?;
+    let width = read_u32_le(dds_bytes, 16).context("Failed to read width")?;
 
-    // Pixel format (offset 76)
-    let pf_size = read_u32_le(dds_bytes, 76).ok_or("Failed to read pixel format size")?;
+    let pf_size = read_u32_le(dds_bytes, 76).context("Failed to read pixel format size")?;
     if pf_size != 32 {
-        return Err("Invalid DDS_PIXELFORMAT size".to_string());
+        return Err(anyhow!("Invalid DDS_PIXELFORMAT size"));
     }
 
-    let pf_flags = read_u32_le(dds_bytes, 80).ok_or("Failed to read pixel format flags")?;
-    let mut pf_fourcc = read_u32_le(dds_bytes, 84).ok_or("Failed to read pixel format FourCC")?;
+    let pf_flags = read_u32_le(dds_bytes, 80).context("Failed to read pixel format flags")?;
+    let mut pf_fourcc = read_u32_le(dds_bytes, 84).context("Failed to read pixel format FourCC")?;
     let pf_rgb_bitcount =
-        read_u32_le(dds_bytes, 88).ok_or("Failed to read pixel format bitcount")?;
+        read_u32_le(dds_bytes, 88).context("Failed to read pixel format bitcount")?;
 
     let is_xbox = is_xbox_360_format(pf_fourcc);
     if is_xbox {
@@ -220,49 +216,42 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
 
     let mut is_compressed = false;
     let mut block_bytes = 16;
+    let mut header_size = 128;
 
     let ddpf_fourcc = 0x00000004;
     let ddpf_rgb = 0x00000040;
-
-    let mut header_size = 128;
 
     if (pf_flags & ddpf_fourcc) != 0 {
         if pf_fourcc == FOURCC_DX10 {
             header_size += 20;
             if dds_bytes.len() < header_size {
-                return Err("DX10 header out of bounds".to_string());
+                return Err(anyhow!("DX10 header out of bounds"));
             }
-            let dxgi = read_u32_le(dds_bytes, 128).ok_or("Failed to read DX10 DXGI format")?;
-            // DXGI Formats: BC1=71, BC2=74, BC3=77, BC4=80, BC5=83
-            if dxgi == 71 || dxgi == 72 || dxgi == 80 || dxgi == 81 {
+            let dxgi = read_u32_le(dds_bytes, 128).context("Failed to read DX10 DXGI format")?;
+            if matches!(dxgi, 71 | 72 | 80 | 81) {
                 is_compressed = true;
                 block_bytes = 8;
-            } else if dxgi == 74
-                || dxgi == 75
-                || dxgi == 77
-                || dxgi == 78
-                || dxgi == 83
-                || dxgi == 84
-            {
+            } else if matches!(dxgi, 74 | 75 | 77 | 78 | 83 | 84) {
                 is_compressed = true;
                 block_bytes = 16;
             }
         } else {
-            if pf_fourcc == FOURCC_DXT1
-                || pf_fourcc == FOURCC_ATI1
-                || pf_fourcc == FOURCC_BC4U
-                || pf_fourcc == FOURCC_BC4S
-            {
+            if matches!(
+                pf_fourcc,
+                FOURCC_DXT1 | FOURCC_ATI1 | FOURCC_BC4U | FOURCC_BC4S
+            ) {
                 is_compressed = true;
                 block_bytes = 8;
-            } else if pf_fourcc == FOURCC_DXT2
-                || pf_fourcc == FOURCC_DXT3
-                || pf_fourcc == FOURCC_DXT4
-                || pf_fourcc == FOURCC_DXT5
-                || pf_fourcc == FOURCC_ATI2
-                || pf_fourcc == FOURCC_BC5U
-                || pf_fourcc == FOURCC_BC5S
-            {
+            } else if matches!(
+                pf_fourcc,
+                FOURCC_DXT2
+                    | FOURCC_DXT3
+                    | FOURCC_DXT4
+                    | FOURCC_DXT5
+                    | FOURCC_ATI2
+                    | FOURCC_BC5U
+                    | FOURCC_BC5S
+            ) {
                 is_compressed = true;
                 block_bytes = 16;
             }
@@ -273,7 +262,7 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
     let mut is_swizzled = false;
 
     if data_ptr_offset + 4 <= dds_bytes.len() {
-        let marker = read_u32_le(dds_bytes, data_ptr_offset).ok_or("Failed to read marker")?;
+        let marker = read_u32_le(dds_bytes, data_ptr_offset).context("Failed to read marker")?;
         if marker == FOURCC_CRYF || marker == FOURCC_FYRC {
             is_swizzled = marker == FOURCC_CRYF;
             data_ptr_offset += if marker == FOURCC_CRYF { 8 } else { 4 };
@@ -285,20 +274,18 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
     }
 
     if data_ptr_offset > dds_bytes.len() {
-        return Err("DDS offset out of bounds".to_string());
+        return Err(anyhow!("DDS offset out of bounds"));
     }
 
     let (pitch, slice_pitch) = if is_compressed {
         let num_blocks_wide = width.div_ceil(4).max(1) as usize;
         let num_blocks_high = height.div_ceil(4).max(1) as usize;
         let p = num_blocks_wide * block_bytes;
-        let sp = p * num_blocks_high;
-        (p, sp)
+        (p, p * num_blocks_high)
     } else {
         let bpp = pf_rgb_bitcount as usize;
         let p = (width as usize * bpp).div_ceil(8);
-        let sp = p * height as usize;
-        (p, sp)
+        (p, p * height as usize)
     };
 
     Ok(AnalyzedHeaderInfo {
@@ -315,10 +302,9 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo, String> {
     })
 }
 
-pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
+pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage> {
     let info = analyze_header(dds_bytes)?;
 
-    use std::borrow::Cow;
     let clean_dds_bytes = if info.is_swizzled || info.is_xbox {
         let mut pixel_data = if info.is_swizzled {
             let mut unswizzled = vec![0u8; info.slice_pitch];
@@ -349,20 +335,15 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
             perform_xbox_endian_swap(&mut pixel_data, info.fourcc);
         }
 
-        // Construct a clean, standard DDS file buffer in memory
+        // Reconstruct standard DDS header in memory
         let mut clean = Vec::with_capacity(128 + pixel_data.len());
         clean.extend_from_slice(b"DDS ");
 
         let mut dds_header = [0u8; 124];
         dds_header[0..4].copy_from_slice(&124u32.to_le_bytes());
 
-        // dwFlags: CAPS, HEIGHT, WIDTH, PIXELFORMAT + LINEARSIZE or PITCH
         let mut dw_flags: u32 = 0x1 | 0x2 | 0x4 | 0x1000;
-        if info.is_compressed {
-            dw_flags |= 0x80000;
-        } else {
-            dw_flags |= 0x8;
-        }
+        dw_flags |= if info.is_compressed { 0x80000 } else { 0x8 };
         dds_header[4..8].copy_from_slice(&dw_flags.to_le_bytes());
 
         dds_header[8..12].copy_from_slice(&info.height.to_le_bytes());
@@ -374,16 +355,15 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
             info.pitch as u32
         };
         dds_header[16..20].copy_from_slice(&dw_pitch.to_le_bytes());
-        dds_header[20..24].copy_from_slice(&1u32.to_le_bytes()); // dwDepth
-        dds_header[24..28].copy_from_slice(&1u32.to_le_bytes()); // dwMipMapCount
+        dds_header[20..24].copy_from_slice(&1u32.to_le_bytes()); // Depth
+        dds_header[24..28].copy_from_slice(&1u32.to_le_bytes()); // MipMapCount
 
-        // ddspf
         dds_header[72..76].copy_from_slice(&32u32.to_le_bytes()); // pf_size
         let pf_flags: u32 = if info.is_compressed {
             0x00000004
         } else {
             0x00000040 | 0x00000001
-        }; // FOURCC or RGB|ALPHAPIXELS
+        };
         dds_header[76..80].copy_from_slice(&pf_flags.to_le_bytes());
 
         let pf_fourcc = if info.is_compressed { info.fourcc } else { 0 };
@@ -398,8 +378,7 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
             dds_header[100..104].copy_from_slice(&0xff000000u32.to_le_bytes());
         }
 
-        dds_header[104..108].copy_from_slice(&0x1000u32.to_le_bytes()); // dwCaps (DDSCAPS_TEXTURE)
-
+        dds_header[104..108].copy_from_slice(&0x1000u32.to_le_bytes()); // dwCaps
         clean.extend_from_slice(&dds_header);
 
         if info.fourcc == FOURCC_DX10
@@ -415,47 +394,40 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage, String> {
     };
 
     let dds = image_dds::ddsfile::Dds::read(Cursor::new(&*clean_dds_bytes))
-        .map_err(|e| format!("Ddsfile parse error: {}", e))?;
+        .context("Failed to parse DDS file structure")?;
 
     let rgba_img =
-        image_dds::image_from_dds(&dds, 0).map_err(|e| format!("image_dds decode error: {}", e))?;
+        image_dds::image_from_dds(&dds, 0).context("Failed to decode compressed DDS payload")?;
 
     Ok(DynamicImage::ImageRgba8(rgba_img))
 }
 
-pub fn open_image_with_dds_fallback<P: AsRef<std::path::Path>>(
-    path: P,
-) -> Result<DynamicImage, String> {
+pub fn open_image_with_dds_fallback<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
     let path_ref = path.as_ref();
-
-    // Extract the file extension and convert it to lower case
     let ext = path_ref
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
 
     if ext == "dds" {
-        // Parse DDS (handles standard, Xbox 360, and CryEngine specific unswizzling)
-        let file = std::fs::File::open(path_ref).map_err(|e| e.to_string())?;
-        let mmap = unsafe { memmap2::Mmap::map(&file).map_err(|e| e.to_string())? };
+        let file = std::fs::File::open(path_ref).context("Failed to open DDS file")?;
+        let mmap = unsafe { memmap2::Mmap::map(&file).context("Failed to memory map DDS file")? };
         decode_dds_bytes(&mmap)
     } else if ext == "exr" {
-        // Custom pipeline for EXR: Read raw float pixels and apply ACES Filmic Tonemapping
-        let (hdr_pixels, width, height) = crate::tonemapper::load_exr_rgba(path_ref)
-            .map_err(|e| format!("EXR Load error: {}", e))?;
+        let (hdr_pixels, width, height) = crate::core::tonemapper::load_exr_rgba(path_ref)
+            .context("Failed to load EXR float pixels")?;
 
-        let ldr_img = crate::tonemapper::tonemap_hdr_to_ldr_rgba(
+        let ldr_img = crate::core::tonemapper::tonemap_hdr_to_ldr_rgba(
             &hdr_pixels,
             width,
             height,
-            crate::tonemapper::TonemapOperator::AcesFilmic,
-            1.0, // Default exposure value
+            crate::core::tonemapper::TonemapOperator::AcesFilmic,
+            1.0,
         )
-        .map_err(|e| format!("Tonemap error: {}", e))?;
+        .context("Failed to apply ACES Filmic tonemapping to EXR")?;
 
         Ok(DynamicImage::ImageRgba8(ldr_img))
     } else {
-        // Standard fallback for PNG, JPEG, TGA, BMP, TIFF, WEBP etc.
-        image::open(path_ref).map_err(|e| e.to_string())
+        image::open(path_ref).context("Failed to decode standard image format")
     }
 }
