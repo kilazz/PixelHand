@@ -1329,8 +1329,10 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         horizontal-stretch: 1;
 
-                        // Mode 1: Side-by-Side viewport (Perfectly responsive!)
+                        // Mode 1: Side-by-Side viewport (Perfectly responsive and geometrically aligned!)
                         if root.compare_mode == 0: HorizontalLayout {
+                            width: 100%;
+                            height: 100%;
                             spacing: 12px;
                             VerticalLayout {
                                 horizontal-stretch: 1;
@@ -1420,6 +1422,8 @@ export component AppWindow inherits Window {
 
                         // Mode 2: Wipe slider viewport (Fits perfectly to edge-to-edge area)
                         if root.compare_mode == 1: VerticalLayout {
+                            width: 100%;
+                            height: 100%;
                             spacing: 4px;
                             Text {
                                 text: "WIPE COMPARE (ORIGINAL / DUPLICATE)";
@@ -1449,6 +1453,8 @@ export component AppWindow inherits Window {
 
                         // Mode 3: Transparency overlay blend viewport (Full stretch adaptive bounds)
                         if root.compare_mode == 2: VerticalLayout {
+                            width: 100%;
+                            height: 100%;
                             spacing: 4px;
                             Text {
                                 text: "OVERLAY BLEND";
@@ -1492,6 +1498,8 @@ export component AppWindow inherits Window {
 
                         // Mode 4: Generated difference heatmap view layer (Full stretch adaptive bounds)
                         if root.compare_mode == 3: VerticalLayout {
+                            width: 100%;
+                            height: 100%;
                             spacing: 4px;
                             Text {
                                 text: "DIFFERENCE HEATMAP";
