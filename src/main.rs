@@ -28,13 +28,15 @@ async fn main() -> Result<()> {
         .any(|arg| arg == "--cli" || arg == "-c" || arg == "--help" || arg == "-h");
 
     if is_cli_mode {
+        // Start logging subscriber ONLY for CLI mode diagnostics
+        tracing_subscriber::fmt::init();
+
         // Delegate completely to the CLI module
         cli::run(args).await?;
     } else {
-        // Start logging subscriber for GUI mode diagnostics
-        tracing_subscriber::fmt::init();
-
-        // Delegate completely to the UI Controller module
+        // Removed standard tracing subscriber initialization here!
+        // We delegate completely to app::run_gui(), which registers its own custom
+        // UiLogWriter subscriber to pipe log statements into the GUI's Log Tab.
         app::run_gui()?;
     }
 
