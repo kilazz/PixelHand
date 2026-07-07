@@ -40,7 +40,8 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     if !cache.contains_key(path) {
         let mut img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p).ok()?;
         if img.width() > 512 || img.height() > 512 {
-            img = img.resize_exact(512, 512, image::imageops::FilterType::Triangle);
+            // Use `resize` instead of `resize_exact` to preserve the aspect ratio
+            img = img.resize(512, 512, image::imageops::FilterType::Triangle);
         }
 
         // Evict least-recently accessed cache items if size limit reached

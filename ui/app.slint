@@ -1,4 +1,15 @@
-import { ListView, CheckBox, TextEdit, LineEdit, SpinBox, ComboBox, ScrollView, ProgressIndicator, Palette, Slider } from "std-widgets.slint";
+import {
+    ListView,
+    CheckBox,
+    TextEdit,
+    LineEdit,
+    SpinBox,
+    ComboBox,
+    ScrollView,
+    ProgressIndicator,
+    Palette,
+    Slider,
+} from "std-widgets.slint";
 
 // Custom Interactive Thumbnail with Corner Zones (R / G / B / A)
 component InteractiveThumbnail {
@@ -32,25 +43,37 @@ component InteractiveThumbnail {
             image-fit: contain;
         }
 
-        if show_corners : Rectangle {
+        if show_corners: Rectangle {
             // Top Left (R)
             TouchArea {
-                x: 0px; y: 0px; width: parent.width * 0.45; height: parent.height * 0.45;
+                x: 0px;
+                y: 0px;
+                width: parent.width * 0.45;
+                height: parent.height * 0.45;
                 clicked => { corner_clicked(path, "R"); }
             }
             // Top Right (G)
             TouchArea {
-                x: parent.width * 0.55; y: 0px; width: parent.width * 0.45; height: parent.height * 0.45;
+                x: parent.width * 0.55;
+                y: 0px;
+                width: parent.width * 0.45;
+                height: parent.height * 0.45;
                 clicked => { corner_clicked(path, "G"); }
             }
             // Bottom Left (B)
             TouchArea {
-                x: 0px; y: parent.height * 0.55; width: parent.width * 0.45; height: parent.height * 0.45;
+                x: 0px;
+                y: parent.height * 0.55;
+                width: parent.width * 0.45;
+                height: parent.height * 0.45;
                 clicked => { corner_clicked(path, "B"); }
             }
             // Bottom Right (A)
             TouchArea {
-                x: parent.width * 0.55; y: parent.height * 0.55; width: parent.width * 0.45; height: parent.height * 0.45;
+                x: parent.width * 0.55;
+                y: parent.height * 0.55;
+                width: parent.width * 0.45;
+                height: parent.height * 0.45;
                 clicked => { corner_clicked(path, "A"); }
             }
         }
@@ -124,6 +147,7 @@ component ChannelButton {
             vertical-alignment: center;
         }
     }
+
     TouchArea {
         clicked => { clicked(); }
     }
@@ -164,10 +188,10 @@ component CustomButton {
     }
 
     states [
-        hover when ta.has-hover && enabled : {
+        hover when ta.has-hover && enabled: {
             rect.background: primary-color.brighter(12%);
         }
-        active when ta.pressed && enabled : {
+        active when ta.pressed && enabled: {
             rect.background: primary-color.darker(12%);
         }
     ]
@@ -181,9 +205,31 @@ component SpecsRow {
     height: 24px;
     HorizontalLayout {
         spacing: 8px;
-        Text { text: name; width: 120px; color: #949ba4; font-size: 12px; vertical-alignment: center; }
-        Text { text: val1; color: #dcddde; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        Text { text: val2; color: #dcddde; font-size: 12px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text {
+            text: name;
+            width: 120px;
+            color: #949ba4;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: val1;
+            color: #dcddde;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: val2;
+            color: #dcddde;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
     }
 }
 
@@ -198,6 +244,7 @@ component SectionTitle {
             font-weight: 700;
             color: #949ba4;
         }
+
         Rectangle {
             height: 1px;
             background: #1f2023;
@@ -210,12 +257,15 @@ component PanelSection {
     in property <string> title;
     VerticalLayout {
         spacing: 6px;
-        SectionTitle { text: root.title; }
+        SectionTitle {
+            text: root.title;
+        }
+
         @children
     }
 }
 
-// Custom interactive Wipe comparative viewport (Enforces perfect square-aligned rendering!)
+// Custom interactive Wipe comparative viewport (Responsive rendering)
 component WipeViewport {
     in property <image> original;
     in property <image> duplicate;
@@ -342,10 +392,28 @@ export component AppWindow inherits Window {
 
     // Metadata tables data structures
     in-out property <SelectedFile> original_meta: {
-        name: "-", size_str: "-", format: "-", resolution: "-", bit_depth: "-", color_space: "-", mipmaps: "-", alpha: "-", similarity: "-", path: ""
+        name: "-",
+        size_str: "-",
+        format: "-",
+        resolution: "-",
+        bit_depth: "-",
+        color_space: "-",
+        mipmaps: "-",
+        alpha: "-",
+        similarity: "-",
+        path: ""
     };
     in-out property <SelectedFile> duplicate_meta: {
-        name: "-", size_str: "-", format: "-", resolution: "-", bit_depth: "-", color_space: "-", mipmaps: "-", alpha: "-", similarity: "-", path: ""
+        name: "-",
+        size_str: "-",
+        format: "-",
+        resolution: "-",
+        bit_depth: "-",
+        color_space: "-",
+        mipmaps: "-",
+        alpha: "-",
+        similarity: "-",
+        path: ""
     };
 
     // Comparative canvas assets bindings
@@ -420,28 +488,71 @@ export component AppWindow inherits Window {
             VerticalLayout {
                 padding: 10px; // Padding applied directly to layout to prevent warnings
                 spacing: 8px;
-                Text { text: "File Formats Selector"; font-weight: 700; color: #ffffff; }
+                Text {
+                    text: "File Formats Selector";
+                    font-weight: 700;
+                    color: #ffffff;
+                }
+
                 HorizontalLayout {
                     spacing: 12px;
                     VerticalLayout {
                         spacing: 4px;
-                        CheckBox { text: ".png"; checked <=> root.ext_png; }
-                        CheckBox { text: ".tga"; checked <=> root.ext_tga; }
-                        CheckBox { text: ".dds"; checked <=> root.ext_dds; }
-                        CheckBox { text: ".bmp"; checked <=> root.ext_bmp; }
+                        CheckBox {
+                            text: ".png";
+                            checked <=> root.ext_png;
+                        }
+
+                        CheckBox {
+                            text: ".tga";
+                            checked <=> root.ext_tga;
+                        }
+
+                        CheckBox {
+                            text: ".dds";
+                            checked <=> root.ext_dds;
+                        }
+
+                        CheckBox {
+                            text: ".bmp";
+                            checked <=> root.ext_bmp;
+                        }
                     }
+
                     VerticalLayout {
                         spacing: 4px;
-                        CheckBox { text: ".exr"; checked <=> root.ext_exr; }
-                        CheckBox { text: ".hdr"; checked <=> root.ext_hdr; }
-                        CheckBox { text: ".tif"; checked <=> root.ext_tif; }
-                        CheckBox { text: ".webp"; checked <=> root.ext_webp; }
+                        CheckBox {
+                            text: ".exr";
+                            checked <=> root.ext_exr;
+                        }
+
+                        CheckBox {
+                            text: ".hdr";
+                            checked <=> root.ext_hdr;
+                        }
+
+                        CheckBox {
+                            text: ".tif";
+                            checked <=> root.ext_tif;
+                        }
+
+                        CheckBox {
+                            text: ".webp";
+                            checked <=> root.ext_webp;
+                        }
                     }
                 }
-                Rectangle { vertical-stretch: 1; }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
                 HorizontalLayout {
                     alignment: end;
-                    CustomButton { text: "Close"; clicked => { ext_popup.close(); } }
+                    CustomButton {
+                        text: "Close";
+                        clicked => { ext_popup.close(); }
+                    }
                 }
             }
         }
@@ -455,10 +566,27 @@ export component AppWindow inherits Window {
         HorizontalLayout {
             spacing: 4px;
             height: 32px;
-            TabButton { text: "Find"; active: root.active_tab == 0; clicked => { root.active_tab = 0; } }
-            TabButton { text: "Compare"; active: root.active_tab == 1; clicked => { root.active_tab = 1; } }
-            TabButton { text: "Log"; active: root.active_tab == 2; clicked => { root.active_tab = 2; } }
-            Rectangle { horizontal-stretch: 1; }
+            TabButton {
+                text: "Find";
+                active: root.active_tab == 0;
+                clicked => { root.active_tab = 0; }
+            }
+
+            TabButton {
+                text: "Compare";
+                active: root.active_tab == 1;
+                clicked => { root.active_tab = 1; }
+            }
+
+            TabButton {
+                text: "Log";
+                active: root.active_tab == 2;
+                clicked => { root.active_tab = 2; }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
         }
 
         Rectangle {
@@ -466,7 +594,7 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
 
             // ------------------ TAB 0: FIND (Results List/Grid & Sidebar) ------------------
-            if root.active_tab == 0 : HorizontalLayout {
+            if root.active_tab == 0: HorizontalLayout {
                 spacing: 12px;
 
                 // 1. Sidebar Config Section
@@ -488,33 +616,110 @@ export component AppWindow inherits Window {
                                     spacing: 8px;
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Folder A:"; width: 70px; vertical-alignment: center; font-size: 12px; }
-                                        LineEdit { text <=> root.dir_a; placeholder-text: "Source folder path..."; horizontal-stretch: 1; height: 24px; }
-                                        CustomButton { text: "..."; width: 26px; height: 24px; clicked => { root.select_folder_a(); } }
+                                        Text {
+                                            text: "Folder A:";
+                                            width: 70px;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.dir_a;
+                                            placeholder-text: "Source folder path...";
+                                            horizontal-stretch: 1;
+                                            height: 24px;
+                                        }
+
+                                        CustomButton {
+                                            text: "...";
+                                            width: 26px;
+                                            height: 24px;
+                                            clicked => { root.select_folder_a(); }
+                                        }
                                     }
-                                    if root.qc_mode : HorizontalLayout {
+
+                                    if root.qc_mode: HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Folder B:"; width: 70px; vertical-alignment: center; font-size: 12px; }
-                                        LineEdit { text <=> root.dir_b; placeholder-text: "Comparison folder..."; horizontal-stretch: 1; height: 24px; }
-                                        CustomButton { text: "..."; width: 26px; height: 24px; clicked => { root.select_folder_b(); } }
+                                        Text {
+                                            text: "Folder B:";
+                                            width: 70px;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.dir_b;
+                                            placeholder-text: "Comparison folder...";
+                                            horizontal-stretch: 1;
+                                            height: 24px;
+                                        }
+
+                                        CustomButton {
+                                            text: "...";
+                                            width: 26px;
+                                            height: 24px;
+                                            clicked => { root.select_folder_b(); }
+                                        }
                                     }
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Query AI:"; width: 70px; vertical-alignment: center; font-size: 12px; }
-                                        LineEdit { text <=> root.query_text; placeholder-text: "Optional text or path..."; height: 24px; }
+                                        Text {
+                                            text: "Query AI:";
+                                            width: 70px;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.query_text;
+                                            placeholder-text: "Optional text or path...";
+                                            height: 24px;
+                                        }
                                     }
+
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Similarity:"; width: 70px; vertical-alignment: center; font-size: 12px; }
-                                        Slider { value <=> root.similarity_threshold; minimum: 50; maximum: 100; height: 24px; } // Bidirectional binding
-                                        Text { text: Math.round(root.similarity_threshold) + "%"; width: 36px; horizontal-alignment: right; vertical-alignment: center; font-size: 12px; }
+                                        Text {
+                                            text: "Similarity:";
+                                            width: 70px;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
+
+                                        Slider {
+                                            value <=> root.similarity_threshold;
+                                            minimum: 50;
+                                            maximum: 100;
+                                            height: 24px;
+                                        } // Bidirectional binding
+                                        Text {
+                                            text: Math.round(root.similarity_threshold) + "%";
+                                            width: 36px;
+                                            horizontal-alignment: right;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
                                     }
+
                                     HorizontalLayout {
                                         spacing: 6px;
-                                        Text { text: "Batch Sz:"; width: 70px; vertical-alignment: center; font-size: 12px; }
-                                        SpinBox { value <=> root.batch_size; minimum: 16; maximum: 1024; height: 24px; }
+                                        Text {
+                                            text: "Batch Sz:";
+                                            width: 70px;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
+
+                                        SpinBox {
+                                            value <=> root.batch_size;
+                                            minimum: 16;
+                                            maximum: 1024;
+                                            height: 24px;
+                                        }
                                     }
+
                                     HorizontalLayout {
+                                        spacing: 8px;
                                         CustomButton {
                                             text: "File Types...";
                                             width: 100px;
@@ -525,8 +730,12 @@ export component AppWindow inherits Window {
                                                 ext_popup.show();
                                             }
                                         }
-                                        Rectangle { horizontal-stretch: 1; }
+
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                        }
                                     }
+
                                     CustomButton {
                                         text: root.is_scanning ? "Processing Assets..." : "Start Scan";
                                         primary-color: #23a55a;
@@ -541,17 +750,57 @@ export component AppWindow inherits Window {
                                 title: "Quality Control (QC) Options";
                                 VerticalLayout {
                                     spacing: 6px;
-                                    CheckBox { text: "Enable Technical QC Mode"; checked <=> root.qc_mode; height: 20px; }
-                                    if root.qc_mode : VerticalLayout {
+                                    CheckBox {
+                                        text: "Enable Technical QC Mode";
+                                        checked <=> root.qc_mode;
+                                        height: 20px;
+                                    }
+
+                                    if root.qc_mode: VerticalLayout {
                                         spacing: 4px;
                                         padding-left: 8px;
-                                        CheckBox { text: "Check NPOT (Power of 2)"; checked <=> root.qc_npot; height: 20px; }
-                                        CheckBox { text: "Check Mip-Maps"; checked <=> root.qc_mipmaps; height: 20px; }
-                                        CheckBox { text: "Check BlockAlignment (4px)"; checked <=> root.qc_block_align; height: 20px; }
-                                        CheckBox { text: "Check Bit Depth"; checked <=> root.qc_bit_depth; height: 20px; }
-                                        CheckBox { text: "Check Solid Colors"; checked <=> root.qc_solid_colors; height: 20px; }
-                                        CheckBox { text: "Validate Normal Maps"; checked <=> root.qc_normals; height: 20px; }
-                                        LineEdit { text <=> root.qc_normals_tags; placeholder-text: "Tags: _norm, _ddn"; enabled: root.qc_normals; height: 24px; }
+                                        CheckBox {
+                                            text: "Check NPOT (Power of 2)";
+                                            checked <=> root.qc_npot;
+                                            height: 20px;
+                                        }
+
+                                        CheckBox {
+                                            text: "Check Mip-Maps";
+                                            checked <=> root.qc_mipmaps;
+                                            height: 20px;
+                                        }
+
+                                        CheckBox {
+                                            text: "Check BlockAlignment (4px)";
+                                            checked <=> root.qc_block_align;
+                                            height: 20px;
+                                        }
+
+                                        CheckBox {
+                                            text: "Check Bit Depth";
+                                            checked <=> root.qc_bit_depth;
+                                            height: 20px;
+                                        }
+
+                                        CheckBox {
+                                            text: "Check Solid Colors";
+                                            checked <=> root.qc_solid_colors;
+                                            height: 20px;
+                                        }
+
+                                        CheckBox {
+                                            text: "Validate Normal Maps";
+                                            checked <=> root.qc_normals;
+                                            height: 20px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.qc_normals_tags;
+                                            placeholder-text: "Tags: _norm, _ddn";
+                                            enabled: root.qc_normals;
+                                            height: 24px;
+                                        }
                                     }
                                 }
                             }
@@ -559,7 +808,11 @@ export component AppWindow inherits Window {
                             PanelSection {
                                 title: "Search Methods (Non-QC)";
                                 ComboBox {
-                                    model: ["Exact Match (xxHash)", "Simple Duplicates (dHash)", "AI Semantic/Visual Search"];
+                                    model: [
+                                        "Exact Match (xxHash)",
+                                        "Simple Duplicates (dHash)",
+                                        "AI Semantic/Visual Search"
+                                    ];
                                     current-index <=> root.search_method;
                                     height: 24px;
                                 }
@@ -574,7 +827,9 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            Rectangle { vertical-stretch: 1; }
+                            Rectangle {
+                                vertical-stretch: 1;
+                            }
                         }
                     }
                 }
@@ -591,7 +846,12 @@ export component AppWindow inherits Window {
 
                         HorizontalLayout {
                             alignment: space-between;
-                            Text { text: "Results (" + root.results.length + " items)"; font-size: 14px; font-weight: 700; }
+                            Text {
+                                text: "Results (" + root.results.length + " items)";
+                                font-size: 14px;
+                                font-weight: 700;
+                            }
+
                             HorizontalLayout {
                                 spacing: 6px;
                                 CustomButton {
@@ -611,7 +871,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
 
                             // Standard List View Mode
-                            if !root.results_grid_mode && root.results.length > 0 : ListView {
+                            if !root.results_grid_mode && root.results.length > 0: ListView {
                                 for row[idx] in root.results: Rectangle {
                                     height: row.is_header ? 34px : 44px;
                                     background: row.is_header ? #1e1f22 : (row.is_best ? #2c3e50 : (row-ta.has-hover ? #393c41 : #2b2d31));
@@ -628,7 +888,7 @@ export component AppWindow inherits Window {
                                     }
 
                                     // Header rendering for groups (Interactive Click to Collapse)
-                                    if row.is_header : HorizontalLayout {
+                                    if row.is_header: HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
                                         spacing: 8px;
@@ -640,6 +900,7 @@ export component AppWindow inherits Window {
                                             font-weight: 700;
                                             vertical-alignment: center;
                                         }
+
                                         Text {
                                             text: row.meta_str; // Display dynamic status indicator
                                             color: #f0b132;
@@ -647,6 +908,7 @@ export component AppWindow inherits Window {
                                             font-weight: 700;
                                             vertical-alignment: center;
                                         }
+
                                         Text {
                                             text: row.size_str;
                                             color: #949ba4;
@@ -656,7 +918,7 @@ export component AppWindow inherits Window {
                                     }
 
                                     // Item rendering with Live Thumbnail & Corner RGBA channel isolators
-                                    if !row.is_header : HorizontalLayout {
+                                    if !row.is_header: HorizontalLayout {
                                         padding-left: 10px;
                                         padding-right: 10px;
                                         spacing: 8px;
@@ -689,6 +951,7 @@ export component AppWindow inherits Window {
                                                     root.active_tab = 1; // Auto switch to comparison tab
                                                 }
                                             }
+
                                             Text {
                                                 text: row.name;
                                                 color: #dcddde;
@@ -732,7 +995,7 @@ export component AppWindow inherits Window {
                             }
 
                             // Dynamic Grid View Mode (Calculated 3-column auto-flow)
-                            if root.results_grid_mode && root.results.length > 0 : ScrollView {
+                            if root.results_grid_mode && root.results.length > 0: ScrollView {
                                 HorizontalLayout {
                                     spacing: 12px;
                                     padding: 10px;
@@ -740,7 +1003,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         spacing: 0px;
                                         alignment: start;
-                                        for row[idx] in root.results : Rectangle {
+                                        for row[idx] in root.results: Rectangle {
                                             property <bool> show: idx.mod(3) == 0 && !row.is_header && row.is_best;
                                             width: show ? 135px : 0px;
                                             height: show ? 175px : 0px;
@@ -773,6 +1036,7 @@ export component AppWindow inherits Window {
                                                         width: 115px;
                                                         height: 95px;
                                                     }
+
                                                     Text {
                                                         text: "Group #" + (row.group_index + 1);
                                                         color: #ffffff;
@@ -780,6 +1044,7 @@ export component AppWindow inherits Window {
                                                         font-weight: 700;
                                                         horizontal-alignment: center;
                                                     }
+
                                                     Text {
                                                         text: row.size_str;
                                                         color: #949ba4;
@@ -794,7 +1059,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         spacing: 0px;
                                         alignment: start;
-                                        for row[idx] in root.results : Rectangle {
+                                        for row[idx] in root.results: Rectangle {
                                             property <bool> show: idx.mod(3) == 1 && !row.is_header && row.is_best;
                                             width: show ? 135px : 0px;
                                             height: show ? 175px : 0px;
@@ -827,6 +1092,7 @@ export component AppWindow inherits Window {
                                                         width: 115px;
                                                         height: 95px;
                                                     }
+
                                                     Text {
                                                         text: "Group #" + (row.group_index + 1);
                                                         color: #ffffff;
@@ -834,6 +1100,7 @@ export component AppWindow inherits Window {
                                                         font-weight: 700;
                                                         horizontal-alignment: center;
                                                     }
+
                                                     Text {
                                                         text: row.size_str;
                                                         color: #949ba4;
@@ -848,7 +1115,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         spacing: 0px;
                                         alignment: start;
-                                        for row[idx] in root.results : Rectangle {
+                                        for row[idx] in root.results: Rectangle {
                                             property <bool> show: idx.mod(3) == 2 && !row.is_header && row.is_best;
                                             width: show ? 135px : 0px;
                                             height: show ? 175px : 0px;
@@ -881,6 +1148,7 @@ export component AppWindow inherits Window {
                                                         width: 115px;
                                                         height: 95px;
                                                     }
+
                                                     Text {
                                                         text: "Group #" + (row.group_index + 1);
                                                         color: #ffffff;
@@ -888,6 +1156,7 @@ export component AppWindow inherits Window {
                                                         font-weight: 700;
                                                         horizontal-alignment: center;
                                                     }
+
                                                     Text {
                                                         text: row.size_str;
                                                         color: #949ba4;
@@ -901,7 +1170,7 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            if root.results.length == 0 : Rectangle {
+                            if root.results.length == 0: Rectangle {
                                 background: #1e1f22;
                                 VerticalLayout {
                                     alignment: center;
@@ -928,14 +1197,43 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             padding: 8px;
                             spacing: 4px;
-                            Text { text: "Selection Rules"; font-size: 12px; font-weight: 700; color: #949ba4; }
+                            Text {
+                                text: "Selection Rules";
+                                font-size: 12px;
+                                font-weight: 700;
+                                color: #949ba4;
+                            }
+
                             HorizontalLayout {
                                 spacing: 8px;
                                 alignment: start;
-                                CustomButton { text: "Select All"; primary-color: #4e5058; width: 85px; clicked => { root.trigger_selection_rule("all"); } }
-                                CustomButton { text: "Deselect All"; primary-color: #4e5058; width: 95px; clicked => { root.trigger_selection_rule("none"); } }
-                                CustomButton { text: "Select All Except Best"; primary-color: #4e5058; width: 140px; clicked => { root.trigger_selection_rule("except_best"); } }
-                                CustomButton { text: "Invert Selection"; primary-color: #4e5058; width: 110px; clicked => { root.trigger_selection_rule("invert"); } }
+                                CustomButton {
+                                    text: "Select All";
+                                    primary-color: #4e5058;
+                                    width: 85px;
+                                    clicked => { root.trigger_selection_rule("all"); }
+                                }
+
+                                CustomButton {
+                                    text: "Deselect All";
+                                    primary-color: #4e5058;
+                                    width: 95px;
+                                    clicked => { root.trigger_selection_rule("none"); }
+                                }
+
+                                CustomButton {
+                                    text: "Select All Except Best";
+                                    primary-color: #4e5058;
+                                    width: 140px;
+                                    clicked => { root.trigger_selection_rule("except_best"); }
+                                }
+
+                                CustomButton {
+                                    text: "Invert Selection";
+                                    primary-color: #4e5058;
+                                    width: 110px;
+                                    clicked => { root.trigger_selection_rule("invert"); }
+                                }
                             }
                         }
                     }
@@ -943,16 +1241,36 @@ export component AppWindow inherits Window {
                     // Link actions footer section
                     HorizontalLayout {
                         spacing: 8px;
-                        CustomButton { text: "Replace with Hardlink"; primary-color: #5865f2; width: 145px; clicked => { root.trigger_action("hardlink"); } }
-                        CustomButton { text: "Replace with Reflink"; primary-color: #5865f2; width: 135px; clicked => { root.trigger_action("reflink"); } }
-                        Rectangle { horizontal-stretch: 1; }
-                        CustomButton { text: "Move to Trash"; primary-color: #f23f43; width: 105px; clicked => { root.trigger_action("trash"); } }
+                        CustomButton {
+                            text: "Replace with Hardlink";
+                            primary-color: #5865f2;
+                            width: 145px;
+                            clicked => { root.trigger_action("hardlink"); }
+                        }
+
+                        CustomButton {
+                            text: "Replace with Reflink";
+                            primary-color: #5865f2;
+                            width: 135px;
+                            clicked => { root.trigger_action("reflink"); }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+
+                        CustomButton {
+                            text: "Move to Trash";
+                            primary-color: #f23f43;
+                            width: 105px;
+                            clicked => { root.trigger_action("trash"); }
+                        }
                     }
                 }
             }
 
             // ------------------ TAB 1: COMPARE (Large Side-by-Side Canvas) ------------------
-            if root.active_tab == 1 : HorizontalLayout {
+            if root.active_tab == 1: HorizontalLayout {
                 spacing: 12px;
 
                 // Visual rendering canvases viewport frame (Left Large Panel)
@@ -960,7 +1278,11 @@ export component AppWindow inherits Window {
                     horizontal-stretch: 1;
                     spacing: 12px;
 
-                    Text { text: "Interactive Compare Viewport"; font-size: 15px; font-weight: 700; }
+                    Text {
+                        text: "Interactive Compare Viewport";
+                        font-size: 15px;
+                        font-weight: 700;
+                    }
 
                     // Canvas control bar
                     HorizontalLayout {
@@ -972,10 +1294,21 @@ export component AppWindow inherits Window {
                             width: 160px;
                             height: 24px;
                         }
+
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Wipe Shift:"; vertical-alignment: center; font-size: 12px; }
-                            Slider { value <=> root.wipe_slider_val; minimum: 0.0; maximum: 1.0; height: 24px; }
+                            Text {
+                                text: "Wipe Shift:";
+                                vertical-alignment: center;
+                                font-size: 12px;
+                            }
+
+                            Slider {
+                                value <=> root.wipe_slider_val;
+                                minimum: 0.0;
+                                maximum: 1.0;
+                                height: 24px;
+                            }
                         }
                     }
 
@@ -988,22 +1321,20 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         horizontal-stretch: 1;
 
-                        // Unified constraint calculation formulas to guarantee identical square rendering!
-                        property <length> max_col_width: (self.width - 32px) / 2;
-                        property <length> max_col_height: self.height - 40px;
-                        property <length> uniform_square_size: max_col_width < max_col_height ? max_col_width : max_col_height;
-
-                        // Mode 1: Side-by-Side viewport (Enforced square-aligned rendering!)
-                        if root.compare_mode == 0 : HorizontalLayout {
+                        // Mode 1: Side-by-Side viewport (Perfectly responsive!)
+                        if root.compare_mode == 0: HorizontalLayout {
                             spacing: 12px;
-                            alignment: center;
                             VerticalLayout {
+                                horizontal-stretch: 1;
                                 spacing: 4px;
-                                alignment: center;
-                                Text { text: "ORIGINAL"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                                Text {
+                                    text: "ORIGINAL";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+
                                 Rectangle {
-                                    width: viewport_root.uniform_square_size;
-                                    height: self.width;
                                     background: #111214;
                                     border-color: #3e3e42;
                                     border-width: 1px;
@@ -1020,16 +1351,24 @@ export component AppWindow inherits Window {
                                     }
 
                                     // Foreground scaled Image
-                                    Image { source: root.image_original; image-fit: contain; }
+                                    Image {
+                                        source: root.image_original;
+                                        image-fit: contain;
+                                    }
                                 }
                             }
+
                             VerticalLayout {
+                                horizontal-stretch: 1;
                                 spacing: 4px;
-                                alignment: center;
-                                Text { text: "DUPLICATE"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                                Text {
+                                    text: "DUPLICATE";
+                                    font-size: 11px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                }
+
                                 Rectangle {
-                                    width: viewport_root.uniform_square_size;
-                                    height: self.width;
                                     background: #111214;
                                     border-color: #3e3e42;
                                     border-width: 1px;
@@ -1044,20 +1383,26 @@ export component AppWindow inherits Window {
                                         width: 100%;
                                         height: 100%;
                                     }
-                                    Image { source: root.image_duplicate; image-fit: contain; }
+
+                                    Image {
+                                        source: root.image_duplicate;
+                                        image-fit: contain;
+                                    }
                                 }
                             }
                         }
 
-                        // Mode 2: Wipe slider viewport (Centered matching square container)
-                        if root.compare_mode == 1 : VerticalLayout {
-                            alignment: center;
+                        // Mode 2: Wipe slider viewport (Fits perfectly to edge-to-edge area)
+                        if root.compare_mode == 1: VerticalLayout {
                             spacing: 4px;
-                            Text { text: "WIPE COMPARE (ORIGINAL / DUPLICATE)"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                            Text {
+                                text: "WIPE COMPARE (ORIGINAL / DUPLICATE)";
+                                font-size: 11px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
 
                             Rectangle {
-                                width: viewport_root.uniform_square_size;
-                                height: self.width;
                                 background: #111214;
                                 border-color: #3e3e42;
                                 border-width: 1px;
@@ -1075,15 +1420,17 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Mode 3: Transparency overlay blend viewport (Centered matching square container)
-                        if root.compare_mode == 2 : VerticalLayout {
-                            alignment: center;
+                        // Mode 3: Transparency overlay blend viewport (Full stretch adaptive bounds)
+                        if root.compare_mode == 2: VerticalLayout {
                             spacing: 4px;
-                            Text { text: "OVERLAY BLEND"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                            Text {
+                                text: "OVERLAY BLEND";
+                                font-size: 11px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
 
                             Rectangle {
-                                width: viewport_root.uniform_square_size;
-                                height: self.width;
                                 background: #111214;
                                 border-color: #3e3e42;
                                 border-width: 1px;
@@ -1105,6 +1452,7 @@ export component AppWindow inherits Window {
                                     height: 100%;
                                     opacity: 1.0 - root.wipe_slider_val;
                                 }
+
                                 Image {
                                     source: root.image_duplicate;
                                     image-fit: contain;
@@ -1115,15 +1463,17 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Mode 4: Generated difference heatmap view layer (Centered matching square container)
-                        if root.compare_mode == 3 : VerticalLayout {
-                            alignment: center;
+                        // Mode 4: Generated difference heatmap view layer (Full stretch adaptive bounds)
+                        if root.compare_mode == 3: VerticalLayout {
                             spacing: 4px;
-                            Text { text: "DIFFERENCE HEATMAP"; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                            Text {
+                                text: "DIFFERENCE HEATMAP";
+                                font-size: 11px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
+                            }
 
                             Rectangle {
-                                width: viewport_root.uniform_square_size;
-                                height: self.width;
                                 background: #111214;
                                 border-color: #3e3e42;
                                 border-width: 1px;
@@ -1163,6 +1513,7 @@ export component AppWindow inherits Window {
                                 root.channel_toggled();
                             }
                         }
+
                         ChannelButton {
                             text: "G";
                             active-color: #23a55a;
@@ -1173,6 +1524,7 @@ export component AppWindow inherits Window {
                                 root.channel_toggled();
                             }
                         }
+
                         ChannelButton {
                             text: "B";
                             active-color: #5865f2;
@@ -1183,6 +1535,7 @@ export component AppWindow inherits Window {
                                 root.channel_toggled();
                             }
                         }
+
                         ChannelButton {
                             text: "A";
                             active-color: #ffffff;
@@ -1203,7 +1556,12 @@ export component AppWindow inherits Window {
                     spacing: 12px;
 
                     // Header layout for Group Duplicates
-                    Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 13px; font-weight: 700; color: #949ba4; }
+                    Text {
+                        text: "Group Duplicates (" + root.selected_group_files.length + " items)";
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: #949ba4;
+                    }
 
                     // Duplicate Mini-List Container (Dynamic height based on draggable splitter!)
                     Rectangle {
@@ -1213,8 +1571,8 @@ export component AppWindow inherits Window {
                         border-width: 1px;
                         border-radius: 4px;
 
-                        if root.selected_group_files.length > 0 : ListView {
-                            for row[idx] in root.selected_group_files : Rectangle {
+                        if root.selected_group_files.length > 0: ListView {
+                            for row[idx] in root.selected_group_files: Rectangle {
                                 height: 38px;
                                 background: (row.path == root.duplicate_meta.path) ? #2c3e50 : (right-row-ta.has-hover ? #393c41 : #111214);
                                 border-radius: 4px;
@@ -1256,9 +1614,14 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        if root.selected_group_files.length == 0 : VerticalLayout {
+                        if root.selected_group_files.length == 0: VerticalLayout {
                             alignment: center;
-                            Text { text: "No duplicates selected."; color: #7c808a; horizontal-alignment: center; font-size: 11px; }
+                            Text {
+                                text: "No duplicates selected.";
+                                color: #7c808a;
+                                horizontal-alignment: center;
+                                font-size: 11px;
+                            }
                         }
                     }
 
@@ -1271,7 +1634,12 @@ export component AppWindow inherits Window {
                         // Splitter visual indicator mark
                         HorizontalLayout {
                             alignment: center;
-                            Rectangle { width: 20px; height: 2px; background: #6d6f78; border-radius: 1px; }
+                            Rectangle {
+                                width: 20px;
+                                height: 2px;
+                                background: #6d6f78;
+                                border-radius: 1px;
+                            }
                         }
 
                         splitter-ta := TouchArea {
@@ -1284,7 +1652,12 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    Text { text: "Comparison Specifications Matrix"; font-size: 13px; font-weight: 700; color: #949ba4; }
+                    Text {
+                        text: "Comparison Specifications Matrix";
+                        font-size: 13px;
+                        font-weight: 700;
+                        color: #949ba4;
+                    }
 
                     // Detailed Layout comparative properties table (Pushed tightly to the top!)
                     Rectangle {
@@ -1299,27 +1672,104 @@ export component AppWindow inherits Window {
                                 padding: 10px;
                                 spacing: 4px;
                                 HorizontalLayout {
-                                    Text { text: "Specification"; width: 120px; font-weight: 700; color: #949ba4; font-size: 12px; }
-                                    Text { text: "Original [Best]"; font-weight: 700; color: #f0b132; font-size: 12px; }
-                                    Text { text: "Duplicate"; font-weight: 700; color: #dcddde; font-size: 12px; }
+                                    Text {
+                                        text: "Specification";
+                                        width: 120px;
+                                        font-weight: 700;
+                                        color: #949ba4;
+                                        font-size: 12px;
+                                    }
+
+                                    Text {
+                                        text: "Original [Best]";
+                                        font-weight: 700;
+                                        color: #f0b132;
+                                        font-size: 12px;
+                                    }
+
+                                    Text {
+                                        text: "Duplicate";
+                                        font-weight: 700;
+                                        color: #dcddde;
+                                        font-size: 12px;
+                                    }
                                 }
-                                Rectangle { height: 1px; background: #1f2023; vertical-stretch: 0; }
 
-                                SpecsRow { name: "File Name"; val1: root.original_meta.name; val2: root.duplicate_meta.name; }
-                                SpecsRow { name: "File Size"; val1: root.original_meta.size_str; val2: root.duplicate_meta.size_str; }
-                                SpecsRow { name: "Format / Codec"; val1: root.original_meta.format; val2: root.duplicate_meta.format; }
-                                SpecsRow { name: "Resolution"; val1: root.original_meta.resolution; val2: root.duplicate_meta.resolution; }
-                                SpecsRow { name: "Bit Depth"; val1: root.original_meta.bit_depth; val2: root.duplicate_meta.bit_depth; }
-                                SpecsRow { name: "Color Space"; val1: root.original_meta.color_space; val2: root.duplicate_meta.color_space; }
-                                SpecsRow { name: "Mipmaps"; val1: root.original_meta.mipmaps; val2: root.duplicate_meta.mipmaps; }
-                                SpecsRow { name: "Alpha Channel"; val1: root.original_meta.alpha; val2: root.duplicate_meta.alpha; }
-                                SpecsRow { name: "Similarity"; val1: "100.0%"; val2: root.duplicate_meta.similarity; }
+                                Rectangle {
+                                    height: 1px;
+                                    background: #1f2023;
+                                    vertical-stretch: 0;
+                                }
 
-                                Rectangle { height: 1px; background: #1f2023; vertical-stretch: 0; }
+                                SpecsRow {
+                                    name: "File Name";
+                                    val1: root.original_meta.name;
+                                    val2: root.duplicate_meta.name;
+                                }
 
-                                SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
+                                SpecsRow {
+                                    name: "File Size";
+                                    val1: root.original_meta.size_str;
+                                    val2: root.duplicate_meta.size_str;
+                                }
 
-                                Rectangle { vertical-stretch: 1; } // Clean spacer that pushes all rows to the top!
+                                SpecsRow {
+                                    name: "Format / Codec";
+                                    val1: root.original_meta.format;
+                                    val2: root.duplicate_meta.format;
+                                }
+
+                                SpecsRow {
+                                    name: "Resolution";
+                                    val1: root.original_meta.resolution;
+                                    val2: root.duplicate_meta.resolution;
+                                }
+
+                                SpecsRow {
+                                    name: "Bit Depth";
+                                    val1: root.original_meta.bit_depth;
+                                    val2: root.duplicate_meta.bit_depth;
+                                }
+
+                                SpecsRow {
+                                    name: "Color Space";
+                                    val1: root.original_meta.color_space;
+                                    val2: root.duplicate_meta.color_space;
+                                }
+
+                                SpecsRow {
+                                    name: "Mipmaps";
+                                    val1: root.original_meta.mipmaps;
+                                    val2: root.duplicate_meta.mipmaps;
+                                }
+
+                                SpecsRow {
+                                    name: "Alpha Channel";
+                                    val1: root.original_meta.alpha;
+                                    val2: root.duplicate_meta.alpha;
+                                }
+
+                                SpecsRow {
+                                    name: "Similarity";
+                                    val1: "100.0%";
+                                    val2: root.duplicate_meta.similarity;
+                                }
+
+                                Rectangle {
+                                    height: 1px;
+                                    background: #1f2023;
+                                    vertical-stretch: 0;
+                                }
+
+                                SpecsRow {
+                                    name: "Full Path";
+                                    val1: root.original_meta.path;
+                                    val2: root.duplicate_meta.path;
+                                }
+
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                } // Clean spacer that pushes all rows to the top!
                             }
                         }
                     }
@@ -1327,11 +1777,15 @@ export component AppWindow inherits Window {
             }
 
             // ------------------ TAB 2: LOG (Console Output) ------------------
-            if root.active_tab == 2 : VerticalLayout {
+            if root.active_tab == 2: VerticalLayout {
                 padding: 15px;
                 spacing: 10px;
 
-                Text { text: "System Console Logs & ONNX Compiler Diagnostics"; font-weight: 700; font-size: 14px; }
+                Text {
+                    text: "System Console Logs & ONNX Compiler Diagnostics";
+                    font-weight: 700;
+                    font-size: 14px;
+                }
 
                 TextEdit {
                     text <=> root.console_log;
@@ -1343,9 +1797,20 @@ export component AppWindow inherits Window {
 
                 HorizontalLayout {
                     spacing: 8px;
-                    CustomButton { text: "Export Log Output..."; primary-color: #0e639c; }
-                    CustomButton { text: "Clear Console Buffer"; primary-color: #3a3a3a; clicked => { root.console_log = "Buffer cleared."; } }
-                    Rectangle { horizontal-stretch: 1; }
+                    CustomButton {
+                        text: "Export Log Output...";
+                        primary-color: #0e639c;
+                    }
+
+                    CustomButton {
+                        text: "Clear Console Buffer";
+                        primary-color: #3a3a3a;
+                        clicked => { root.console_log = "Buffer cleared."; }
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
                 }
             }
         }
