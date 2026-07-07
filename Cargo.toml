@@ -54,6 +54,10 @@ rfd = "0.17.2"
 base64 = "0.22.1"
 reflink-copy = "0.1.30"
 
+# Errors
+anyhow = "1.0.103"
+thiserror = "2.0.18"
+
 [patch.crates-io]
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
 
