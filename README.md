@@ -27,19 +27,22 @@
     *   Falls back smoothly to highly-optimized local CPU execution.
 
 ## Tech Stack
-*   **Core Desktop Engine**: [Tauri](https://tauri.app/) (Rust)
-*   **Frontend**: [SolidJS](https://www.solidjs.com/), Vite
+*   **Core GUI Engine**: [Slint UI](https://slint.dev/)
 *   **Machine Learning**: `ort` ([ONNX Runtime](https://onnxruntime.ai/))
-*   **Vector Database**: [LanceDB](https://lancedb.com/) with Apache Arrow integration
-*   **Image Processing**: Native Rust `image` and `image_dds` crates
+*   **Vector Database**: [LanceDB](https://lancedb.com/)
+*   **Image Processing & Format Parsing**: Native Rust `image`, `image_dds`, `ddsfile`, and `exr` crates with custom hardware-mapped unswizzlers (Morton Z-order curve decoding).
 
 ## Development
 To run the PixelHand development environment:
 
-```bash
-# 1. Install Node modules in the root /src directory
-npm install
+```
+# 1. Run GUI
+cargo run
 
-# 2. Run the Tauri dev server (from the workspace root)
-cargo tauri dev
+# 2. Run the command-line (CLI) auditor mode
+cargo run -- -c --scan-exact <directory_path>
+cargo run -- -c --scan-qc <directory_path> --check-npot --validate-normals
+
+# 3. Compile optimized production release binaries
+cargo build --release
 ```
