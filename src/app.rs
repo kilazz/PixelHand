@@ -2,6 +2,7 @@
 use anyhow::{Context, Result};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, ModelRc, VecModel};
+use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -16,16 +17,40 @@ slint::include_modules!();
 // Global handle to push logs directly to the UI console from any thread
 pub static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 
-/// Custom writer that captures all tracing events, sending them to Slint Log Tab.
+// Fast intermediate thread-safe memory queue for incoming logs
+static PENDING_LOGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+// Global thread-safe handle for the active physical log file
+static LOG_FILE: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();
+
+/// Custom writer that captures all tracing events, sending them to Slint Log Tab
+/// and writing them simultaneously to a physical log file on disk.
 struct UiLogWriter;
 impl std::io::Write for UiLogWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Ok(s) = std::str::from_utf8(buf) {
+            // 1. Write to the GUI Log Tab queue
             append_to_console_log(s.trim_end());
         }
+
+        // 2. Write to the physical log file on disk (thread-safe append)
+        if let Some(file_mutex) = LOG_FILE.get()
+            && let Ok(mut lock) = file_mutex.lock()
+            && let Some(ref mut file) = *lock
+        {
+            let _ = file.write_all(buf);
+            let _ = file.flush();
+        }
+
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
+        if let Some(file_mutex) = LOG_FILE.get()
+            && let Ok(mut lock) = file_mutex.lock()
+            && let Some(ref mut file) = *lock
+        {
+            let _ = file.flush();
+        }
         Ok(())
     }
 }
@@ -36,25 +61,34 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for UiLogWriter {
     }
 }
 
-/// Appends a message to the Slint UI log console safely from any thread.
+/// Appends a message to the fast memory queue instead of updating the UI immediately.
+/// This prevents CPU bottlenecking under heavy parallel logging.
 pub fn append_to_console_log(msg: &str) {
-    if let Some(app_weak) = APP_HANDLE.get() {
-        let msg_clone = msg.to_string();
-        let _ = app_weak.upgrade_in_event_loop(move |ui| {
-            let current_log = ui.get_console_log().to_string();
-            ui.set_console_log(format!("{}\n{}", current_log, msg_clone).into());
-        });
-    } else {
-        println!("[CONSOLE] {}", msg);
+    let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut lock) = queue.lock() {
+        lock.push(msg.to_string());
     }
 }
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    // Init tracing to pipe ALL app/library warnings directly to our Log tab
+    // Initialize the physical log file inside the portable directory
+    if let Ok(dir) = utils::settings::get_portable_app_data_dir() {
+        let log_path = dir.join("PixelHand.log");
+        if let Ok(file) = fs::OpenOptions::new()
+            .create(true)
+            .append(true) // Append logs so previous sessions are preserved (implicitly grants write permission)
+            .open(log_path)
+        {
+            let _ = LOG_FILE.set(Mutex::new(Some(file)));
+        }
+    }
+
+    // Init tracing to pipe ALL app/library warnings directly to our Log tab and the file
     tracing_subscriber::fmt()
         .with_writer(UiLogWriter)
         .with_env_filter("info,ort=warn") // Show info from us, warnings from ONNX Runtime
+        .with_ansi(false) // Disable ANSI color escapes to protect Slint layout parser and log files
         .init();
 
     let state = Arc::new(Mutex::new(AppState::default()));
@@ -68,6 +102,52 @@ pub fn run_gui() -> Result<()> {
 
     let checkerboard = utils::ui::generate_checkerboard();
     app.set_checkerboard_pattern(checkerboard);
+
+    // Start background log flushing loop (Updates UI at a steady 5Hz to prevent rendering stutter)
+    let app_weak_log = app.as_weak();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
+        loop {
+            interval.tick().await;
+
+            // Drain all pending logs atomically
+            let pending: Vec<String> = {
+                let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
+                if let Ok(mut lock) = queue.lock() {
+                    if lock.is_empty() {
+                        continue;
+                    }
+                    std::mem::take(&mut *lock)
+                } else {
+                    Vec::new()
+                }
+            };
+
+            if pending.is_empty() {
+                continue;
+            }
+
+            let app_clone = app_weak_log.clone();
+            let _ = app_clone.upgrade_in_event_loop(move |ui| {
+                let current_log = ui.get_console_log().to_string();
+                let mut lines: Vec<&str> = current_log.lines().collect();
+
+                // Append the batch of new lines
+                for p in &pending {
+                    lines.push(p);
+                }
+
+                // Buffer Bounding: strictly keep only the last 200 lines to keep Slint TextEdit lightning-fast!
+                if lines.len() > 200 {
+                    let start = lines.len() - 200;
+                    lines = lines[start..].to_vec();
+                }
+
+                let new_log = lines.join("\n");
+                ui.set_console_log(new_log.into());
+            });
+        }
+    });
 
     trigger_startup_model_download(app.as_weak());
 
