@@ -314,9 +314,8 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_tif: true;
     in-out property <bool> ext_webp: true;
 
-    // Mini-list resizing & spec matrix collapse properties
-    in-out property <float> duplicates_panel_height: 140;
-    in-out property <bool> specs_matrix_collapsed: false;
+    // Draggable Splitter Properties (Type Length for Native Layout operations)
+    in-out property <length> duplicates_panel_height: 180px;
 
     // Metadata tables data structures
     in-out property <SelectedFile> original_meta: {
@@ -1070,18 +1069,12 @@ export component AppWindow inherits Window {
                     width: 440px;
                     spacing: 12px;
 
-                    // Header layout for Group Duplicates with adjust slider
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 13px; font-weight: 700; color: #949ba4; vertical-alignment: center; }
-                        Rectangle { horizontal-stretch: 1; }
-                        Text { text: "List Height:"; vertical-alignment: center; font-size: 12px; color: #858585; }
-                        Slider { value <=> root.duplicates_panel_height; minimum: 80; maximum: 350; width: 100px; height: 16px; }
-                    }
+                    // Header layout for Group Duplicates
+                    Text { text: "Group Duplicates (" + root.selected_group_files.length + " items)"; font-size: 13px; font-weight: 700; color: #949ba4; }
 
-                    // Duplicate Mini-List Container (Dynamic height based on slider!)
+                    // Duplicate Mini-List Container (Dynamic height based on draggable splitter!)
                     Rectangle {
-                        height: root.duplicates_panel_height * 1px;
+                        height: root.duplicates_panel_height;
                         background: #111214;
                         border-color: #1f2023;
                         border-width: 1px;
@@ -1135,20 +1128,32 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Specs Header with toggle collapse button
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text { text: "Comparison Specifications Matrix"; font-size: 13px; font-weight: 700; color: #949ba4; vertical-alignment: center; }
-                        Rectangle { horizontal-stretch: 1; }
-                        CustomButton {
-                            text: root.specs_matrix_collapsed ? "Show Matrix (▼)" : "Hide Matrix (▲)";
-                            height: 20px;
-                            clicked => { root.specs_matrix_collapsed = !root.specs_matrix_collapsed; }
+                    // Tactile Draggable Splitter Bar (Jitter-free parent-relative dragging!)
+                    Rectangle {
+                        height: 8px;
+                        background: splitter-ta.has-hover ? #4e5058 : #2b2d31;
+                        border-radius: 4px;
+
+                        // Splitter visual indicator mark
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle { width: 20px; height: 2px; background: #6d6f78; border-radius: 1px; }
+                        }
+
+                        splitter-ta := TouchArea {
+                            mouse-cursor: MouseCursor.row-resize;
+                            moved => {
+                                if (self.pressed) {
+                                    root.duplicates_panel_height = (self.y + self.mouse-y - self.pressed-y).clamp(80px, 450px);
+                                }
+                            }
                         }
                     }
 
-                    // Detailed Layout comparative properties table (Only visible if NOT collapsed)
-                    if !root.specs_matrix_collapsed : Rectangle {
+                    Text { text: "Comparison Specifications Matrix"; font-size: 13px; font-weight: 700; color: #949ba4; }
+
+                    // Detailed Layout comparative properties table (Pushed tightly to the top!)
+                    Rectangle {
                         border-color: #1f2023;
                         border-width: 1px;
                         background: #111214;
@@ -1157,7 +1162,7 @@ export component AppWindow inherits Window {
 
                         ScrollView {
                             VerticalLayout {
-                                padding: 8px;
+                                padding: 10px;
                                 spacing: 4px;
                                 HorizontalLayout {
                                     Text { text: "Specification"; width: 120px; font-weight: 700; color: #949ba4; font-size: 12px; }
@@ -1180,7 +1185,7 @@ export component AppWindow inherits Window {
 
                                 SpecsRow { name: "Full Path"; val1: root.original_meta.path; val2: root.duplicate_meta.path; }
 
-                                Rectangle { vertical-stretch: 1; } // Clean spacer that pushes all rows to the top!
+                                Rectangle { vertical-stretch: 1; } // Absorb unused space and push everything to top cleanly!
                             }
                         }
                     }

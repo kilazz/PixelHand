@@ -137,6 +137,7 @@ pub struct AppSettings {
     pub ext_hdr: bool,
     pub ext_tif: bool,
     pub ext_webp: bool,
+    pub duplicates_panel_height: f32, // Preserves resizable splitter state!
 }
 
 impl Default for AppSettings {
@@ -164,6 +165,7 @@ impl Default for AppSettings {
             ext_hdr: true,
             ext_tif: true,
             ext_webp: true,
+            duplicates_panel_height: 180.0,
         }
     }
 }
@@ -250,6 +252,7 @@ fn save_current_settings(ui: &AppWindow) {
         ext_hdr: ui.get_ext_hdr(),
         ext_tif: ui.get_ext_tif(),
         ext_webp: ui.get_ext_webp(),
+        duplicates_panel_height: ui.get_duplicates_panel_height(),
     };
     if let Ok(dir) = get_portable_app_data_dir() {
         let path = dir.join("Settings.json");
@@ -1529,6 +1532,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     app.set_ext_hdr(loaded_settings.ext_hdr);
     app.set_ext_tif(loaded_settings.ext_tif);
     app.set_ext_webp(loaded_settings.ext_webp);
+    app.set_duplicates_panel_height(loaded_settings.duplicates_panel_height);
 
     // Auto-download models on startup!
     let app_weak_startup = app.as_weak();
@@ -1961,15 +1965,15 @@ async fn main() -> Result<(), slint::PlatformError> {
 
     // 6. Hardlink / Reflink / Trash Actions Handler Callback
     let app_weak = app.as_weak();
-    let state_clone = state.clone();
+    let state_copy = state.clone();
     app.on_trigger_action(move |action_type| {
         let app_copy = app_weak.clone();
-        let state_copy = state_clone.clone();
+        let state_copy_inner = state_copy.clone();
         let action = action_type.to_string();
 
         tokio::spawn(async move {
             let (checked_files, pairs) = {
-                let lock = state_copy.lock().unwrap();
+                let lock = state_copy_inner.lock().unwrap();
                 let mut checked_files = Vec::new();
                 let mut pairs = Vec::new();
 
@@ -2016,7 +2020,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                     });
 
                     // Clear local memory buffers
-                    let mut lock = state_copy.lock().unwrap();
+                    let mut lock = state_copy_inner.lock().unwrap();
                     lock.results.clear();
                     lock.groups.clear();
                     lock.collapsed_groups.clear();
