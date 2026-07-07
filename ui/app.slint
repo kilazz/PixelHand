@@ -1428,7 +1428,7 @@ export component AppWindow inherits Window {
                         }
 
                         // Mode 3: Transparency overlay blend viewport (Full stretch adaptive bounds)
-                        if root.compare_mode == 2: VerticalLayout {
+                            if root.compare_mode == 2: VerticalLayout {
                             spacing: 4px;
                             Text {
                                 text: "OVERLAY BLEND";
@@ -1458,7 +1458,6 @@ export component AppWindow inherits Window {
                                     image-fit: contain;
                                     width: 100%;
                                     height: 100%;
-                                    opacity: 1.0 - root.wipe_slider_val;
                                 }
 
                                 Image {
