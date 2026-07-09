@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, ModelRc, VecModel};
 use std::fs;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
 // Import state store settings
@@ -18,24 +18,19 @@ slint::include_modules!();
 // Global handle to push logs directly to the UI console from any thread
 pub static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 
-// Fast intermediate thread-safe memory queue for incoming logs
-static PENDING_LOGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+// Fast intermediate thread-safe queue to bypass immediate UI locked calls
+static LOG_MESSAGES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 
-// Global thread-safe handle for the active physical log file
-static LOG_FILE: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();
-
-/// Custom writer that captures all tracing events, sending them to Slint Log Tab
-/// and writing them simultaneously to a physical log file on disk.
+/// Custom tracing subscriber log handler wrapping native console pipes
 struct UiLogWriter;
 
 impl std::io::Write for UiLogWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if let Ok(s) = std::str::from_utf8(buf) {
-            // Write to the GUI Log Tab queue
-            append_to_console_log(s.trim_end());
+        if let Ok(msg) = String::from_utf8(buf.to_vec()) {
+            append_to_console_log(&msg);
         }
 
-        // Write to the physical log file on disk (thread-safe append)
+        // Write to physical log file on disk (thread-safe append)
         if let Some(file_mutex) = LOG_FILE.get()
             && let Ok(mut lock) = file_mutex.lock()
             && let Some(ref mut file) = *lock
@@ -65,12 +60,44 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for UiLogWriter {
     }
 }
 
-/// Appends a message to the fast memory queue instead of updating the UI immediately.
-/// This prevents CPU bottlenecking under heavy parallel logging.
+fn clean_sample_log(raw: String) -> String {
+    raw.replace("\u{001b}[2m", "")
+        .replace("\u{001b}[0m", "")
+        .replace("\u{001b}[32m", "")
+        .replace("\u{001b}[33m", "")
+        .replace("\u{001b}[31m", "")
+}
+
+fn weak_upgrade_and_queue(weak: slint::Weak<AppWindow>, log_line: String) {
+    let _ = weak.upgrade_in_event_loop(move |ui| {
+        let current = ui.get_console_log().to_string();
+        let next = if current.is_empty() {
+            log_line
+        } else {
+            format!("{}\n{}", current, log_line)
+        };
+        ui.set_console_log(next.into());
+    });
+}
+
 pub fn append_to_console_log(msg: &str) {
-    let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
-    if let Ok(mut lock) = queue.lock() {
-        lock.push(msg.to_string());
+    let clean_msg = msg.trim_end().to_string();
+    if clean_msg.is_empty() {
+        return;
+    }
+
+    // Attempt direct main UI thread update if possible using collapsed conditionals
+    if let Some(weak_handle) = APP_HANDLE.get()
+        && let Some(_ui) = weak_handle.upgrade()
+    {
+        weak_upgrade_and_queue(weak_handle.clone(), clean_sample_log(clean_msg));
+        return;
+    }
+
+    // Queue messages globally if UI is not fully instantiated yet
+    let queue_mutex = LOG_MESSAGES.get_or_init(|| Mutex::new(Vec::new()));
+    if let Ok(mut q) = queue_mutex.lock() {
+        q.push(clean_msg);
     }
 }
 
@@ -88,7 +115,7 @@ pub fn run_gui() -> Result<()> {
         }
     }
 
-    // Init tracing to pipe ALL app/library warnings directly to our Log tab and the file
+    // Init custom tracing to redirect ALL warnings and logs directly into our GUI and log file
     tracing_subscriber::fmt()
         .with_writer(UiLogWriter)
         .with_env_filter("info,ort=warn") // Show info from us, warnings from ONNX Runtime
@@ -96,7 +123,7 @@ pub fn run_gui() -> Result<()> {
         .init();
 
     let state = Arc::new(Mutex::new(AppState::default()));
-    let cancel_token = Arc::new(AtomicBool::new(false)); // Scan cancellation flag
+    let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false)); // Scan cancellation flag
 
     let app = AppWindow::new().context("Failed to initialize Slint UI Window")?;
     let _ = APP_HANDLE.set(app.as_weak());
@@ -106,6 +133,34 @@ pub fn run_gui() -> Result<()> {
 
     let checkerboard = utils::ui::generate_checkerboard();
     app.set_checkerboard_pattern(checkerboard);
+
+    // Sync HDR Tonemapping global atomic states on application launch
+    crate::core::tonemapper::TONEMAP_ENABLED
+        .store(loaded_settings.tonemap_enabled, Ordering::Relaxed);
+    crate::core::tonemapper::TONEMAP_OPERATOR
+        .store(loaded_settings.tonemap_operator as usize, Ordering::Relaxed);
+
+    // Flush any logs that accumulated before UI thread finished instantiating
+    if let Some(queue_mutex) = LOG_MESSAGES.get()
+        && let Ok(mut q) = queue_mutex.lock()
+    {
+        let app_weak_init = app.as_weak();
+        let logs_to_flush = std::mem::take(&mut *q);
+        if !logs_to_flush.is_empty() {
+            let _ = app_weak_init.upgrade_in_event_loop(move |ui| {
+                let mut current = ui.get_console_log().to_string();
+                for line in logs_to_flush {
+                    let cleaned = clean_sample_log(line);
+                    if current.is_empty() {
+                        current = cleaned;
+                    } else {
+                        current = format!("{}\n{}", current, cleaned);
+                    }
+                }
+                ui.set_console_log(current.into());
+            });
+        }
+    }
 
     // Start background log flushing loop (Updates UI at a steady 5Hz to prevent rendering stutter)
     let app_weak_log = app.as_weak();
@@ -210,7 +265,6 @@ pub fn run_gui() -> Result<()> {
         let app_weak_download = app_weak.clone();
 
         tokio::spawn(async move {
-            // --- FIXED: Collapsed the outer if check and nested let-bindings into a single condition line ---
             if params_for_task.search_method == 2
                 && let Err(e) = crate::core::downloader::verify_and_download_models(
                     app_weak_download.clone(),
@@ -223,6 +277,17 @@ pub fn run_gui() -> Result<()> {
                     ui.set_status_text(format!("AI Model download failed: {}", e).into());
                 });
                 return;
+            }
+
+            // Sync Tonemapping active choices inside background scanning thread
+            // Bound to scoped block to ensure ref_ui is fully dropped prior to the execute_scan await boundary
+            {
+                if let Some(ref_ui) = app_weak_download.upgrade() {
+                    crate::core::tonemapper::TONEMAP_ENABLED
+                        .store(ref_ui.get_tonemap_enabled(), Ordering::Relaxed);
+                    crate::core::tonemapper::TONEMAP_OPERATOR
+                        .store(ref_ui.get_tonemap_operator() as usize, Ordering::Relaxed);
+                }
             }
 
             let scan_result = scanners::execute_scan(params_for_task.clone()).await;
@@ -430,6 +495,43 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Handle generic saving request callback from Slint
+    let app_weak_save = app.as_weak();
+    app.on_save_settings(move || {
+        if let Some(ui) = app_weak_save.upgrade() {
+            utils::settings::save_settings(&ui);
+        }
+    });
+
+    // Dynamic callback trigger linked to HDR Tonemapper sidebar panel selection updates
+    let app_weak_tonemap = app.as_weak();
+    app.on_tonemap_toggled(move || {
+        let app_copy = app_weak_tonemap.clone();
+        let ui = app_copy.unwrap();
+
+        // Dynamically save modified settings to file
+        utils::settings::save_settings(&ui);
+
+        // Sync global atomic choices with background thread decoders
+        crate::core::tonemapper::TONEMAP_ENABLED.store(ui.get_tonemap_enabled(), Ordering::Relaxed);
+        crate::core::tonemapper::TONEMAP_OPERATOR
+            .store(ui.get_tonemap_operator() as usize, Ordering::Relaxed);
+
+        // Fully flush the decoded high-res preview cache so that EXR/DDS images instantly re-decode with the new tonemapper
+        if let Some(cache_mutex) = utils::cache::DECODED_CACHE.get()
+            && let Ok(mut cache) = cache_mutex.lock()
+        {
+            cache.clear();
+        }
+
+        let orig_path = ui.get_original_meta().path.to_string();
+        let dup_path = ui.get_duplicate_meta().path.to_string();
+
+        if !orig_path.is_empty() && !dup_path.is_empty() {
+            trigger_viewport_update(app_weak_tonemap.clone(), orig_path, dup_path);
+        }
+    });
+
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
         if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
@@ -502,11 +604,14 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_qc_hide_same_resolution(settings.qc_hide_same_resolution);
     app.set_ai_model(settings.ai_model);
     app.set_search_precision(settings.search_precision);
+
+    // Apply Tonemapping configurations to UI
+    app.set_tonemap_enabled(settings.tonemap_enabled);
+    app.set_tonemap_operator(settings.tonemap_operator);
 }
 
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     let app = app_weak.unwrap();
-    // Fetch active model settings on launch to verify dynamic weights first
     let active_model = app.get_ai_model();
 
     tokio::spawn(async move {
@@ -535,6 +640,11 @@ fn trigger_viewport_update(app_weak: slint::Weak<AppWindow>, orig_path: String, 
     let compare_mode = ui.get_compare_mode();
     let app_weak_clone = app_weak.clone();
 
+    // Dynamically align active Tonemapping state configs across threads
+    crate::core::tonemapper::TONEMAP_ENABLED.store(ui.get_tonemap_enabled(), Ordering::Relaxed);
+    crate::core::tonemapper::TONEMAP_OPERATOR
+        .store(ui.get_tonemap_operator() as usize, Ordering::Relaxed);
+
     tokio::spawn(async move {
         if let Some(raw_orig) = utils::cache::get_channel_preview_image(&orig_path, &channel).await
         {
@@ -560,3 +670,9 @@ fn trigger_viewport_update(app_weak: slint::Weak<AppWindow>, orig_path: String, 
         }
     });
 }
+
+// Thread-safe fast intermediate queue implementation for incoming console log pipelines
+static PENDING_LOGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+// Thread-safe active log file handle mapping
+pub static LOG_FILE: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();

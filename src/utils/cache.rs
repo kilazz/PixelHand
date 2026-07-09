@@ -5,13 +5,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-struct DecodedCacheItem {
-    mtime: std::time::SystemTime,
-    last_accessed: std::time::Instant,
-    image: image::RgbaImage,
+pub struct DecodedCacheItem {
+    pub mtime: std::time::SystemTime,
+    pub last_accessed: std::time::Instant,
+    pub image: image::RgbaImage,
 }
 
-static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
+// Public static OnceLock to allow app.rs to clear the cache upon tonemapping adjustments
+pub static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
 
 pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::RgbaImage> {
     let p = PathBuf::from(path);
@@ -35,9 +36,10 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     }
 
     if !cache.contains_key(path) {
-        // --- FIXED: Load 1:1 original full-resolution pixel buffers for split-pane inspects ---
+        // Load 1:1 original full-resolution pixel buffers for split-pane inspects
         let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p, None).ok()?;
 
+        // Least-Recently-Used (LRU) eviction rule limiting cache to 4 massive images to avoid OOM
         if cache.len() >= 4 {
             let mut oldest_key = None;
             let mut oldest_time = std::time::Instant::now();

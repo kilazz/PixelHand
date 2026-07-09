@@ -2,6 +2,7 @@
 
 use image::{DynamicImage, RgbaImage};
 use image_hasher::{HashAlg, HasherConfig};
+use rayon::prelude::*;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -20,16 +21,21 @@ pub struct PerceptualHashes {
     pub phash: String,
 }
 
+/// Detects if an image has a fully transparent alpha channel but contains
+/// valid RGB visual data in parallel (common in game engines/packed textures).
 pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
-    let mut max_alpha = 0u8;
-    let mut max_rgb = 0u8;
-    for pixel in rgba.pixels() {
-        if pixel[3] > max_alpha {
-            max_alpha = pixel[3];
-        }
-        max_rgb = max_rgb.max(pixel[0]).max(pixel[1]).max(pixel[2]);
+    let pixels = rgba.as_raw();
+
+    // Check in parallel if any pixel has a non-zero alpha value
+    let has_opaque_alpha = pixels.par_chunks_exact(4).any(|pixel| pixel[3] > 0);
+    if has_opaque_alpha {
+        return false;
     }
-    max_alpha == 0 && max_rgb > 0
+
+    // Since alpha is fully transparent, verify in parallel if there is non-zero color data
+    pixels
+        .par_chunks_exact(4)
+        .any(|pixel| pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0)
 }
 
 /// Shared color-channel splitting and luminance processing logic
@@ -90,7 +96,7 @@ pub fn calculate_perceptual_hashes(
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
 ) -> Option<PerceptualHashes> {
-    // --- OPTIMIZED: Request downscaled 128px mipmap directly during DDS parse step ---
+    // Request downscaled 128px mipmap directly during DDS parse step to conserve memory
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
     let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);

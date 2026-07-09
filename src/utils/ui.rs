@@ -1,4 +1,5 @@
 // src/utils/ui.rs
+
 use crate::app::{AppWindow, ResultsRow, SelectedFile};
 use crate::state::{AppState, DuplicateFileSummary, ResultsRowData};
 use slint::{ModelRc, SharedPixelBuffer, VecModel};
@@ -52,12 +53,12 @@ pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
         is_qc: rd.is_qc,
         is_ai: rd.is_ai,
         group_index: rd.group_index,
-        hash_or_issue: rd.hash_or_issue.clone().into(),
-        path: rd.path.clone().into(),
-        name: rd.name.clone().into(),
-        score_or_detail: rd.score_or_detail.clone().into(),
-        size_str: rd.size_str.clone().into(),
-        meta_str: rd.meta_str.clone().into(),
+        hash_or_issue: slint::SharedString::from(&rd.hash_or_issue),
+        path: slint::SharedString::from(&rd.path),
+        name: slint::SharedString::from(&rd.name),
+        score_or_detail: slint::SharedString::from(&rd.score_or_detail),
+        size_str: slint::SharedString::from(&rd.size_str),
+        meta_str: slint::SharedString::from(&rd.meta_str),
         is_best: rd.is_best,
         is_checked: rd.is_checked,
         thumbnail,
@@ -78,16 +79,16 @@ pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize>
     None
 }
 
-/// Syncs the Slint ListView based on the expanded/collapsed group masks
+/// Syncs the Slint ListView based on the expanded/collapsed group masks with pre-allocated buffer sizes
 pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
-    let mut slint_rows = Vec::new();
+    let mut slint_rows = Vec::with_capacity(state.results.len());
     for row in &state.results {
         if row.is_header {
             let mut slint_row = convert_to_slint_row(row);
             slint_row.meta_str = if state.collapsed_groups.contains(&row.group_index) {
-                "▶ [Collapsed] Click Header to Expand".into()
+                slint::SharedString::from("▶ [Collapsed] Click Header to Expand")
             } else {
-                "▼ [Expanded] Click Header to Collapse".into()
+                slint::SharedString::from("▼ [Expanded] Click Header to Collapse")
             };
             slint_rows.push(slint_row);
         } else if !state.collapsed_groups.contains(&row.group_index) {
@@ -126,33 +127,35 @@ pub fn apply_selection_rule(state: &mut AppState, rule: &str) {
     }
 }
 
-/// Maps an internal core Summary File into a Slint UI display Struct
+/// Maps an internal core Summary File into a Slint UI display Struct using highly optimized string references
 pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) -> SelectedFile {
     let name = std::path::Path::new(&file.path)
         .file_name()
         .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
+        .to_string_lossy();
+
+    let mipmaps_str = if file.mipmap_count <= 1 {
+        "No".to_string()
+    } else {
+        file.mipmap_count.to_string()
+    };
+
+    let similarity_str = if is_original {
+        "-".to_string()
+    } else {
+        format!("{:.1}%", file.similarity)
+    };
 
     SelectedFile {
-        name: name.into(),
-        size_str: super::helpers::format_size(file.size).into(),
-        format: file.compression_format.clone().into(),
-        resolution: format!("{}x{}", file.width, file.height).into(),
-        bit_depth: format!("{}-bit", file.bit_depth).into(),
-        color_space: file.color_space.clone().into(),
-        mipmaps: (if file.mipmap_count <= 1 {
-            "No".to_string()
-        } else {
-            file.mipmap_count.to_string()
-        })
-        .into(),
-        alpha: (if file.has_alpha { "Yes" } else { "No" }).into(),
-        similarity: if is_original {
-            "-".into()
-        } else {
-            format!("{:.1}%", file.similarity).into()
-        },
-        path: file.path.clone().into(),
+        name: slint::SharedString::from(name.as_ref()),
+        size_str: slint::SharedString::from(super::helpers::format_size(file.size)),
+        format: slint::SharedString::from(&file.compression_format),
+        resolution: slint::SharedString::from(format!("{}x{}", file.width, file.height)),
+        bit_depth: slint::SharedString::from(format!("{}-bit", file.bit_depth)),
+        color_space: slint::SharedString::from(&file.color_space),
+        mipmaps: slint::SharedString::from(mipmaps_str),
+        alpha: slint::SharedString::from(if file.has_alpha { "Yes" } else { "No" }),
+        similarity: slint::SharedString::from(similarity_str),
+        path: slint::SharedString::from(&file.path),
     }
 }

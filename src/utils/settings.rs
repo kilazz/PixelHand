@@ -79,6 +79,10 @@ pub fn save_settings(ui: &AppWindow) {
         excluded_folders: ui.get_excluded_folders().to_string(),
         search_precision: ui.get_search_precision(),
         ai_model: ui.get_ai_model(),
+
+        // HDR Tonemapping Options
+        tonemap_enabled: ui.get_tonemap_enabled(),
+        tonemap_operator: ui.get_tonemap_operator(),
     };
 
     if let Ok(dir) = get_portable_app_data_dir() {

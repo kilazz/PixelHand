@@ -1,3 +1,5 @@
+// ui/app.slint
+
 import {
     ListView,
     CheckBox,
@@ -266,7 +268,6 @@ component PanelSection {
 }
 
 // Custom interactive Wipe comparative viewport (Responsive rendering)
-// Kept private to avoid standalone Rust interface generation warnings
 component WipeViewport {
     in property <image> original;
     in property <image> duplicate;
@@ -359,7 +360,6 @@ export component AppWindow inherits Window {
 
     title: "PixelHand - AI Duplicate & Graphical QC Auditor";
 
-    // Default size and flexible constraints for free OS scaling
     preferred-width: 1320px;
     preferred-height: 880px;
     min-width: 1000px;
@@ -367,8 +367,14 @@ export component AppWindow inherits Window {
 
     background: #1e1f22;
 
+    // Active Tab tracking state (0: Find, 1: Compare, 2: Log)
     in-out property <int> active_tab: 0;
 
+    // Tonemapping persistence states properties
+    in-out property <bool> tonemap_enabled: true;
+    in-out property <int> tonemap_operator: 0; // 0: ACES Filmic, 1: ICtCp (Lumina)
+
+    // Scan Configurations and Directories
     in-out property <string> dir_a: "";
     in-out property <string> dir_b: "";
     in-out property <string> query_text: "";
@@ -378,6 +384,7 @@ export component AppWindow inherits Window {
     in-out property <float> progress: 0.0;
     in-out property <string> status_text: "System Ready. Drop images or write path.";
 
+    // Active file format selections (Binds to CheckBoxes inside File Types pop-up)
     in-out property <bool> ext_png: true;
     in-out property <bool> ext_tga: true;
     in-out property <bool> ext_dds: true;
@@ -417,17 +424,22 @@ export component AppWindow inherits Window {
     // Dynamic LanceDB IVF-PQ Precision state bindings
     in-out property <int> search_precision: 1; // 0: Fast, 1: Balanced, 2: Accurate, 3: Exhaustive
 
-    // --- NEW: Dynamic Model switching state bindings ---
+    // Dynamic Model switching state bindings
     in-out property <int> ai_model: 0; // 0: CLIP-B/32, 1: SigLIP-B, 2: DINOv2-B
+
+    // Accumulate skipped/corrupted files during scanning
+    in-out property <[string]> skipped_files_list: [];
+    in-out property <length> skipped_popup_x: 0px;
+    in-out property <length> skipped_popup_y: 0px;
 
     // Draggable Splitters states (Persisted dynamically)
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
 
-    // Global checkerboard pattern loaded from Rust
+    // Checkerboard asset
     in-out property <image> checkerboard_pattern;
 
-    // Metadata tables data structures
+    // Metadata specs mappings
     in-out property <SelectedFile> original_meta: {
         name: "-",
         size_str: "-",
@@ -453,23 +465,21 @@ export component AppWindow inherits Window {
         path: ""
     };
 
-    // Comparative canvas assets bindings
+    // Viewer image assets
     in-out property <image> image_original;
     in-out property <image> image_duplicate;
     in-out property <image> image_heatmap;
 
-    // Comparer canvas configuration options: 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference Heatmap
+    // Viewer controllers variables
     in-out property <int> compare_mode: 0;
     in-out property <float> wipe_slider_val: 0.5;
     in-out property <float> bg_alpha: 1.0;
 
-    // Channel preview filters states
     in-out property <bool> active_r: false;
     in-out property <bool> active_g: false;
     in-out property <bool> active_b: false;
     in-out property <bool> active_a: false;
 
-    // Quality Control options configuration parameters
     in-out property <bool> qc_mode: false;
     in-out property <bool> qc_npot: true;
     in-out property <bool> qc_mipmaps: true;
@@ -479,38 +489,38 @@ export component AppWindow inherits Window {
     in-out property <bool> qc_normals: true;
     in-out property <string> qc_normals_tags: "";
 
-    // General options
     in-out property <bool> ignore_hidden: true;
     in-out property <bool> ignore_errors: true;
     in-out property <bool> skip_system: true;
 
-    // Search options
-    in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: dHash, 2: AI Embeddings
+    in-out property <int> search_method: 0;
     in-out property <int> execution_provider: 0;
 
-    // UI layouts states
     in-out property <bool> results_grid_mode: false;
     in-out property <[ResultsRow]> selected_group_files: [];
 
-    // Project files models & console log output
     in-out property <[ResultsRow]> results: [];
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
-    // Coordinate variables tracking File Format filter dropdown locations
     in-out property <length> ext_popup_x: 0px;
     in-out property <length> ext_popup_y: 0px;
 
-    // Navigation and folder browser commands callbacks
+    // Native callbacks mappings
     callback select_folder_a();
     callback select_folder_b();
     callback run_scan();
     callback cancel_scan();
     callback open_file_in_viewer(string);
-    callback trigger_action(string); // "hardlink", "reflink", "trash"
-    callback row_clicked(int, bool, int, string); // idx, is_header, group_idx, path
-    callback row_checkbox_toggled(int); // idx
+    callback trigger_action(string);
+    callback row_clicked(int, bool, int, string);
+    callback row_checkbox_toggled(int);
     callback channel_toggled();
-    callback trigger_selection_rule(string); // "all", "none", "except_best", "invert"
+    callback trigger_selection_rule(string);
+
+    // Callbacks to notify Rust backend to save settings and handle tonemapping transitions
+    callback save_settings();
+    callback tonemap_toggled();
+    callback export_log(string);
 
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
@@ -526,7 +536,7 @@ export component AppWindow inherits Window {
             border-radius: 4px;
 
             VerticalLayout {
-                padding: 10px; // Padding applied directly to layout to prevent warnings
+                padding: 10px;
                 spacing: 8px;
                 Text {
                     text: "File Formats Selector";
@@ -541,21 +551,25 @@ export component AppWindow inherits Window {
                         CheckBox {
                             text: ".png";
                             checked <=> root.ext_png;
+                            toggled => { root.save_settings(); }
                         }
 
                         CheckBox {
                             text: ".tga";
                             checked <=> root.ext_tga;
+                            toggled => { root.save_settings(); }
                         }
 
                         CheckBox {
                             text: ".dds";
                             checked <=> root.ext_dds;
+                            toggled => { root.save_settings(); }
                         }
 
                         CheckBox {
                             text: ".bmp";
                             checked <=> root.ext_bmp;
+                            toggled => { root.save_settings(); }
                         }
                     }
 
@@ -564,21 +578,25 @@ export component AppWindow inherits Window {
                         CheckBox {
                             text: ".exr";
                             checked <=> root.ext_exr;
+                            toggled => { root.save_settings(); }
                         }
 
                         CheckBox {
                             text: ".hdr";
                             checked <=> root.ext_hdr;
+                            toggled => { root.save_settings(); }
                         }
 
                         CheckBox {
                             text: ".tif";
                             checked <=> root.ext_tif;
+                            toggled => { root.save_settings(); }
                         }
 
                         CheckBox {
                             text: ".webp";
                             checked <=> root.ext_webp;
+                            toggled => { root.save_settings(); }
                         }
                     }
                 }
@@ -598,6 +616,68 @@ export component AppWindow inherits Window {
         }
     }
 
+    skipped_popup := PopupWindow {
+        x: root.skipped_popup_x;
+        y: root.skipped_popup_y;
+        width: 450px;
+        height: 300px;
+        close-policy: close-on-click;
+
+        Rectangle {
+            background: #2b2d31;
+            border-color: #f23f43;
+            border-width: 1.5px;
+            border-radius: 4px;
+
+            VerticalLayout {
+                padding: 12px;
+                spacing: 8px;
+
+                Text {
+                    text: "Skipped / Corrupted Files List";
+                    font-weight: 700;
+                    color: #ffffff;
+                    font-size: 13px;
+                }
+
+                Rectangle {
+                    background: #111214;
+                    border-radius: 4px;
+                    vertical-stretch: 1;
+                    clip: true;
+
+                    ListView {
+                        width: 100%;
+                        height: 100%;
+                        for file in root.skipped_files_list: Rectangle {
+                            height: 26px;
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                Text {
+                                    text: file;
+                                    color: #dcddde;
+                                    font-size: 11px;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    CustomButton {
+                        text: "Dismiss";
+                        clicked => { skipped_popup.close(); }
+                    }
+                }
+            }
+        }
+    }
+
+    // MAIN ROOT WINDOW LAYOUT
     VerticalLayout {
         padding: 12px;
         spacing: 12px;
@@ -665,6 +745,7 @@ export component AppWindow inherits Window {
                                             width: 70px;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #dcddde;
                                         }
 
                                         LineEdit {
@@ -672,6 +753,7 @@ export component AppWindow inherits Window {
                                             placeholder-text: "Source folder path...";
                                             horizontal-stretch: 1;
                                             height: 24px;
+                                            edited => { root.save_settings(); }
                                         }
 
                                         CustomButton {
@@ -689,6 +771,7 @@ export component AppWindow inherits Window {
                                             width: 70px;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #dcddde;
                                         }
 
                                         LineEdit {
@@ -696,6 +779,7 @@ export component AppWindow inherits Window {
                                             placeholder-text: "Comparison folder...";
                                             horizontal-stretch: 1;
                                             height: 24px;
+                                            edited => { root.save_settings(); }
                                         }
 
                                         CustomButton {
@@ -713,12 +797,14 @@ export component AppWindow inherits Window {
                                             width: 70px;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #dcddde;
                                         }
 
                                         LineEdit {
                                             text <=> root.excluded_folders;
                                             placeholder-text: "e.g. .git, cache, temp";
                                             height: 24px;
+                                            edited => { root.save_settings(); }
                                         }
                                     }
 
@@ -729,14 +815,15 @@ export component AppWindow inherits Window {
                                             width: 70px;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #dcddde;
                                         }
 
-                                        // --- UX FIX: Disable and alter placeholder text if DINOv2-B (index 2) is chosen ---
                                         LineEdit {
                                             text <=> root.query_text;
                                             placeholder-text: root.ai_model == 2 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
                                             enabled: root.ai_model != 2;
                                             height: 24px;
+                                            edited => { root.save_settings(); }
                                         }
                                     }
 
@@ -747,6 +834,7 @@ export component AppWindow inherits Window {
                                             width: 70px;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #dcddde;
                                         }
 
                                         Slider {
@@ -754,6 +842,7 @@ export component AppWindow inherits Window {
                                             minimum: 50;
                                             maximum: 100;
                                             height: 24px;
+                                            changed(val) => { root.save_settings(); }
                                         }
 
                                         Text {
@@ -762,6 +851,7 @@ export component AppWindow inherits Window {
                                             horizontal-alignment: right;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #ffffff;
                                         }
                                     }
 
@@ -772,6 +862,7 @@ export component AppWindow inherits Window {
                                             width: 70px;
                                             vertical-alignment: center;
                                             font-size: 12px;
+                                            color: #dcddde;
                                         }
 
                                         SpinBox {
@@ -779,6 +870,7 @@ export component AppWindow inherits Window {
                                             minimum: 16;
                                             maximum: 1024;
                                             height: 24px;
+                                            edited(val) => { root.save_settings(); }
                                         }
                                     }
 
@@ -804,6 +896,7 @@ export component AppWindow inherits Window {
                                         text: "Save Visual Reports";
                                         checked <=> root.save_visuals;
                                         height: 20px;
+                                        toggled => { root.save_settings(); }
                                     }
 
                                     if root.save_visuals: VerticalLayout {
@@ -829,6 +922,7 @@ export component AppWindow inherits Window {
                                                 maximum: 12;
                                                 height: 22px;
                                                 width: 100px;
+                                                edited(val) => { root.save_settings(); }
                                             }
 
                                             Text {
@@ -845,6 +939,7 @@ export component AppWindow inherits Window {
                                                 maximum: 1000;
                                                 height: 22px;
                                                 width: 110px;
+                                                edited(val) => { root.save_settings(); }
                                             }
 
                                             Rectangle {
@@ -870,6 +965,7 @@ export component AppWindow inherits Window {
                                                 maximum: 36;
                                                 height: 22px;
                                                 width: 100px;
+                                                edited(val) => { root.save_settings(); }
                                             }
 
                                             Text {
@@ -886,6 +982,7 @@ export component AppWindow inherits Window {
                                                 maximum: 3.0;
                                                 height: 22px;
                                                 horizontal-stretch: 1;
+                                                changed(val) => { root.save_settings(); }
                                             }
 
                                             Text {
@@ -919,12 +1016,29 @@ export component AppWindow inherits Window {
                                         text: "Compare by luminance only (Grayscale)";
                                         checked <=> root.prep_luminance;
                                         height: 20px;
+                                        toggled => { root.save_settings(); }
                                     }
 
                                     CheckBox {
                                         text: "Compare by specific channels";
                                         checked <=> root.prep_channels;
                                         height: 20px;
+                                        toggled => { root.save_settings(); }
+                                    }
+
+                                    // Dynamic Tonemapper check and ComboBox selectors
+                                    CheckBox {
+                                        text: "Enable HDR Tonemapping";
+                                        checked <=> root.tonemap_enabled;
+                                        height: 20px;
+                                        toggled => { root.tonemap_toggled(); }
+                                    }
+
+                                    if root.tonemap_enabled: ComboBox {
+                                        model: ["ACES Filmic", "ICtCp (Lumina) Perceptual"];
+                                        current-index <=> root.tonemap_operator;
+                                        height: 24px;
+                                        selected(val) => { root.tonemap_toggled(); }
                                     }
 
                                     if root.prep_channels: VerticalLayout {
@@ -937,21 +1051,25 @@ export component AppWindow inherits Window {
                                             CheckBox {
                                                 text: "R";
                                                 checked <=> root.prep_r;
+                                                toggled => { root.save_settings(); }
                                             }
 
                                             CheckBox {
                                                 text: "G";
                                                 checked <=> root.prep_g;
+                                                toggled => { root.save_settings(); }
                                             }
 
                                             CheckBox {
                                                 text: "B";
                                                 checked <=> root.prep_b;
+                                                toggled => { root.save_settings(); }
                                             }
 
                                             CheckBox {
                                                 text: "A";
                                                 checked <=> root.prep_a;
+                                                toggled => { root.save_settings(); }
                                             }
 
                                             Rectangle {
@@ -973,6 +1091,7 @@ export component AppWindow inherits Window {
                                                 text <=> root.prep_tags;
                                                 placeholder-text: "_mask, _ddn (empty = all)";
                                                 height: 22px;
+                                                edited => { root.save_settings(); }
                                             }
                                         }
 
@@ -980,6 +1099,7 @@ export component AppWindow inherits Window {
                                             text: "Ignore solid channels";
                                             checked <=> root.prep_ignore_solid;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
                                     }
                                 }
@@ -993,6 +1113,7 @@ export component AppWindow inherits Window {
                                         text: "Enable Technical QC Mode";
                                         checked <=> root.qc_mode;
                                         height: 20px;
+                                        toggled => { root.save_settings(); }
                                     }
 
                                     if root.qc_mode: VerticalLayout {
@@ -1003,48 +1124,56 @@ export component AppWindow inherits Window {
                                             text: "Match by stem (ignore ext)";
                                             checked <=> root.qc_match_by_stem;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Hide same resolution (compare only)";
                                             checked <=> root.qc_hide_same_resolution;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check NPOT (Power of 2)";
                                             checked <=> root.qc_npot;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Mip-Maps";
                                             checked <=> root.qc_mipmaps;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check BlockAlignment (4px)";
                                             checked <=> root.qc_block_align;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Bit Depth";
                                             checked <=> root.qc_bit_depth;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Solid Colors";
                                             checked <=> root.qc_solid_colors;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Validate Normal Maps";
                                             checked <=> root.qc_normals;
                                             height: 20px;
+                                            toggled => { root.save_settings(); }
                                         }
 
                                         LineEdit {
@@ -1052,6 +1181,7 @@ export component AppWindow inherits Window {
                                             placeholder-text: "Tags: _norm, _ddn";
                                             enabled: root.qc_normals;
                                             height: 24px;
+                                            edited => { root.save_settings(); }
                                         }
                                     }
                                 }
@@ -1067,16 +1197,17 @@ export component AppWindow inherits Window {
                                     ];
                                     current-index <=> root.search_method;
                                     height: 24px;
+                                    selected(val) => { root.save_settings(); }
                                 }
                             }
 
-                            // --- NEW: Dynamic AI Model selector dropdown Panel ---
                             if root.search_method == 2: PanelSection {
                                 title: "AI Model";
                                 ComboBox {
                                     model: ["Fastest (CLIP-B/32)", "Compact (SigLIP-B)", "Visual Structure (DINOv2-B)"];
                                     current-index <=> root.ai_model;
                                     height: 24px;
+                                    selected(val) => { root.save_settings(); }
                                 }
                             }
 
@@ -1086,6 +1217,7 @@ export component AppWindow inherits Window {
                                     model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
                                     current-index <=> root.search_precision;
                                     height: 24px;
+                                    selected(val) => { root.save_settings(); }
                                 }
                             }
 
@@ -1095,6 +1227,7 @@ export component AppWindow inherits Window {
                                     model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
                                     current-index <=> root.execution_provider;
                                     height: 24px;
+                                    selected(val) => { root.save_settings(); }
                                 }
                             }
 
@@ -1125,6 +1258,7 @@ export component AppWindow inherits Window {
                         moved => {
                             if (self.pressed) {
                                 root.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(340px, 600px);
+                                root.save_settings();
                             }
                         }
                     }
@@ -1146,11 +1280,24 @@ export component AppWindow inherits Window {
                                 text: "Results (" + root.results.length + " items)";
                                 font-size: 14px;
                                 font-weight: 700;
+                                color: #ffffff;
                                 vertical-alignment: center;
                             }
 
                             HorizontalLayout {
                                 spacing: 6px;
+
+                                if root.skipped_files_list.length > 0: CustomButton {
+                                    text: "⚠️ Skipped Files (" + root.skipped_files_list.length + ")";
+                                    primary-color: #f23f43; // warning red
+                                    height: 24px;
+                                    clicked => {
+                                        root.skipped_popup_x = self.absolute-position.x - 120px;
+                                        root.skipped_popup_y = self.absolute-position.y + self.height;
+                                        skipped_popup.show();
+                                    }
+                                }
+
                                 CustomButton {
                                     text: root.results_grid_mode ? "List Mode (☰)" : "Grid Mode (⊞)";
                                     height: 24px;
@@ -1546,6 +1693,7 @@ export component AppWindow inherits Window {
                         text: "Interactive Compare Viewport";
                         font-size: 15px;
                         font-weight: 700;
+                        color: #ffffff;
                     }
 
                     // Canvas control bar
@@ -1565,6 +1713,7 @@ export component AppWindow inherits Window {
                                 text: "Wipe Shift:";
                                 vertical-alignment: center;
                                 font-size: 12px;
+                                color: #dcddde;
                             }
 
                             Slider {
@@ -1601,6 +1750,11 @@ export component AppWindow inherits Window {
                             property <length> start_y;
 
                             pointer-event(evt) => {
+                                if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                                    root.zoom_factor = 1.0;
+                                    root.pan_x = 0px;
+                                    root.pan_y = 0px;
+                                }
                                 if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
                                     self.start_x = self.mouse-x;
                                     self.start_y = self.mouse-y;
@@ -2064,6 +2218,7 @@ export component AppWindow inherits Window {
                     text: "System Console Logs & Compiler Diagnostics";
                     font-weight: 700;
                     font-size: 14px;
+                    color: #ffffff;
                 }
 
                 TextEdit {
@@ -2077,9 +2232,11 @@ export component AppWindow inherits Window {
 
                 HorizontalLayout {
                     spacing: 8px;
+
                     CustomButton {
                         text: "Export Log Output...";
                         primary-color: #0e639c;
+                        clicked => { root.export_log(root.console_log); }
                     }
 
                     CustomButton {

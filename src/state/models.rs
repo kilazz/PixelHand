@@ -62,8 +62,12 @@ pub struct AppSettings {
     pub excluded_folders: String,
     pub search_precision: i32,
 
-    // --- FIXED: Registered active AI model state persistent property ---
+    // Registered active AI model state persistent property
     pub ai_model: i32, // 0: CLIP-B/32, 1: SigLIP-B, 2: DINOv2-B
+
+    // HDR Tonemapping Configuration
+    pub tonemap_enabled: bool,
+    pub tonemap_operator: i32, // 0: ACES Filmic, 1: ICtCp (Lumina)
 }
 
 impl Default for AppSettings {
@@ -120,6 +124,10 @@ impl Default for AppSettings {
 
             // Default model index CLIP-B/32
             ai_model: 0,
+
+            // Default Tonemapping Options
+            tonemap_enabled: true,
+            tonemap_operator: 0, // Default to ACES Filmic
         }
     }
 }
