@@ -431,7 +431,12 @@ export component AppWindow inherits Window {
     in-out property <int> search_precision: 1; // 0: Fast, 1: Balanced, 2: Accurate, 3: Exhaustive
 
     // Dynamic Model switching state bindings
-    in-out property <int> ai_model: 0; // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B
+    in-out property <int> ai_model: 0; // 0: CLIP-B, 1: CLIP-L, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: Custom
+
+    // Custom local ONNX properties
+    in-out property <string> custom_model_path: "";
+    in-out property <int> custom_model_arch: 0; // 0: CLIP, 1: SigLIP, 2: DINOv2
+    in-out property <int> custom_model_dim: 512;
 
     // Accumulate skipped/corrupted files during scanning
     in-out property <[string]> skipped_files_list: [];
@@ -549,6 +554,7 @@ export component AppWindow inherits Window {
     callback results_sort_changed(int);
     callback clear_cache();
     callback clear_models();
+    callback select_custom_model();
 
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
@@ -1280,11 +1286,72 @@ export component AppWindow inherits Window {
                                         "Balanced (CLIP-L/14)",
                                         "Compact (SigLIP-B)",
                                         "High Quality (SigLIP-L)",
-                                        "Visual Structure (DINOv2-B)"
+                                        "Visual Structure (DINOv2-B)",
+                                        "Custom (Local ONNX)"
                                     ];
                                     current-index <=> root.ai_model;
                                     height: 24px;
                                     selected(val) => { root.save_settings(); }
+                                }
+                            }
+
+                            if root.search_method == 2 && root.ai_model == 5: VerticalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Custom Model Path:";
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    LineEdit {
+                                        text <=> root.custom_model_path;
+                                        placeholder-text: "Path to ONNX folder...";
+                                        height: 24px;
+                                        edited => { root.save_settings(); }
+                                    }
+
+                                    CustomButton {
+                                        text: "...";
+                                        width: 26px;
+                                        height: 24px;
+                                        clicked => { root.select_custom_model(); }
+                                    }
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text {
+                                        text: "Arch:";
+                                        vertical-alignment: center;
+                                        font-size: 11px;
+                                        color: #dcddde;
+                                        width: 35px;
+                                    }
+
+                                    ComboBox {
+                                        model: ["CLIP", "SigLIP", "DINOv2"];
+                                        current-index <=> root.custom_model_arch;
+                                        height: 22px;
+                                        selected(val) => { root.save_settings(); }
+                                    }
+
+                                    Text {
+                                        text: "Dim:";
+                                        vertical-alignment: center;
+                                        font-size: 11px;
+                                        color: #dcddde;
+                                        width: 35px;
+                                    }
+
+                                    SpinBox {
+                                        value <=> root.custom_model_dim;
+                                        minimum: 64;
+                                        maximum: 4096;
+                                        height: 22px;
+                                        edited(val) => { root.save_settings(); }
+                                    }
                                 }
                             }
 

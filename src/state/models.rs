@@ -27,7 +27,7 @@ pub struct AppSettings {
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
 
-    // Relative QC Toggles
+    // Relative Quality Control Toggles
     pub qc_check_bloat: bool,
     pub qc_check_alpha: bool,
     pub qc_check_colorspace: bool,
@@ -69,7 +69,12 @@ pub struct AppSettings {
     pub search_precision: i32,
 
     // Registered active AI model state persistent property
-    pub ai_model: i32, // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B
+    pub ai_model: i32, // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: Custom
+
+    // Local Custom ONNX Model configurations
+    pub custom_model_path: String,
+    pub custom_model_arch: i32, // 0: CLIP, 1: SigLIP, 2: DINOv2
+    pub custom_model_dim: i32,
 
     // HDR Tonemapping Configuration
     pub tonemap_enabled: bool,
@@ -135,6 +140,10 @@ impl Default for AppSettings {
 
             // Default model index CLIP-B/32
             ai_model: 0,
+
+            custom_model_path: String::new(),
+            custom_model_arch: 0,
+            custom_model_dim: 512,
 
             // Default Tonemapping Options
             tonemap_enabled: true,

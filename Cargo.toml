@@ -22,11 +22,13 @@ rayon = "1.12.0"
 memmap2 = "0.9.11"
 
 # Image Processing
-image = { version = "0.25.10", features = ["png", "jpeg", "tga", "bmp", "tiff", "webp"] }
+image = { version = "0.25.10", features = ["png", "jpeg", "tga", "bmp", "tiff", "webp", "avif"] }
 exr = "1.74.1"
 ddsfile = "0.6.0"
 image_dds = { version = "0.7.2", features = ["image"] }
 imagesize = "0.14.0"
+psd = "0.3.5"
+jxl-oxide = { version = "0.12.6", features = ["image"] }
 
 # Hashing & Similarity
 xxhash-rust = { version = "0.8.16", features = ["xxh64"] }

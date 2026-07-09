@@ -57,6 +57,11 @@ pub async fn verify_and_download_models(
     app_weak: slint::Weak<crate::app::AppWindow>,
     model_idx: i32,
 ) -> Result<()> {
+    // If the index corresponds to a Custom Local Model, skip the remote downloading pipeline entirely
+    if model_idx == 5 {
+        return Ok(());
+    }
+
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
 
     // Map selected model index to HuggingFace Xenova ONNX repositories

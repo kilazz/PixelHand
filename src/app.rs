@@ -254,7 +254,16 @@ pub fn run_gui() -> Result<()> {
 
         // Reset cancellation
         cancel_token_clone.store(false, Ordering::Relaxed);
-        let params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
+
+        let mut params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
+
+        // Pass thread-safe progress reporter callback directly into scanners
+        let app_weak_progress = app_copy.clone();
+        params.on_progress = Some(Arc::new(move |prog| {
+            let _ = app_weak_progress.upgrade_in_event_loop(move |ui| {
+                ui.set_progress(prog);
+            });
+        }));
 
         ui.set_is_scanning(true);
         ui.set_status_text("Scanning assets...".into());
@@ -488,7 +497,7 @@ pub fn run_gui() -> Result<()> {
     let state_clone = state.clone();
     app.on_expand_all_groups(move || {
         let mut lock = state_clone.lock().unwrap();
-        lock.collapsed_groups.clear(); // Полностью очищаем маску скрытия
+        lock.collapsed_groups.clear();
         if let Some(ui) = app_weak.upgrade() {
             utils::ui::update_results_ui(&ui, &lock);
         }
@@ -638,6 +647,21 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Directory Selection for Custom Local ONNX Models
+    let app_weak_custom = app.as_weak();
+    app.on_select_custom_model(move || {
+        if let Some(folder) = rfd::FileDialog::new()
+            .set_title("Select Custom ONNX Model Directory")
+            .pick_folder()
+        {
+            let path_str = folder.to_string_lossy().to_string();
+            if let Some(ui) = app_weak_custom.upgrade() {
+                ui.set_custom_model_path(path_str.into());
+                utils::settings::save_settings(&ui);
+            }
+        }
+    });
+
     // Smart Drag & Drop file/folder drop handler on the window surface
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
@@ -728,6 +752,11 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_ai_model(settings.ai_model);
     app.set_search_precision(settings.search_precision);
 
+    // Apply local custom ONNX Model paths configurations
+    app.set_custom_model_path(settings.custom_model_path.clone().into());
+    app.set_custom_model_arch(settings.custom_model_arch);
+    app.set_custom_model_dim(settings.custom_model_dim);
+
     // Apply Tonemapping configurations to UI
     app.set_tonemap_enabled(settings.tonemap_enabled);
     app.set_tonemap_operator(settings.tonemap_operator);
@@ -750,9 +779,12 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
             Err(e) => {
                 let err_msg = e.to_string();
                 tracing::error!("Model download failed: {}", err_msg);
+                let err_msg_clone = err_msg.clone();
                 let _ = app_weak.upgrade_in_event_loop(move |ui| {
                     ui.set_is_scanning(false);
-                    ui.set_status_text(format!("Model verification failed: {}", err_msg).into());
+                    ui.set_status_text(
+                        format!("Model verification failed: {}", err_msg_clone).into(),
+                    );
                 });
             }
         }

@@ -10,13 +10,23 @@ use std::sync::atomic::Ordering;
 use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::{calculate_xxhash, discover_files};
 
+#[derive(Debug, Clone)]
+struct FileMetadata {
+    path: PathBuf,
+    size: u64,
+    width: usize,
+    height: usize,
+    hash: String,
+}
+
+/// Executes a byte-exact file scan using high-speed xxHash64 streams.
 pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
     let path = PathBuf::from(params.dir_a.clone());
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    // Split raw tag string into dynamic token list
+    // Split raw excluded folders string into separate tokens
     let ex_folders: Vec<String> = params
         .excluded_folders
         .split(',')
@@ -30,7 +40,10 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
     }
 
     let cancel_token = params.cancel_token.clone();
+    let total = paths.len();
+    let processed = std::sync::atomic::AtomicUsize::new(0);
 
+    // Parallel file inspection and hashing using Rayon thread-pool
     let metadata_list: Vec<FileMetadata> = paths
         .par_iter()
         .filter_map(|p| {
@@ -47,7 +60,16 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
                 Ok(dim) => (dim.width, dim.height),
                 Err(_) => (0, 0),
             };
+
+            // Extract the high-speed xxHash64 representation of the file
             let hash = calculate_xxhash(p).ok()?;
+
+            // Progress tracking updates
+            let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(ref cb) = params.on_progress {
+                cb(current as f32 / total as f32);
+            }
+
             Some(FileMetadata {
                 path: p.clone(),
                 size,
@@ -62,6 +84,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
         return Err(anyhow!("Scan cancelled by user."));
     }
 
+    // Group matching files into hashing buckets to identify exact duplicates
     let mut groups: HashMap<String, Vec<FileMetadata>> = HashMap::new();
     for meta in metadata_list {
         groups.entry(meta.hash.clone()).or_default().push(meta);
@@ -69,6 +92,8 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
 
     let mut dups: Vec<(String, Vec<FileMetadata>)> =
         groups.into_iter().filter(|(_, f)| f.len() > 1).collect();
+
+    // Sort groups so that the largest duplicate clusters on disk appear first
     dups.sort_by(|a, b| b.1[0].size.cmp(&a.1[0].size));
 
     let mut results = Vec::new();
@@ -114,13 +139,4 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
         });
     }
     Ok(results)
-}
-
-#[derive(Debug, Clone)]
-struct FileMetadata {
-    path: PathBuf,
-    size: u64,
-    width: usize,
-    height: usize,
-    hash: String,
 }

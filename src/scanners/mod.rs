@@ -71,6 +71,14 @@ pub struct ScanParams {
 
     // Active AI Model selection property
     pub ai_model: i32,
+
+    // Live Progress Update handler (thread-safe Arc wrapper)
+    pub on_progress: Option<Arc<dyn Fn(f32) + Send + Sync>>,
+
+    // Custom Local ONNX configurations
+    pub custom_model_path: String,
+    pub custom_model_arch: i32,
+    pub custom_model_dim: i32,
 }
 
 impl ScanParams {
@@ -168,6 +176,14 @@ impl ScanParams {
 
             // AI Model selection index
             ai_model: ui.get_ai_model(),
+
+            // Custom model local properties
+            custom_model_path: ui.get_custom_model_path().to_string(),
+            custom_model_arch: ui.get_custom_model_arch(),
+            custom_model_dim: ui.get_custom_model_dim(),
+
+            // Initialized as None; the UI thread sets this callback handler directly
+            on_progress: None,
         }
     }
 }

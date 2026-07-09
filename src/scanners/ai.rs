@@ -88,13 +88,17 @@ pub async fn run_ai_duplicate_scan(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic AI Model and Database Dimension mapping supporting the full 5-model roster
+    // Dynamic AI Model and Database Dimension mapping supporting the full 5-model roster + Custom Local Model
     let (folder_name, dim) = match params.ai_model {
-        1 => ("clip_vit_l14", 768),
-        2 => ("siglip_base", 768),
-        3 => ("siglip_large", 1024),
-        4 => ("dinov2_base", 768),
-        _ => ("clip_vit_b32", 512),
+        1 => ("clip_vit_l14".to_string(), 768),
+        2 => ("siglip_base".to_string(), 768),
+        3 => ("siglip_large".to_string(), 1024),
+        4 => ("dinov2_base".to_string(), 768),
+        5 => (
+            params.custom_model_path.clone(),
+            params.custom_model_dim as usize,
+        ),
+        _ => ("clip_vit_b32".to_string(), 512),
     };
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
@@ -110,7 +114,12 @@ pub async fn run_ai_duplicate_scan(
     let db_dir = app_dir
         .join(".lancedb_cache")
         .join(format!("{}_{:016x}", folder_name, folder_hash));
-    let model_dir = app_dir.join("models").join(folder_name);
+
+    let model_dir = if params.ai_model == 5 {
+        PathBuf::from(&folder_name)
+    } else {
+        app_dir.join("models").join(&folder_name)
+    };
 
     let mut db = DatabaseService::new();
     db.initialize(&db_dir, "images", dim).await?;
@@ -123,6 +132,8 @@ pub async fn run_ai_duplicate_scan(
 
     let mut records = Vec::new();
     let cancel_token = params.cancel_token.clone();
+    let total_items = items.len();
+    let processed_items = std::sync::atomic::AtomicUsize::new(0);
 
     for chunk in chunks {
         if cancel_token.load(Ordering::Relaxed) {
@@ -168,6 +179,13 @@ pub async fn run_ai_duplicate_scan(
                     final_img =
                         final_img.resize_exact(512, 512, image::imageops::FilterType::Triangle);
                 }
+
+                // Increment atomic processed items and dispatch to the main progress callback
+                let current = processed_items.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(ref cb) = params.on_progress {
+                    cb(current as f32 / total_items as f32);
+                }
+
                 Some((item.clone(), final_img))
             })
             .collect();
@@ -176,10 +194,12 @@ pub async fn run_ai_duplicate_scan(
             loaded_images.into_iter().unzip();
         let mut chunk_records = Vec::new();
 
-        // Inject the specific mean/std normalization logic based on the selected AI model
+        // Pass custom_model_arch as the second argument to safely config custom local networks
         if !imgs.is_empty()
-            && let Ok(vectors) =
-                engine.encode_images_batch(&imgs, &PreprocessingConfig::for_model(params.ai_model))
+            && let Ok(vectors) = engine.encode_images_batch(
+                &imgs,
+                &PreprocessingConfig::for_model(params.ai_model, params.custom_model_arch),
+            )
         {
             for (item, vector) in chunk_items.into_iter().zip(vectors) {
                 let chan_str = match item.analysis_type {
@@ -371,13 +391,17 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic AI Model and Database Dimension mapping supporting the full 5-model roster
+    // Dynamic AI Model and Database Dimension mapping supporting the full 5-model roster + Custom Local Model
     let (folder_name, dim) = match params.ai_model {
-        1 => ("clip_vit_l14", 768),
-        2 => ("siglip_base", 768),
-        3 => ("siglip_large", 1024),
-        4 => ("dinov2_base", 768),
-        _ => ("clip_vit_b32", 512),
+        1 => ("clip_vit_l14".to_string(), 768),
+        2 => ("siglip_base".to_string(), 768),
+        3 => ("siglip_large".to_string(), 1024),
+        4 => ("dinov2_base".to_string(), 768),
+        5 => (
+            params.custom_model_path.clone(),
+            params.custom_model_dim as usize,
+        ),
+        _ => ("clip_vit_b32".to_string(), 512),
     };
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
@@ -393,7 +417,12 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
     let db_dir = app_dir
         .join(".lancedb_cache")
         .join(format!("{}_{:016x}", folder_name, folder_hash));
-    let model_dir = app_dir.join("models").join(folder_name);
+
+    let model_dir = if params.ai_model == 5 {
+        PathBuf::from(&folder_name)
+    } else {
+        app_dir.join("models").join(&folder_name)
+    };
 
     let mut db = DatabaseService::new();
     db.initialize(&db_dir, "images", dim).await?;
@@ -405,6 +434,8 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
 
     let mut records = Vec::new();
     let cancel_token = params.cancel_token.clone();
+    let total_items = items.len();
+    let processed_items = std::sync::atomic::AtomicUsize::new(0);
 
     for chunk in chunks {
         if cancel_token.load(Ordering::Relaxed) {
@@ -445,6 +476,13 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
                     final_img =
                         final_img.resize_exact(512, 512, image::imageops::FilterType::Triangle);
                 }
+
+                // Increment atomic processed items and dispatch to the main progress callback
+                let current = processed_items.fetch_add(1, Ordering::Relaxed) + 1;
+                if let Some(ref cb) = params.on_progress {
+                    cb(current as f32 / total_items as f32);
+                }
+
                 Some((item.clone(), final_img))
             })
             .collect();
@@ -453,10 +491,12 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
             loaded_images.into_iter().unzip();
         let mut chunk_records = Vec::new();
 
-        // Inject the specific mean/std normalization logic based on the selected AI model
+        // Pass custom_model_arch as the second argument to safely config custom local networks
         if !imgs.is_empty()
-            && let Ok(vectors) =
-                engine.encode_images_batch(&imgs, &PreprocessingConfig::for_model(params.ai_model))
+            && let Ok(vectors) = engine.encode_images_batch(
+                &imgs,
+                &PreprocessingConfig::for_model(params.ai_model, params.custom_model_arch),
+            )
         {
             for (item, vector) in chunk_items.into_iter().zip(vectors) {
                 let chan_str = match item.analysis_type {

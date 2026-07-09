@@ -453,6 +453,30 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
         .context("Failed to apply tonemapping to EXR")?;
 
         Ok(DynamicImage::ImageRgba8(ldr_img))
+    } else if ext == "psd" {
+        // Flat Adobe Photoshop (.psd) decoder
+        let bytes = std::fs::read(path_ref).context("Failed to read PSD file")?;
+        let psd = psd::Psd::from_bytes(&bytes)
+            .map_err(|e| anyhow::anyhow!("PSD parsing failed: {}", e))?;
+
+        let width = psd.width();
+        let height = psd.height();
+        let rgba = psd.rgba();
+
+        let buffer = image::RgbaImage::from_raw(width, height, rgba)
+            .ok_or_else(|| anyhow::anyhow!("Failed to compile PSD pixel buffer"))?;
+
+        Ok(DynamicImage::ImageRgba8(buffer))
+    } else if ext == "jxl" {
+        // High-performance conforming JPEG XL decoder
+        let bytes = std::fs::read(path_ref).context("Failed to read JXL file")?;
+        let decoder = jxl_oxide::integration::JxlDecoder::new(std::io::Cursor::new(bytes))
+            .map_err(|e| anyhow::anyhow!("JXL decoder initialization failed: {:?}", e))?;
+
+        let img = DynamicImage::from_decoder(decoder)
+            .map_err(|e| anyhow::anyhow!("JXL decoding pipeline failed: {:?}", e))?;
+
+        Ok(img)
     } else {
         // Load standard image formats via the standard 'image' library
         let img = image::open(path_ref).context("Failed to decode standard image format")?;

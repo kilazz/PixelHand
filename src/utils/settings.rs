@@ -86,6 +86,11 @@ pub fn save_settings(ui: &AppWindow) {
         search_precision: ui.get_search_precision(),
         ai_model: ui.get_ai_model(),
 
+        // Custom Model Local Options
+        custom_model_path: ui.get_custom_model_path().to_string(),
+        custom_model_arch: ui.get_custom_model_arch(),
+        custom_model_dim: ui.get_custom_model_dim(),
+
         // HDR Tonemapping Options
         tonemap_enabled: ui.get_tonemap_enabled(),
         tonemap_operator: ui.get_tonemap_operator(),

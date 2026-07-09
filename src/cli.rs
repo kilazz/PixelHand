@@ -120,6 +120,12 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         qc_check_alpha: true,
         qc_check_colorspace: true,
         qc_check_compression: true,
+
+        // Initialize custom local model parameters and progress handlers
+        custom_model_path: String::new(),
+        custom_model_arch: 0,
+        custom_model_dim: 512,
+        on_progress: None,
     };
 
     match exact::run_exact_scan(params).await {
@@ -216,6 +222,12 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         qc_check_alpha: true,
         qc_check_colorspace: true,
         qc_check_compression: true,
+
+        // Initialize custom local model parameters and progress handlers
+        custom_model_path: String::new(),
+        custom_model_arch: 0,
+        custom_model_dim: 512,
+        on_progress: None,
     };
 
     match qc::run_qc_scan_internal(params).await {

@@ -12,6 +12,7 @@ use crate::scanners::AnalysisItem;
 use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::discover_files;
 
+/// Executes a perceptual duplicate image scan using разностный dHash metrics.
 pub async fn run_perceptual_scan_internal(
     params: super::ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
@@ -27,7 +28,6 @@ pub async fn run_perceptual_scan_internal(
         .filter(|t| !t.is_empty())
         .collect();
 
-    // --- FIXED: Passed dynamic ex_folders vector correctly as the third argument ---
     let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
@@ -35,6 +35,7 @@ pub async fn run_perceptual_scan_internal(
 
     let cancel_token = params.cancel_token.clone();
 
+    // Expands physical files into logical split-channel/luminance tasks
     let items = super::generate_analysis_items(&paths, &params);
 
     crate::app::append_to_console_log(&format!(
@@ -43,6 +44,10 @@ pub async fn run_perceptual_scan_internal(
         paths.len()
     ));
 
+    let total = items.len();
+    let processed = std::sync::atomic::AtomicUsize::new(0);
+
+    // Compute perceptual dHash structures across all worker threads
     let hashes: Vec<(AnalysisItem, String)> = items
         .par_iter()
         .filter_map(|item| {
@@ -56,6 +61,12 @@ pub async fn run_perceptual_scan_internal(
                 params.prep_ignore_solid,
             )?;
 
+            // Thread-safe progress updating pipeline
+            let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(ref cb) = params.on_progress {
+                cb(current as f32 / total as f32);
+            }
+
             Some((item.clone(), res.dhash))
         })
         .collect();
@@ -64,6 +75,7 @@ pub async fn run_perceptual_scan_internal(
     let mut results = Vec::new();
     let mut group_id = 0;
 
+    // Convert similarity threshold into Hamming Distance bounds (64-bit space)
     let max_dist = (((100.0 - params.similarity) / 100.0) * 64.0).round() as u32;
 
     for i in 0..hashes.len() {
@@ -81,6 +93,7 @@ pub async fn run_perceptual_scan_internal(
                 continue;
             }
 
+            // Collapse the nested if statement to satisfy clippy rules
             if let Some(dist) = calculate_hamming_distance(&hashes[i].1, &hashes[j].1)
                 && dist <= max_dist
             {
@@ -89,10 +102,10 @@ pub async fn run_perceptual_scan_internal(
             }
         }
 
+        // If duplicate candidates are discovered, consolidate their metadata summary reports
         if group_members.len() > 1 {
             group_id += 1;
             let mut file_summaries = Vec::new();
-
             let mut seen_paths = HashSet::new();
 
             for (item, _) in &group_members {
@@ -143,6 +156,7 @@ pub async fn run_perceptual_scan_internal(
             }
 
             if file_summaries.len() > 1 {
+                // Heuristic sort: largest resolution first, then largest file size on disk
                 file_summaries.sort_by(|a, b| {
                     let area_a = a.width * a.height;
                     let area_b = b.width * b.height;
