@@ -72,6 +72,11 @@ pub fn save_settings(ui: &AppWindow) {
         prep_a: ui.get_prep_a(),
         prep_tags: ui.get_prep_tags().to_string(),
         prep_ignore_solid: ui.get_prep_ignore_solid(),
+
+        // --- NEW: Save Exclude Folders & Match logic settings on exit ---
+        excluded_folders: ui.get_excluded_folders().to_string(),
+        qc_match_by_stem: ui.get_qc_match_by_stem(),
+        qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
     };
 
     if let Ok(dir) = get_portable_app_data_dir() {

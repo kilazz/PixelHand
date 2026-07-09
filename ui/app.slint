@@ -399,6 +399,16 @@ export component AppWindow inherits Window {
     in-out property <string> prep_tags: "";
     in-out property <bool> prep_ignore_solid: true;
 
+    // Global Zoom and Pan Interactive state bindings
+    in-out property <float> zoom_factor: 1.0;
+    in-out property <length> pan_x: 0px;
+    in-out property <length> pan_y: 0px;
+
+    // Slicing Options
+    in-out property <string> excluded_folders: ".git, .svn, cache, temp";
+    in-out property <bool> qc_match_by_stem: true;
+    in-out property <bool> qc_hide_same_resolution: false;
+
     // Draggable Splitters states (Persisted dynamically)
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
@@ -475,6 +485,7 @@ export component AppWindow inherits Window {
     in-out property <[ResultsRow]> results: [];
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
+    // Coordinate variables tracking File Format filter dropdown locations
     in-out property <length> ext_popup_x: 0px;
     in-out property <length> ext_popup_y: 0px;
 
@@ -607,7 +618,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        // --- Container with relative dimensions (100%) to safely bypass strict property loops ---
+        // Tab switches root content boundary element
         Rectangle {
             vertical-stretch: 1;
             horizontal-stretch: 1;
@@ -683,6 +694,23 @@ export component AppWindow inherits Window {
                                             clicked => { root.select_folder_b(); }
                                         }
                                     }
+
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Text {
+                                            text: "Exclude:";
+                                            width: 70px;
+                                            vertical-alignment: center;
+                                            font-size: 12px;
+                                        }
+
+                                        LineEdit {
+                                            text <=> root.excluded_folders;
+                                            placeholder-text: "e.g. .git, cache, temp";
+                                            height: 24px;
+                                        }
+                                    }
+
                                     HorizontalLayout {
                                         spacing: 6px;
                                         Text {
@@ -869,7 +897,6 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            // --- NEW BLOCK: Image Preparation (Pre-processing) Options panel ---
                             PanelSection {
                                 title: "Image Preparation Options";
                                 VerticalLayout {
@@ -958,6 +985,19 @@ export component AppWindow inherits Window {
                                     if root.qc_mode: VerticalLayout {
                                         spacing: 4px;
                                         padding-left: 8px;
+
+                                        CheckBox {
+                                            text: "Match by stem (ignore ext)";
+                                            checked <=> root.qc_match_by_stem;
+                                            height: 20px;
+                                        }
+
+                                        CheckBox {
+                                            text: "Hide same resolution (compare only)";
+                                            checked <=> root.qc_hide_same_resolution;
+                                            height: 20px;
+                                        }
+
                                         CheckBox {
                                             text: "Check NPOT (Power of 2)";
                                             checked <=> root.qc_npot;
@@ -1464,6 +1504,7 @@ export component AppWindow inherits Window {
                 width: 100%;
                 height: 100%;
 
+                // Visual rendering canvases viewport frame (Left Large Panel)
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 12px;
@@ -1473,6 +1514,7 @@ export component AppWindow inherits Window {
                         font-weight: 700;
                     }
 
+                    // Canvas control bar
                     HorizontalLayout {
                         spacing: 8px;
                         height: 28px;
@@ -1498,157 +1540,82 @@ export component AppWindow inherits Window {
                                 height: 24px;
                             }
                         }
+
+                        // Reset trigger into comparative control bar
+                        CustomButton {
+                            text: "Reset Zoom";
+                            height: 24px;
+                            primary-color: #4e5058;
+                            clicked => {
+                                root.zoom_factor = 1.0;
+                                root.pan_x = 0px;
+                                root.pan_y = 0px;
+                            }
+                        }
                     }
 
+                    // Double click to open, scroll to zoom, left click & drag to pan
                     viewport_root := Rectangle {
                         background: #111214;
                         clip: true;
                         vertical-stretch: 1;
                         horizontal-stretch: 1;
 
+                        // Master Touch gesture intercept area sits on top
+                        TouchArea {
+                            property <length> start_x;
+                            property <length> start_y;
+
+                            pointer-event(evt) => {
+                                if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
+                                    self.start_x = self.mouse-x;
+                                    self.start_y = self.mouse-y;
+                                }
+                                if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.move) {
+                                    if (self.pressed) {
+                                        root.pan_x = root.pan_x + (self.mouse-x - self.start_x);
+                                        root.pan_y = root.pan_y + (self.mouse-y - self.start_y);
+                                        self.start_x = self.mouse-x;
+                                        self.start_y = self.mouse-y;
+                                    }
+                                }
+                            }
+
+                            scroll-event(evt) => {
+                                // --- FIXED: Normalized float division of evt.delta-y via 1px explicitly to prevent type errors ---
+                                let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
+                                root.zoom_factor = (root.zoom_factor + zoom_delta).clamp(1.0, 10.0);
+                                if (root.zoom_factor == 1.0) {
+                                    root.pan_x = 0px;
+                                    root.pan_y = 0px;
+                                }
+                                EventResult.accept
+                            }
+
+                            double-clicked => {
+                                if (self.mouse-x < parent.width / 2) {
+                                    root.open_file_in_viewer(root.original_meta.path);
+                                } else {
+                                    root.open_file_in_viewer(root.duplicate_meta.path);
+                                }
+                            }
+                        }
+
+                        // Mode 1: Side-by-Side Viewport
                         if root.compare_mode == 0: Rectangle {
                             width: 100%;
                             height: 100%;
+
+                            // Left viewport (Original)
                             Rectangle {
                                 x: 0px;
                                 y: 0px;
                                 width: parent.width / 2 - 6px;
                                 height: parent.height;
-                                VerticalLayout {
-                                    width: 100%;
-                                    height: 100%;
-                                    spacing: 4px;
-                                    Text {
-                                        text: "ORIGINAL (Double-click to open)";
-                                        font-size: 11px;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                    }
-
-                                    Rectangle {
-                                        vertical-stretch: 1;
-                                        background: #111214;
-                                        border-color: #3e3e42;
-                                        border-width: 1px;
-                                        border-radius: 4px;
-                                        clip: true;
-                                        Image {
-                                            source: root.checkerboard_pattern;
-                                            horizontal-tiling: repeat;
-                                            vertical-tiling: repeat;
-                                            width: 100%;
-                                            height: 100%;
-                                        }
-
-                                        Image {
-                                            source: root.image_original;
-                                            image-fit: contain;
-                                            width: 100%;
-                                            height: 100%;
-                                        }
-
-                                        TouchArea {
-                                            double-clicked => { root.open_file_in_viewer(root.original_meta.path); }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                x: parent.width / 2 + 6px;
-                                y: 0px;
-                                width: parent.width / 2 - 6px;
-                                height: parent.height;
-                                VerticalLayout {
-                                    width: 100%;
-                                    height: 100%;
-                                    spacing: 4px;
-                                    Text {
-                                        text: "DUPLICATE (Double-click to open)";
-                                        font-size: 11px;
-                                        font-weight: 700;
-                                        horizontal-alignment: center;
-                                    }
-
-                                    Rectangle {
-                                        vertical-stretch: 1;
-                                        background: #111214;
-                                        border-color: #3e3e42;
-                                        border-width: 1px;
-                                        border-radius: 4px;
-                                        clip: true;
-                                        Image {
-                                            source: root.checkerboard_pattern;
-                                            horizontal-tiling: repeat;
-                                            vertical-tiling: repeat;
-                                            width: 100%;
-                                            height: 100%;
-                                        }
-
-                                        Image {
-                                            source: root.image_duplicate;
-                                            image-fit: contain;
-                                            width: 100%;
-                                            height: 100%;
-                                        }
-
-                                        TouchArea {
-                                            double-clicked => { root.open_file_in_viewer(root.duplicate_meta.path); }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        if root.compare_mode == 1: Rectangle {
-                            width: 100%;
-                            height: 100%;
-                            VerticalLayout {
-                                width: 100%;
-                                height: 100%;
-                                spacing: 4px;
-                                Text {
-                                    text: "WIPE COMPARE (ORIGINAL / DUPLICATE)";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                }
-
+                                clip: true;
                                 Rectangle {
-                                    vertical-stretch: 1;
-                                    background: #111214;
-                                    border-color: #3e3e42;
-                                    border-width: 1px;
-                                    border-radius: 4px;
-                                    clip: true;
-                                    WipeViewport {
-                                        original: root.image_original;
-                                        duplicate: root.image_duplicate;
-                                        wipe-val: root.wipe_slider_val;
-                                        checkerboard: root.checkerboard_pattern;
-                                        width: 100%;
-                                        height: 100%;
-                                    }
-                                }
-                            }
-                        }
-
-                        if root.compare_mode == 2: Rectangle {
-                            width: 100%;
-                            height: 100%;
-                            VerticalLayout {
-                                width: 100%;
-                                height: 100%;
-                                spacing: 4px;
-                                Text {
-                                    text: "OVERLAY BLEND";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                }
-
-                                Rectangle {
-                                    vertical-stretch: 1;
+                                    width: parent.width;
+                                    height: parent.height;
                                     background: #111214;
                                     border-color: #3e3e42;
                                     border-width: 1px;
@@ -1665,37 +1632,23 @@ export component AppWindow inherits Window {
                                     Image {
                                         source: root.image_original;
                                         image-fit: contain;
-                                        width: 100%;
-                                        height: 100%;
-                                    }
-
-                                    Image {
-                                        source: root.image_duplicate;
-                                        image-fit: contain;
-                                        width: 100%;
-                                        height: 100%;
-                                        opacity: root.wipe_slider_val;
+                                        width: parent.width * root.zoom_factor;
+                                        height: parent.height * root.zoom_factor;
+                                        x: parent.width / 2 - self.width / 2 + root.pan_x;
+                                        y: parent.height / 2 - self.height / 2 + root.pan_y;
                                     }
                                 }
                             }
-                        }
-
-                        if root.compare_mode == 3: Rectangle {
-                            width: 100%;
-                            height: 100%;
-                            VerticalLayout {
-                                width: 100%;
-                                height: 100%;
-                                spacing: 4px;
-                                Text {
-                                    text: "DIFFERENCE HEATMAP";
-                                    font-size: 11px;
-                                    font-weight: 700;
-                                    horizontal-alignment: center;
-                                }
-
+                            // Right viewport (Duplicate)
+                            Rectangle {
+                                x: parent.width / 2 + 6px;
+                                y: 0px;
+                                width: parent.width / 2 - 6px;
+                                height: parent.height;
+                                clip: true;
                                 Rectangle {
-                                    vertical-stretch: 1;
+                                    width: parent.width;
+                                    height: parent.height;
                                     background: #111214;
                                     border-color: #3e3e42;
                                     border-width: 1px;
@@ -1710,12 +1663,113 @@ export component AppWindow inherits Window {
                                     }
 
                                     Image {
-                                        source: root.image_heatmap;
+                                        source: root.image_duplicate;
                                         image-fit: contain;
-                                        width: 100%;
-                                        height: 100%;
+                                        width: parent.width * root.zoom_factor;
+                                        height: parent.height * root.zoom_factor;
+                                        x: parent.width / 2 - self.width / 2 + root.pan_x;
+                                        y: parent.height / 2 - self.height / 2 + root.pan_y;
                                     }
                                 }
+                            }
+                        }
+
+                        // Mode 2: Wipe slider comparative viewport
+                        if root.compare_mode == 1: Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            clip: true;
+
+                            // Base Original Layer
+                            Image {
+                                source: root.image_original;
+                                image-fit: contain;
+                                width: parent.width * root.zoom_factor;
+                                height: parent.height * root.zoom_factor;
+                                x: parent.width / 2 - self.width / 2 + root.pan_x;
+                                y: parent.height / 2 - self.height / 2 + root.pan_y;
+                            }
+
+                            // Clipped Overlay Duplicate Layer
+                            Rectangle {
+                                clip: true;
+                                x: 0px;
+                                y: 0px;
+                                width: parent.width * root.wipe_slider_val;
+                                height: parent.height;
+                                Image {
+                                    source: root.image_duplicate;
+                                    image-fit: contain;
+                                    width: viewport_root.width * root.zoom_factor;
+                                    height: viewport_root.height * root.zoom_factor;
+                                    x: viewport_root.width / 2 - self.width / 2 + root.pan_x;
+                                    y: viewport_root.height / 2 - self.height / 2 + root.pan_y;
+                                }
+                            }
+
+                            // Yellow Divider handle split line
+                            Rectangle {
+                                x: parent.width * root.wipe_slider_val - 1px;
+                                y: 0px;
+                                width: 2px;
+                                height: parent.height;
+                                background: #f0b132;
+                            }
+                        }
+
+                        // Mode 3: Transparency overlay blend viewport
+                        if root.compare_mode == 2: Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            clip: true;
+                            Image {
+                                source: root.checkerboard_pattern;
+                                horizontal-tiling: repeat;
+                                vertical-tiling: repeat;
+                                width: 100%;
+                                height: 100%;
+                            }
+
+                            Image {
+                                source: root.image_original;
+                                image-fit: contain;
+                                width: parent.width * root.zoom_factor;
+                                height: parent.height * root.zoom_factor;
+                                x: parent.width / 2 - self.width / 2 + root.pan_x;
+                                y: parent.height / 2 - self.height / 2 + root.pan_y;
+                            }
+
+                            Image {
+                                source: root.image_duplicate;
+                                image-fit: contain;
+                                opacity: root.wipe_slider_val;
+                                width: parent.width * root.zoom_factor;
+                                height: parent.height * root.zoom_factor;
+                                x: parent.width / 2 - self.width / 2 + root.pan_x;
+                                y: parent.height / 2 - self.height / 2 + root.pan_y;
+                            }
+                        }
+
+                        // Mode 4: Generated difference heatmap view layer
+                        if root.compare_mode == 3: Rectangle {
+                            width: 100%;
+                            height: 100%;
+                            clip: true;
+                            Image {
+                                source: root.checkerboard_pattern;
+                                horizontal-tiling: repeat;
+                                vertical-tiling: repeat;
+                                width: 100%;
+                                height: 100%;
+                            }
+
+                            Image {
+                                source: root.image_heatmap;
+                                image-fit: contain;
+                                width: parent.width * root.zoom_factor;
+                                height: parent.height * root.zoom_factor;
+                                x: parent.width / 2 - self.width / 2 + root.pan_x;
+                                y: parent.height / 2 - self.height / 2 + root.pan_y;
                             }
                         }
                     }

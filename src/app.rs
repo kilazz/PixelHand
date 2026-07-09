@@ -7,35 +7,23 @@ use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-// Import state store settings
 use crate::scanners;
 use crate::state::{AppSettings, AppState};
 use crate::utils;
 
-// Generate Slint Rust code from the UI markup
 slint::include_modules!();
 
-// Global handle to push logs directly to the UI console from any thread
 pub static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
-
-// Fast intermediate thread-safe memory queue for incoming logs
 static PENDING_LOGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
-
-// Global thread-safe handle for the active physical log file
 static LOG_FILE: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();
 
-/// Custom writer that captures all tracing events, sending them to Slint Log Tab
-/// and writing them simultaneously to a physical log file on disk.
 struct UiLogWriter;
 
 impl std::io::Write for UiLogWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Ok(s) = std::str::from_utf8(buf) {
-            // 1. Write to the GUI Log Tab queue
             append_to_console_log(s.trim_end());
         }
-
-        // 2. Write to the physical log file on disk (thread-safe append)
         if let Some(file_mutex) = LOG_FILE.get()
             && let Ok(mut lock) = file_mutex.lock()
             && let Some(ref mut file) = *lock
@@ -43,7 +31,6 @@ impl std::io::Write for UiLogWriter {
             let _ = file.write_all(buf);
             let _ = file.flush();
         }
-
         Ok(buf.len())
     }
 
@@ -65,8 +52,6 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for UiLogWriter {
     }
 }
 
-/// Appends a message to the fast memory queue instead of updating the UI immediately.
-/// This prevents CPU bottlenecking under heavy parallel logging.
 pub fn append_to_console_log(msg: &str) {
     let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
     if let Ok(mut lock) = queue.lock() {
@@ -74,29 +59,26 @@ pub fn append_to_console_log(msg: &str) {
     }
 }
 
-/// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    // Initialize the physical log file inside the portable directory
     if let Ok(dir) = utils::settings::get_portable_app_data_dir() {
         let log_path = dir.join("PixelHand.log");
         if let Ok(file) = fs::OpenOptions::new()
             .create(true)
-            .append(true) // Append logs so previous sessions are preserved (implicitly grants write permission)
+            .append(true)
             .open(log_path)
         {
             let _ = LOG_FILE.set(Mutex::new(Some(file)));
         }
     }
 
-    // Init tracing to pipe ALL app/library warnings directly to our Log tab and the file
     tracing_subscriber::fmt()
         .with_writer(UiLogWriter)
-        .with_env_filter("info,ort=warn") // Show info from us, warnings from ONNX Runtime
-        .with_ansi(false) // Disable ANSI color escapes to protect Slint layout parser and log files
+        .with_env_filter("info,ort=warn")
+        .with_ansi(false)
         .init();
 
     let state = Arc::new(Mutex::new(AppState::default()));
-    let cancel_token = Arc::new(AtomicBool::new(false)); // Scan cancellation flag
+    let cancel_token = Arc::new(AtomicBool::new(false));
 
     let app = AppWindow::new().context("Failed to initialize Slint UI Window")?;
     let _ = APP_HANDLE.set(app.as_weak());
@@ -107,14 +89,12 @@ pub fn run_gui() -> Result<()> {
     let checkerboard = utils::ui::generate_checkerboard();
     app.set_checkerboard_pattern(checkerboard);
 
-    // Start background log flushing loop (Updates UI at a steady 5Hz to prevent rendering stutter)
     let app_weak_log = app.as_weak();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
         loop {
             interval.tick().await;
 
-            // Drain all pending logs atomically
             let pending: Vec<String> = {
                 let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
                 if let Ok(mut lock) = queue.lock() {
@@ -136,12 +116,10 @@ pub fn run_gui() -> Result<()> {
                 let current_log = ui.get_console_log().to_string();
                 let mut lines: Vec<&str> = current_log.lines().collect();
 
-                // Append the batch of new lines
                 for p in &pending {
                     lines.push(p);
                 }
 
-                // Buffer Bounding: strictly keep only the last 200 lines to keep Slint TextEdit lightning-fast!
                 if lines.len() > 200 {
                     let start = lines.len() - 200;
                     lines = lines[start..].to_vec();
@@ -156,7 +134,7 @@ pub fn run_gui() -> Result<()> {
     trigger_startup_model_download(app.as_weak());
 
     // ---------------------------------------------------------
-    // BIND CALLBACKS
+    // BIND EVENT CALLBACKS
     // ---------------------------------------------------------
 
     let app_weak = app.as_weak();
@@ -197,7 +175,6 @@ pub fn run_gui() -> Result<()> {
 
         utils::settings::save_settings(&ui);
 
-        // Reset cancellation
         cancel_token_clone.store(false, Ordering::Relaxed);
         let params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
 
@@ -211,7 +188,6 @@ pub fn run_gui() -> Result<()> {
         tokio::spawn(async move {
             let scan_result = scanners::execute_scan(params_for_task.clone()).await;
 
-            // Generate visuals sheets if requested and scan completed successfully (Clippy Optimized Block)
             if params_for_task.save_visuals
                 && let Ok((ref groups, _)) = scan_result
             {
@@ -251,7 +227,7 @@ pub fn run_gui() -> Result<()> {
                         let msg = if params_for_task.save_visuals {
                             "Scan and visual reports finished successfully!"
                         } else {
-                            "Scan finished successfully!"
+                            "Scan completed successfully!"
                         };
                         ui.set_status_text(msg.into());
                         tracing::info!("Scan completed.");
@@ -265,14 +241,12 @@ pub fn run_gui() -> Result<()> {
         });
     });
 
-    // Cancel Button callback implementation
     let cancel_token_cancel = cancel_token.clone();
     app.on_cancel_scan(move || {
         cancel_token_cancel.store(true, Ordering::Relaxed);
         tracing::warn!("User requested scan cancellation. Waiting for threads to stop...");
     });
 
-    // Open Original Image File callback implementation
     app.on_open_file_in_viewer(move |path| {
         let path_str = path.to_string();
         if !path_str.is_empty() {
@@ -386,7 +360,7 @@ pub fn run_gui() -> Result<()> {
                 }
                 Err(e) => {
                     ui.set_status_text(format!("Action failed: {}", e).into());
-                    tracing::error!("Action execution failed: {}", e);
+                    tracing::error!("Action failed: {}", e);
                 }
             });
         });
@@ -414,7 +388,6 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // Native Drag and Drop integration via unstable winit events channel integration
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
         if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
@@ -423,7 +396,7 @@ pub fn run_gui() -> Result<()> {
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_query_text(path_str.clone().into());
                 ui.set_search_method(2);
-                ui.set_status_text(format!("Reference image registered: {}", path_str).into());
+                ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
             });
         }
         slint::winit_030::EventResult::Propagate
@@ -434,7 +407,6 @@ pub fn run_gui() -> Result<()> {
     Ok(())
 }
 
-/// Binds serialized disk settings properties onto Slint window properties.
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_dir_a(settings.dir_a.clone().into());
     app.set_dir_b(settings.dir_b.clone().into());
@@ -465,14 +437,14 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_duplicates_panel_height(settings.duplicates_panel_height);
     app.set_sidebar_width(settings.sidebar_width);
 
-    // Visual Reports configurations
+    // Apply Visual Reports configurations to Slint UI
     app.set_save_visuals(settings.save_visuals);
     app.set_visuals_columns(settings.visuals_columns);
     app.set_visuals_max_count(settings.visuals_max_count);
     app.set_visuals_font_size(settings.visuals_font_size);
     app.set_visuals_scale(settings.visuals_scale);
 
-    // Image Pre-processing Configurations
+    // Apply Image Pre-processing configurations
     app.set_prep_luminance(settings.prep_luminance);
     app.set_prep_channels(settings.prep_channels);
     app.set_prep_r(settings.prep_r);
@@ -481,9 +453,13 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_prep_a(settings.prep_a);
     app.set_prep_tags(settings.prep_tags.clone().into());
     app.set_prep_ignore_solid(settings.prep_ignore_solid);
+
+    // --- NEW: Load dynamic Exclude Folders & Match logic settings into UI ---
+    app.set_excluded_folders(settings.excluded_folders.clone().into());
+    app.set_qc_match_by_stem(settings.qc_match_by_stem);
+    app.set_qc_hide_same_resolution(settings.qc_hide_same_resolution);
 }
 
-/// Asynchronously checks the target runtime weights and verifies local integrity.
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     tokio::spawn(async move {
         match crate::core::downloader::verify_and_download_models(app_weak.clone()).await {
@@ -503,7 +479,6 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     });
 }
 
-/// Thread-safe comparative viewport render task, extracting channels and generating heatmaps at 100% original scale.
 fn trigger_viewport_update(app_weak: slint::Weak<AppWindow>, orig_path: String, dup_path: String) {
     let ui = app_weak.unwrap();
     let channel = utils::ui::get_current_active_channel(&ui).to_string();

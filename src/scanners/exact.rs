@@ -1,6 +1,8 @@
 // src/scanners/exact.rs
+
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -9,12 +11,20 @@ use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::{calculate_xxhash, discover_files};
 
 pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
-    let path = PathBuf::from(params.dir_a);
+    let path = PathBuf::from(params.dir_a.clone());
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    let (paths, warnings) = discover_files(&path, &params.extensions);
+    // Split raw tag string into dynamic token list
+    let ex_folders: Vec<String> = params
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
     }
@@ -114,5 +124,3 @@ struct FileMetadata {
     height: usize,
     hash: String,
 }
-
-use std::collections::HashMap;

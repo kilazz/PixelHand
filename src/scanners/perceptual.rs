@@ -20,14 +20,21 @@ pub async fn run_perceptual_scan_internal(
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    let (paths, warnings) = discover_files(&path, &params.extensions);
+    let ex_folders: Vec<String> = params
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    // --- FIXED: Passed dynamic ex_folders vector correctly as the third argument ---
+    let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
     }
 
     let cancel_token = params.cancel_token.clone();
 
-    // Dynamically generate specific channel or luminance tasks based on Pre-processing configurations
     let items = super::generate_analysis_items(&paths, &params);
 
     crate::app::append_to_console_log(&format!(
@@ -43,7 +50,6 @@ pub async fn run_perceptual_scan_internal(
                 return None;
             }
 
-            // Calculate perceptual hash for the dynamically assigned analysis type (Composite, Luma, R, G, B, A)
             let res = calculate_perceptual_hashes(
                 &item.path,
                 item.analysis_type,
@@ -58,7 +64,6 @@ pub async fn run_perceptual_scan_internal(
     let mut results = Vec::new();
     let mut group_id = 0;
 
-    // Convert similarity percentage into allowed max hamming distance (max 64 bits)
     let max_dist = (((100.0 - params.similarity) / 100.0) * 64.0).round() as u32;
 
     for i in 0..hashes.len() {
@@ -76,7 +81,6 @@ pub async fn run_perceptual_scan_internal(
                 continue;
             }
 
-            // --- FIXED: Collapsed nested if blocks using stable let-chains style ---
             if let Some(dist) = calculate_hamming_distance(&hashes[i].1, &hashes[j].1)
                 && dist <= max_dist
             {
@@ -89,8 +93,6 @@ pub async fn run_perceptual_scan_internal(
             group_id += 1;
             let mut file_summaries = Vec::new();
 
-            // Track physical paths to avoid adding the exact same file twice to the same group
-            // (For example, if its R channel mathematically matched its own G channel)
             let mut seen_paths = HashSet::new();
 
             for (item, _) in &group_members {
@@ -140,8 +142,6 @@ pub async fn run_perceptual_scan_internal(
                 });
             }
 
-            // A group might end up with only 1 unique physical file if the match was purely internal channels.
-            // We only publish groups that map to multiple distinct files.
             if file_summaries.len() > 1 {
                 file_summaries.sort_by(|a, b| {
                     let area_a = a.width * a.height;

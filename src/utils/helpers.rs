@@ -1,15 +1,33 @@
 // src/utils/helpers.rs
+
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh64::Xxh64;
 
 /// Discovers target files recursively based on given extension filters.
-pub fn discover_files(root: &Path, extensions: &[String]) -> (Vec<PathBuf>, Vec<String>) {
+/// Excludes directories that match any tokens defined in the excluded_folders slice.
+pub fn discover_files(
+    root: &Path,
+    extensions: &[String],
+    excluded_folders: &[String],
+) -> (Vec<PathBuf>, Vec<String>) {
     let mut files = Vec::new();
     let mut warnings = Vec::new();
 
-    for entry in walkdir::WalkDir::new(root) {
+    // Use walkdir's filter_entry to prevent scanning inside ignored directories at all, saving disk IO!
+    let walker = walkdir::WalkDir::new(root).into_iter().filter_entry(|e| {
+        if e.file_type().is_dir() {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            !excluded_folders
+                .iter()
+                .any(|ex| name == ex.trim().to_lowercase())
+        } else {
+            true
+        }
+    });
+
+    for entry in walker {
         match entry {
             Ok(e) => {
                 if e.file_type().is_file() {

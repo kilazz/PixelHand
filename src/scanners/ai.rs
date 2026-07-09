@@ -1,4 +1,5 @@
 // src/scanners/ai.rs
+
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::fs;
@@ -14,12 +15,19 @@ use crate::utils::helpers::discover_files;
 pub async fn run_ai_duplicate_scan(
     params: super::ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
-    let path = PathBuf::from(params.dir_a);
+    let path = PathBuf::from(params.dir_a.clone());
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    let (paths, warnings) = discover_files(&path, &params.extensions);
+    let ex_folders: Vec<String> = params
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
     }
@@ -124,7 +132,8 @@ pub async fn run_ai_duplicate_scan(
     let groups = uf.get_groups();
     let mut results = Vec::new();
 
-    for (root_idx, member_indices) in groups {
+    // Pre-fixed with underscore to prevent unused variable warnings
+    for (_root_idx, member_indices) in groups {
         if params.cancel_token.load(Ordering::Relaxed) {
             return Err(anyhow!("Scan cancelled by user."));
         }
@@ -184,24 +193,38 @@ pub async fn run_ai_duplicate_scan(
             }
         });
 
-        let best_path = &file_summaries[0].path;
-        let best_vec = records
+        // --- FIXED: Cloned best_path to break the immutable borrow constraints loop ---
+        let best_path = file_summaries[0].path.clone();
+        let best_vector = records
             .iter()
-            .find(|r| r.path == *best_path)
-            .map(|r| &r.vector);
+            .find(|r| r.path == best_path)
+            .map(|r| r.vector.clone())
+            .unwrap_or_default();
 
-        if let Some(bv) = best_vec {
-            for file in &mut file_summaries {
-                if let Some(r) = records.iter().find(|r| r.path == file.path) {
-                    let dot: f32 = r.vector.iter().zip(bv.iter()).map(|(a, b)| a * b).sum();
-                    file.similarity = dot.clamp(0.0, 1.0) * 100.0;
-                }
+        for file in &mut file_summaries {
+            if file.path == best_path {
+                file.similarity = 100.0;
+                continue;
+            }
+            let current_vec = records
+                .iter()
+                .find(|r| r.path == file.path)
+                .map(|r| r.vector.clone())
+                .unwrap_or_default();
+            if !best_vector.is_empty() && !current_vec.is_empty() {
+                let dot_product: f32 = best_vector
+                    .iter()
+                    .zip(current_vec.iter())
+                    .map(|(a, b)| a * b)
+                    .sum();
+                file.similarity = (dot_product * 100.0).clamp(0.0, 100.0);
             }
         }
 
         let mut hasher = Xxh64::new(0);
-        hasher.update(records[root_idx].path.as_bytes());
-        let hash = format!("{:x}", hasher.digest());
+        hasher.update(best_path.as_bytes());
+        let hash = format!("{:016x}", hasher.digest());
+
         results.push(DuplicateGroupSummary {
             hash,
             files: file_summaries,
@@ -211,12 +234,19 @@ pub async fn run_ai_duplicate_scan(
 }
 
 pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResultSummary>> {
-    let path = PathBuf::from(params.dir_a);
+    let path = PathBuf::from(params.dir_a.clone());
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    let (paths, warnings) = discover_files(&path, &params.extensions);
+    let ex_folders: Vec<String> = params
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
     }
@@ -279,8 +309,8 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
     db.add_batch(&records).await?;
     db.create_vector_index().await?;
 
-    let query_vec = engine.encode_text(&params.query_text)?;
-    let search_results = db.search_similarity(&query_vec, 20).await?;
+    let query_vector = engine.encode_text(&params.query_text)?;
+    let search_results = db.search_similarity(&query_vector, 20).await?;
 
     let results = search_results
         .into_iter()

@@ -1,4 +1,5 @@
 // src/scanners/qc.rs
+
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::fs;
@@ -20,7 +21,14 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    let (paths, warnings) = discover_files(&path, &params.extensions);
+    let ex_folders: Vec<String> = params
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
     for warn in warnings {
         crate::app::append_to_console_log(&warn);
     }
@@ -119,6 +127,9 @@ pub async fn run_folder_compare(
     directory_a: String,
     directory_b: String,
     extensions: Vec<String>,
+    match_by_stem: bool,
+    hide_same_resolution: bool,
+    excluded_folders: Vec<String>,
 ) -> Result<Vec<QcIssueSummary>> {
     let path_a = PathBuf::from(directory_a);
     let path_b = PathBuf::from(directory_b);
@@ -126,19 +137,26 @@ pub async fn run_folder_compare(
         return Err(anyhow!("Both paths must be valid directories"));
     }
 
-    let (files_a, warnings_a) = discover_files(&path_a, &extensions);
+    let (files_a, warnings_a) = discover_files(&path_a, &extensions, &excluded_folders);
     for warn in warnings_a {
         crate::app::append_to_console_log(&warn);
     }
-    let (files_b, warnings_b) = discover_files(&path_b, &extensions);
+    let (files_b, warnings_b) = discover_files(&path_b, &extensions, &excluded_folders);
     for warn in warnings_b {
         crate::app::append_to_console_log(&warn);
     }
 
+    // Dynamic co-relation key builder (Directly implements dynamic match_by_stem!)
     let get_key = |p: &Path| -> String {
-        p.file_stem()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default()
+        if match_by_stem {
+            p.file_stem()
+                .map(|s| s.to_string_lossy().to_lowercase())
+                .unwrap_or_default()
+        } else {
+            p.file_name()
+                .map(|s| s.to_string_lossy().to_lowercase())
+                .unwrap_or_default()
+        }
     };
 
     let mut map_a = std::collections::HashMap::new();
@@ -196,6 +214,16 @@ pub async fn run_folder_compare(
                     bit_depth: 8,
                     mipmap_count: 1,
                 });
+
+            // Filter out exact matches with same resolution if configured
+            if hide_same_resolution
+                && (meta_a.width == meta_b.width && meta_a.height == meta_b.height)
+            {
+                let rel_issues = check_relative(&meta_a, &meta_b, true, true, true, true);
+                if rel_issues.is_empty() {
+                    continue; // Skip matching configurations
+                }
+            }
 
             let rel_issues = check_relative(&meta_a, &meta_b, true, true, true, true);
             for issue in rel_issues {

@@ -24,6 +24,8 @@ pub struct AppSettings {
     pub qc_solid_colors: bool,
     pub qc_normals: bool,
     pub qc_normals_tags: String,
+    pub qc_match_by_stem: bool,
+    pub qc_hide_same_resolution: bool,
 
     // File Extensions
     pub ext_png: bool,
@@ -46,7 +48,7 @@ pub struct AppSettings {
     pub visuals_font_size: i32,
     pub visuals_scale: f32,
 
-    // Image Pre-processing Options (New)
+    // Image Pre-processing Options
     pub prep_luminance: bool,
     pub prep_channels: bool,
     pub prep_r: bool,
@@ -55,6 +57,9 @@ pub struct AppSettings {
     pub prep_a: bool,
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
+
+    // General Filters
+    pub excluded_folders: String,
 }
 
 impl Default for AppSettings {
@@ -76,6 +81,8 @@ impl Default for AppSettings {
             qc_solid_colors: true,
             qc_normals: true,
             qc_normals_tags: String::new(),
+            qc_match_by_stem: true,
+            qc_hide_same_resolution: false,
 
             ext_png: true,
             ext_tga: true,
@@ -95,7 +102,6 @@ impl Default for AppSettings {
             visuals_font_size: 14,
             visuals_scale: 1.5,
 
-            // Default Pre-processing Settings
             prep_luminance: false,
             prep_channels: false,
             prep_r: true,
@@ -104,6 +110,8 @@ impl Default for AppSettings {
             prep_a: true,
             prep_tags: String::new(),
             prep_ignore_solid: true,
+
+            excluded_folders: ".git, .svn, cache, temp".to_string(),
         }
     }
 }
@@ -124,14 +132,14 @@ pub struct DuplicateFileSummary {
     pub similarity: f32,
 }
 
-/// Represents an isolated duplicate cluster containing a list of matching duplicate files.
+/// Represents a cluster of duplicate files.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DuplicateGroupSummary {
     pub hash: String,
     pub files: Vec<DuplicateFileSummary>,
 }
 
-/// Represents a technical issue identified during absolute or relative Quality Control auditing.
+/// Represents an issue found during Quality Control (QC).
 #[derive(Serialize, Clone, Debug)]
 pub struct QcIssueSummary {
     pub path: String,
@@ -139,7 +147,7 @@ pub struct QcIssueSummary {
     pub details: String,
 }
 
-/// Represents a visual similarity match returned from the AI semantic or visual image database.
+/// Represents a visual match from AI Semantic Search.
 #[derive(Serialize, Clone, Debug)]
 pub struct AiSearchResultSummary {
     pub path: String,

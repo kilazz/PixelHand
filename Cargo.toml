@@ -6,7 +6,7 @@ description = "An AI-powered duplicate image finder, technical QC tool, and visu
 
 [dependencies]
 # Slint UI Runtime with unstable-winit-030 feature enabled for native Drag and Drop
-slint = { version = "1.17.0", features = ["image-default-formats", "unstable-winit-030"] }
+slint = { version = "1.17.1", features = ["image-default-formats", "unstable-winit-030"] }
 
 # Tracing
 tracing = "0.1.44"
@@ -23,7 +23,7 @@ memmap2 = "0.9.11"
 
 # Image Processing
 image = { version = "0.25.10", features = ["png", "jpeg", "tga", "bmp", "tiff", "webp"] }
-exr = "1.74.0"
+exr = "1.74.1"
 ddsfile = "0.6.0"
 image_dds = { version = "0.7.2", features = ["image"] }
 imagesize = "0.14.0"
@@ -39,9 +39,9 @@ tokenizers = "0.23.1"
 
 # Database & Data Formats
 lancedb = "0.31.0"
-arrow = "59.0.0"
-arrow-array = "59.0.0"
-arrow-schema = "59.0.0"
+arrow = "59.1.0"
+arrow-array = "59.1.0"
+arrow-schema = "59.1.0"
 
 # Async & Utilities
 futures = "0.3.32"
@@ -69,7 +69,7 @@ ab_glyph = "0.2.32"
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
 
 [build-dependencies]
-slint-build = "1.17.0"
+slint-build = "1.17.1"
 
 [profile.release]
 opt-level = 3

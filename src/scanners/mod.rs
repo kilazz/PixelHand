@@ -14,8 +14,6 @@ use crate::core::perceptual::AnalysisType;
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
 /// All configuration parameters gathered from the UI panel to orchestrate a scan.
-/// Derived `Clone` is required to allow app.rs to query the configuration parameters
-/// after execute_scan consumes ownership of the original struct.
 #[derive(Clone)]
 pub struct ScanParams {
     pub dir_a: String,
@@ -52,6 +50,11 @@ pub struct ScanParams {
     pub prep_a: bool,
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
+
+    // Global filters and relative validations rules
+    pub excluded_folders: String,
+    pub qc_match_by_stem: bool,
+    pub qc_hide_same_resolution: bool,
 }
 
 impl ScanParams {
@@ -132,6 +135,11 @@ impl ScanParams {
             prep_a: ui.get_prep_a(),
             prep_tags: ui.get_prep_tags().to_string(),
             prep_ignore_solid: ui.get_prep_ignore_solid(),
+
+            // Exclude Filter and QC Matching controls
+            excluded_folders: ui.get_excluded_folders().to_string(),
+            qc_match_by_stem: ui.get_qc_match_by_stem(),
+            qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
         }
     }
 }
@@ -217,8 +225,22 @@ pub async fn execute_scan(
     if params.qc_mode {
         if !params.dir_b.trim().is_empty() {
             // Relative Folder A vs Folder B asset comparison
-            let issues =
-                qc::run_folder_compare(params.dir_a, params.dir_b, params.extensions).await?;
+            let ex_folders: Vec<String> = params
+                .excluded_folders
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+
+            let issues = qc::run_folder_compare(
+                params.dir_a.clone(),
+                params.dir_b.clone(),
+                params.extensions.clone(),
+                params.qc_match_by_stem,
+                params.qc_hide_same_resolution,
+                ex_folders,
+            )
+            .await?;
             let rows = map_qc_to_rows(&issues);
             Ok((Vec::new(), rows))
         } else {

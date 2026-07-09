@@ -109,6 +109,11 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         prep_a: true,
         prep_tags: String::new(),
         prep_ignore_solid: true,
+
+        // CLI Defaults
+        excluded_folders: ".git, .svn, cache, temp".to_string(),
+        qc_match_by_stem: true,
+        qc_hide_same_resolution: false,
     };
 
     match exact::run_exact_scan(params).await {
@@ -167,7 +172,6 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         similarity: 90.0,
         batch_size: 128,
         search_method: 0,
-        execution_provider: "CPU".to_string(),
         qc_mode: true,
         qc_npot: check_npot,
         qc_mipmaps: check_mipmaps,
@@ -178,7 +182,6 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         qc_normals_tags: String::new(),
         extensions: default_exts,
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        // Setup default visual configurations for CLI tasks
         save_visuals: false,
         visuals_columns: 6,
         visuals_max_count: 100,
@@ -194,6 +197,12 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         prep_a: true,
         prep_tags: String::new(),
         prep_ignore_solid: true,
+        execution_provider: "CPU".to_string(),
+
+        // CLI Defaults
+        excluded_folders: ".git, .svn, cache, temp".to_string(),
+        qc_match_by_stem: true,
+        qc_hide_same_resolution: false,
     };
 
     match qc::run_qc_scan_internal(params).await {
