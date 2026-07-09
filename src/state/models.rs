@@ -67,7 +67,7 @@ pub struct AppSettings {
 
     // HDR Tonemapping Configuration
     pub tonemap_enabled: bool,
-    pub tonemap_operator: i32, // 0: ACES Filmic, 1: ICtCp (Lumina)
+    pub tonemap_operator: i32, // 0: ACES Filmic, 1: ICtCp, 2: Khronos PBR Neutral
 }
 
 impl Default for AppSettings {

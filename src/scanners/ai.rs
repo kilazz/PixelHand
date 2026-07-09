@@ -88,7 +88,7 @@ pub async fn run_ai_duplicate_scan(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic ИИ Model and Database Dimension mapping
+    // Dynamic AI Model and Database Dimension mapping
     let (folder_name, dim) = match params.ai_model {
         1 => ("siglip_base", 768),
         2 => ("dinov2_base", 768),
@@ -137,7 +137,8 @@ pub async fn run_ai_duplicate_scan(
                     None
                 };
 
-                // Request decimated 512px mipmap level from DDS loader if available
+                // Request decimated 512px mipmap level from DDS loader if available.
+                // 512 is safe enough to provide high-quality data for both 224x224 and 384x384 models.
                 let img =
                     crate::format_loaders::dds_loader::open_image_with_dds_fallback(p, Some(512))
                         .ok()?;
@@ -150,6 +151,7 @@ pub async fn run_ai_duplicate_scan(
                 )?;
 
                 let mut final_img = processed;
+                // Hard clamp at 512x512 before passing to ONNX engine to save tensor processing overhead
                 if final_img.width() > 512 || final_img.height() > 512 {
                     final_img =
                         final_img.resize_exact(512, 512, image::imageops::FilterType::Triangle);
@@ -162,8 +164,10 @@ pub async fn run_ai_duplicate_scan(
             loaded_images.into_iter().unzip();
         let mut chunk_records = Vec::new();
 
+        // Inject the specific mean/std normalization logic based on the selected AI model
         if !imgs.is_empty()
-            && let Ok(vectors) = engine.encode_images_batch(&imgs, &PreprocessingConfig::default())
+            && let Ok(vectors) =
+                engine.encode_images_batch(&imgs, &PreprocessingConfig::for_model(params.ai_model))
         {
             for (item, vector) in chunk_items.into_iter().zip(vectors) {
                 let chan_str = match item.analysis_type {
@@ -355,7 +359,7 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic ИИ Model and Database Dimension mapping
+    // Dynamic AI Model and Database Dimension mapping
     let (folder_name, dim) = match params.ai_model {
         1 => ("siglip_base", 768),
         2 => ("dinov2_base", 768),
@@ -401,6 +405,7 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
                     None
                 };
 
+                // Request decimated 512px mipmap level from DDS loader if available
                 let img =
                     crate::format_loaders::dds_loader::open_image_with_dds_fallback(p, Some(512))
                         .ok()?;
@@ -423,8 +428,10 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
             loaded_images.into_iter().unzip();
         let mut chunk_records = Vec::new();
 
+        // Inject the specific mean/std normalization logic based on the selected AI model
         if !imgs.is_empty()
-            && let Ok(vectors) = engine.encode_images_batch(&imgs, &PreprocessingConfig::default())
+            && let Ok(vectors) =
+                engine.encode_images_batch(&imgs, &PreprocessingConfig::for_model(params.ai_model))
         {
             for (item, vector) in chunk_items.into_iter().zip(vectors) {
                 let chan_str = match item.analysis_type {

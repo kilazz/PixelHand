@@ -1,4 +1,5 @@
 // src/core/inference.rs
+
 use anyhow::{Context, Result};
 use image::DynamicImage;
 use ndarray::{Array, Array4};
@@ -16,13 +17,36 @@ pub struct PreprocessingConfig {
     pub std: [f32; 3],
 }
 
+impl PreprocessingConfig {
+    /// Returns the appropriate preprocessing configuration based on the selected AI model index.
+    /// This is critical because models are trained on specific statistical distributions and resolutions.
+    pub fn for_model(model_idx: i32) -> Self {
+        match model_idx {
+            1 => Self {
+                // SigLIP-B (384x384, Symmetric normalization: [-1, 1])
+                target_size: (384, 384),
+                mean: [0.5, 0.5, 0.5],
+                std: [0.5, 0.5, 0.5],
+            },
+            2 => Self {
+                // DINOv2-B (224x224, standard ImageNet normalization)
+                target_size: (224, 224),
+                mean: [0.485, 0.456, 0.406],
+                std: [0.229, 0.224, 0.225],
+            },
+            _ => Self {
+                // CLIP-B/32 (224x224, OpenAI CLIP normalization)
+                target_size: (224, 224),
+                mean: [0.48145466, 0.4578275, 0.40821073],
+                std: [0.26862954, 0.2613026, 0.2757771],
+            },
+        }
+    }
+}
+
 impl Default for PreprocessingConfig {
     fn default() -> Self {
-        Self {
-            target_size: (224, 224),
-            mean: [0.48145466, 0.4578275, 0.40821073], // CLIP default normalization
-            std: [0.26862954, 0.2613026, 0.2757771],
-        }
+        Self::for_model(0)
     }
 }
 
@@ -239,7 +263,7 @@ impl InferenceEngine {
         let text_session_mutex = self
             .text_session
             .as_ref()
-            .context("Text model is not loaded")?;
+            .context("Text model is not loaded (DINOv2 does not support text search)")?;
 
         let encoding = tokenizer
             .encode(text, true)
