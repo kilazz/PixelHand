@@ -397,7 +397,6 @@ pub fn decode_dds_bytes(dds_bytes: &[u8], target_size: Option<u32>) -> Result<Dy
     let dds = image_dds::ddsfile::Dds::read(Cursor::new(&*clean_dds_bytes))
         .context("Failed to parse DDS file structure")?;
 
-    // --- FIXED: Uses exact mip_map_count field directly to fetch correct scaled levels ---
     let mip_level = if let Some(target) = target_size {
         let mut level = 0;
         let mut w = dds.header.width;
@@ -423,6 +422,7 @@ pub fn decode_dds_bytes(dds_bytes: &[u8], target_size: Option<u32>) -> Result<Dy
 }
 
 /// Helper wrapper that opens any supported graphics asset, utilizing fast mipmap seeking for DDS.
+/// Dynamically detects floating-point textures to perform high-fidelity HDR-to-SDR tonemapping.
 pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
     path: P,
     target_size: Option<u32>,
@@ -438,6 +438,8 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
         let mmap = unsafe { memmap2::Mmap::map(&file).context("Failed to memory map DDS file")? };
         decode_dds_bytes(&mmap, target_size)
     } else if ext == "exr" {
+        // EXR is loaded via a dedicated specialized crate 'exr' because the 'image' crate
+        // features in Cargo.toml do not explicitly enable 'exr'.
         let (hdr_pixels, width, height) = crate::core::tonemapper::load_exr_rgba(path_ref)
             .context("Failed to load EXR float pixels")?;
 
@@ -451,25 +453,35 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
         .context("Failed to apply tonemapping to EXR")?;
 
         Ok(DynamicImage::ImageRgba8(ldr_img))
-    } else if ext == "hdr" {
-        let img = image::open(path_ref).context("Failed to decode HDR image")?;
-
-        let float_img = img.into_rgba32f();
-        let width = float_img.width();
-        let height = float_img.height();
-        let hdr_pixels = float_img.into_raw();
-
-        let ldr_img = crate::core::tonemapper::tonemap_hdr_to_ldr_rgba(
-            &hdr_pixels,
-            width,
-            height,
-            crate::core::tonemapper::TonemapOperator::AcesFilmic,
-            1.0,
-        )
-        .context("Failed to apply tonemapping to HDR")?;
-
-        Ok(DynamicImage::ImageRgba8(ldr_img))
     } else {
-        image::open(path_ref).context("Failed to decode standard image format")
+        // Load standard image formats via the standard 'image' library
+        let img = image::open(path_ref).context("Failed to decode standard image format")?;
+
+        // Inspect the actual decoded pixel type/bit depth instead of relying solely on file extensions.
+        // If it uses floating point pixels (32-bit floats), it's a genuine high-dynamic-range (HDR) texture.
+        match img.color() {
+            image::ColorType::Rgb32F | image::ColorType::Rgba32F => {
+                let float_img = img.to_rgba32f();
+                let width = float_img.width();
+                let height = float_img.height();
+                let hdr_pixels = float_img.into_raw();
+
+                let ldr_img = crate::core::tonemapper::tonemap_hdr_to_ldr_rgba(
+                    &hdr_pixels,
+                    width,
+                    height,
+                    crate::core::tonemapper::TonemapOperator::AcesFilmic, // Overridden by the active active UI operator globally
+                    1.0,
+                )
+                .context("Failed to apply HDR tonemapping to floating-point texture")?;
+
+                Ok(DynamicImage::ImageRgba8(ldr_img))
+            }
+            _ => {
+                // Standard SDR images (8-bit or 16-bit integer formats like typical PNGs/TGHs) are
+                // passed directly to the screen as RGBA8 without compressing their range.
+                Ok(DynamicImage::ImageRgba8(img.to_rgba8()))
+            }
+        }
     }
 }

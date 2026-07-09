@@ -60,11 +60,26 @@ pub fn normalize_vector(mut vec: Vec<f32>) -> Vec<f32> {
     vec
 }
 
+/// Identifies the output extraction mode for different ONNX model architectures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VisualOutputMode {
+    /// Extract "image_embeds" directly (Standard for CLIP)
+    ImageEmbeds,
+    /// Extract "pooler_output" directly (Standard for SigLIP ONNX models)
+    PoolerOutput,
+    /// Slice "last_hidden_state" to extract the first token ([CLS]) (Required for DINOv2 backbone)
+    ClsToken,
+    /// Safe fallback to the very first output of the ONNX model graph
+    FirstOutput,
+}
+
 pub struct InferenceEngine {
     visual_session: Mutex<Session>,
     text_session: Option<Mutex<Session>>,
     tokenizer: Option<Tokenizer>,
     pub model_dim: usize,
+    visual_output_mode: VisualOutputMode,
+    fallback_output_name: String,
 }
 
 impl InferenceEngine {
@@ -151,6 +166,35 @@ impl InferenceEngine {
 
         let visual_session = builder.commit_from_file(&visual_path)?;
 
+        // Inspect the ONNX model outputs dynamically to detect the output architecture
+        let output_names: Vec<String> = visual_session
+            .outputs()
+            .iter()
+            .map(|o| o.name().to_string())
+            .collect();
+
+        let visual_output_mode = if output_names.iter().any(|n| n == "image_embeds") {
+            VisualOutputMode::ImageEmbeds
+        } else if output_names.iter().any(|n| n == "pooler_output") {
+            VisualOutputMode::PoolerOutput
+        } else if output_names.iter().any(|n| n == "last_hidden_state") {
+            VisualOutputMode::ClsToken
+        } else {
+            VisualOutputMode::FirstOutput
+        };
+
+        let fallback_output_name = output_names
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "image_embeds".to_string());
+
+        tracing::info!(
+            "ONNX Visual Model loaded successfully. Output names detected: {:?}. Strategy chosen: {:?}. Fallback node name: '{}'",
+            output_names,
+            visual_output_mode,
+            fallback_output_name
+        );
+
         let text_session = if text_path.exists() {
             let session = Session::builder()
                 .map_err(|e| anyhow::anyhow!("Failed to initialize Text Session builder: {:?}", e))?
@@ -176,6 +220,8 @@ impl InferenceEngine {
             text_session,
             tokenizer,
             model_dim,
+            visual_output_mode,
+            fallback_output_name,
         })
     }
 
@@ -241,10 +287,51 @@ impl InferenceEngine {
             .map_err(|_| anyhow::anyhow!("Session lock poisoned"))?;
 
         let outputs = session.run(inputs!["pixel_values" => &input_tensor])?;
-        let (shape, raw_slice) = outputs["image_embeds"].try_extract_tensor::<f32>()?;
+
+        // Dynamically slice or read the correct outputs based on the model signature
+        let (shape, raw_slice): (Vec<i64>, std::borrow::Cow<'_, [f32]>) = match self
+            .visual_output_mode
+        {
+            VisualOutputMode::ImageEmbeds => {
+                let (sh, slice) = outputs["image_embeds"].try_extract_tensor::<f32>()?;
+                (sh.to_vec(), std::borrow::Cow::Borrowed(slice))
+            }
+            VisualOutputMode::PoolerOutput => {
+                let (sh, slice) = outputs["pooler_output"].try_extract_tensor::<f32>()?;
+                (sh.to_vec(), std::borrow::Cow::Borrowed(slice))
+            }
+            VisualOutputMode::ClsToken => {
+                let (raw_shape, data) = outputs["last_hidden_state"].try_extract_tensor::<f32>()?;
+                let b_size = raw_shape[0] as usize;
+                let seq_len = raw_shape[1] as usize;
+                let hidden_size = raw_shape[2] as usize;
+
+                // DINOv2 returns [batch, seq_len, 768]. Slice the CLS token (sequence index 0)
+                let mut cls_embeddings = Vec::with_capacity(b_size * hidden_size);
+                for b in 0..b_size {
+                    let start_idx = b * seq_len * hidden_size;
+                    let cls_token_slice = &data[start_idx..start_idx + hidden_size];
+                    cls_embeddings.extend_from_slice(cls_token_slice);
+                }
+                (
+                    vec![b_size as i64, hidden_size as i64],
+                    std::borrow::Cow::Owned(cls_embeddings),
+                )
+            }
+            VisualOutputMode::FirstOutput => {
+                let (sh, slice) =
+                    outputs[self.fallback_output_name.as_str()].try_extract_tensor::<f32>()?;
+                (sh.to_vec(), std::borrow::Cow::Borrowed(slice))
+            }
+        };
 
         if shape[0] as usize != batch_size || shape[1] as usize != self.model_dim {
-            return Err(anyhow::anyhow!("Output shape mismatch!"));
+            return Err(anyhow::anyhow!(
+                "Output shape mismatch! Expected [{}, {}], got {:?}",
+                batch_size,
+                self.model_dim,
+                shape
+            ));
         }
 
         let mut results = Vec::with_capacity(batch_size);
