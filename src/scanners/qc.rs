@@ -17,7 +17,7 @@ pub use crate::core::qc::calculate_diff_map;
 
 /// Executes an absolute local directory Quality Control audit
 pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
-    let path = PathBuf::from(params.dir_a);
+    let path = PathBuf::from(params.dir_a.clone());
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
@@ -35,6 +35,8 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
     }
 
     let cancel_token = params.cancel_token.clone();
+    let total = paths.len();
+    let processed = std::sync::atomic::AtomicUsize::new(0);
 
     let issues: Vec<QcIssueSummary> = paths
         .par_iter()
@@ -116,6 +118,13 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     });
                 }
             }
+
+            // Increment atomic processed items and dispatch to the main progress callback
+            let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(ref cb) = params.on_progress {
+                cb(current as f32 / total as f32);
+            }
+
             file_issues
         })
         .collect();
