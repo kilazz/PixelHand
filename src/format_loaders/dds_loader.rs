@@ -448,7 +448,25 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
             crate::core::tonemapper::TonemapOperator::AcesFilmic,
             1.0,
         )
-        .context("Failed to apply ACES Filmic tonemapping to EXR")?;
+        .context("Failed to apply tonemapping to EXR")?;
+
+        Ok(DynamicImage::ImageRgba8(ldr_img))
+    } else if ext == "hdr" {
+        let img = image::open(path_ref).context("Failed to decode HDR image")?;
+
+        let float_img = img.into_rgba32f();
+        let width = float_img.width();
+        let height = float_img.height();
+        let hdr_pixels = float_img.into_raw();
+
+        let ldr_img = crate::core::tonemapper::tonemap_hdr_to_ldr_rgba(
+            &hdr_pixels,
+            width,
+            height,
+            crate::core::tonemapper::TonemapOperator::AcesFilmic,
+            1.0,
+        )
+        .context("Failed to apply tonemapping to HDR")?;
 
         Ok(DynamicImage::ImageRgba8(ldr_img))
     } else {
