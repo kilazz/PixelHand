@@ -29,9 +29,9 @@
     *   Instant `Expand All` and `Collapse All` duplicate group triggers.
 
 ## Format Support
-*   **Pro Formats**: Direct memory-mapped `.dds`, 32-bit floating-point `.exr` (OpenEXR) and `.hdr` (Radiance HDR).
-*   **Production Source Formats**: Adobe Photoshop `.psd` layered composites, next-generation `.jxl` (JPEG XL), and Apple `.heic` / `.heif` native decodes.
-*   **Standard Formats**: `.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.tiff`, and `.webp`.
+*   **Formats**: Direct memory-mapped `.dds`, 32-bit floating-point `.exr` (OpenEXR) and `.hdr` (Radiance HDR).
+*   **Source Formats**: `.psd`,`.jxl`, `.heic`/`.heif`.
+*   **Standard Formats**: `.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.tiff`, `.webp`, 
 
 ## Tech Stack
 *   **GUI Engine**: [Slint UI](https://slint.dev/)
