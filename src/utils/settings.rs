@@ -1,10 +1,12 @@
 // src/utils/settings.rs
+
 use crate::app::AppWindow;
 use crate::state::AppSettings;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Locates or creates the persistent data storage directory next to the executable.
+/// This maintains portable execution characteristics for the application.
 pub fn get_portable_app_data_dir() -> anyhow::Result<PathBuf> {
     let exe_path = std::env::current_exe()?;
     let exe_dir = exe_path.parent().unwrap_or(Path::new(""));
@@ -17,7 +19,8 @@ pub fn get_portable_app_data_dir() -> anyhow::Result<PathBuf> {
     Ok(portable_data_dir)
 }
 
-/// Serializes and saves current window state settings to Settings.json
+/// Serializes and saves current window state settings to Settings.json.
+/// This extracts properties directly from the active Slint GUI AppWindow.
 pub fn save_settings(ui: &AppWindow) {
     let settings = AppSettings {
         dir_a: ui.get_dir_a().to_string(),
@@ -44,6 +47,16 @@ pub fn save_settings(ui: &AppWindow) {
         ext_tif: ui.get_ext_tif(),
         ext_webp: ui.get_ext_webp(),
         duplicates_panel_height: ui.get_duplicates_panel_height(),
+
+        // --- UPDATED: Save the dynamic sidebar splitter width on exit ---
+        sidebar_width: ui.get_sidebar_width(),
+
+        // Synchronize and write visual reports configuration states
+        save_visuals: ui.get_save_visuals(),
+        visuals_columns: ui.get_visuals_columns(),
+        visuals_max_count: ui.get_visuals_max_count(),
+        visuals_font_size: ui.get_visuals_font_size(),
+        visuals_scale: ui.get_visuals_scale(),
     };
 
     if let Ok(dir) = get_portable_app_data_dir() {

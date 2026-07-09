@@ -1,7 +1,7 @@
 // src/cli.rs
-use anyhow::{Result, anyhow};
 
 use crate::scanners::{ScanParams, exact, qc};
+use anyhow::{Result, anyhow};
 
 /// Main CLI entry point.
 /// Parses inputs and executes audits entirely in the console.
@@ -93,6 +93,12 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         perceptual_channel: "Composite".to_string(),
         execution_provider: "CPU".to_string(),
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        // Setup default visual configurations for CLI tasks
+        save_visuals: false,
+        visuals_columns: 6,
+        visuals_max_count: 100,
+        visuals_font_size: 14,
+        visuals_scale: 1.0,
     };
 
     match exact::run_exact_scan(params).await {
@@ -163,6 +169,12 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         perceptual_channel: "Composite".to_string(),
         execution_provider: "CPU".to_string(),
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        // Setup default visual configurations for CLI tasks
+        save_visuals: false,
+        visuals_columns: 6,
+        visuals_max_count: 100,
+        visuals_font_size: 14,
+        visuals_scale: 1.0,
     };
 
     match qc::run_qc_scan_internal(params).await {

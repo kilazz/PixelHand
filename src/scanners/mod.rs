@@ -1,4 +1,5 @@
 // src/scanners/mod.rs
+
 pub mod ai;
 pub mod exact;
 pub mod perceptual;
@@ -11,14 +12,17 @@ use std::sync::atomic::AtomicBool;
 
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
-/// All configuration parameters compiled from the UI panel
+/// All configuration parameters gathered from the UI panel to orchestrate a scan.
+/// Derived `Clone` is required to allow app.rs to query the configuration parameters
+/// after execute_scan consumes ownership of the original struct.
+#[derive(Clone)]
 pub struct ScanParams {
     pub dir_a: String,
     pub dir_b: String,
     pub query_text: String,
     pub similarity: f32,
     pub batch_size: usize,
-    pub search_method: i32, // 0: Exact, 1: Perceptual, 2: AI
+    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI Embeddings
     pub execution_provider: String,
     pub qc_mode: bool,
     pub qc_npot: bool,
@@ -31,10 +35,17 @@ pub struct ScanParams {
     pub extensions: Vec<String>,
     pub perceptual_channel: String,
     pub cancel_token: Arc<AtomicBool>,
+
+    // Properties for Asynchronous Visual Reports (Contact Sheets)
+    pub save_visuals: bool,
+    pub visuals_columns: usize,
+    pub visuals_max_count: usize,
+    pub visuals_font_size: usize,
+    pub visuals_scale: f32,
 }
 
 impl ScanParams {
-    /// Compiles current state of Slint checkboxes and input fields into ScanParams
+    /// Compiles the current state of Slint UI properties into a safe, thread-safe ScanParams struct.
     pub fn from_ui(ui: &crate::app::AppWindow, cancel_token: Arc<AtomicBool>) -> Self {
         let mut extensions = Vec::new();
         if ui.get_ext_png() {
@@ -65,7 +76,7 @@ impl ScanParams {
             extensions.push(".webp".to_string());
         }
 
-        // Read the currently active channel filter on the board
+        // Determine the active color channel isolate selected on the preview panel
         let perceptual_channel = if ui.get_active_r() {
             "R".to_string()
         } else if ui.get_active_g() {
@@ -106,45 +117,54 @@ impl ScanParams {
             extensions,
             perceptual_channel,
             cancel_token,
+
+            // Pull visuals settings from Slint UI properties
+            save_visuals: ui.get_save_visuals(),
+            visuals_columns: ui.get_visuals_columns() as usize,
+            visuals_max_count: ui.get_visuals_max_count() as usize,
+            visuals_font_size: ui.get_visuals_font_size() as usize,
+            visuals_scale: ui.get_visuals_scale(),
         }
     }
 }
 
-/// Main orchestration routing logic
+/// Core routing mechanism designed to dispatch to the correct scanning strategy.
 pub async fn execute_scan(
     params: ScanParams,
 ) -> Result<(Vec<DuplicateGroupSummary>, Vec<ResultsRowData>)> {
     if params.qc_mode {
         if !params.dir_b.trim().is_empty() {
-            // Relative Folder B vs A comparison
+            // Relative Folder A vs Folder B asset comparison
             let issues =
                 qc::run_folder_compare(params.dir_a, params.dir_b, params.extensions).await?;
             let rows = map_qc_to_rows(&issues);
             Ok((Vec::new(), rows))
         } else {
-            // Absolute local folder technical QC auditing
+            // Absolute local folder technical quality control audit
             let issues = qc::run_qc_scan_internal(params).await?;
             let rows = map_qc_to_rows(&issues);
             Ok((Vec::new(), rows))
         }
     } else if params.search_method == 2 {
-        // AI semantic/visual search
+        // AI Vector Space Similarity Searches
         if !params.query_text.trim().is_empty() {
+            // Semantic Text Search
             let matches = ai::run_ai_search(params).await?;
             let rows = map_ai_search_to_rows(&matches);
             Ok((Vec::new(), rows))
         } else {
+            // AI Visual Duplicate Cluster Scan
             let groups = ai::run_ai_duplicate_scan(params).await?;
             let rows = map_groups_to_rows(&groups);
             Ok((groups, rows))
         }
     } else if params.search_method == 1 {
-        // Simple perceptual scanner (dHash)
+        // Linear Perceptual Similarity Engine (dHash + Hamming Distance)
         let groups = perceptual::run_perceptual_scan_internal(params).await?;
         let rows = map_groups_to_rows(&groups);
         Ok((groups, rows))
     } else {
-        // Exact Byte-match (xxHash64)
+        // Binary Byte-Exact Scanning (xxHash64)
         let groups = exact::run_exact_scan(params).await?;
         let rows = map_groups_to_rows(&groups);
         Ok((groups, rows))
@@ -155,6 +175,7 @@ pub async fn execute_scan(
 // PRIVATE RESULT-MAPPING DATA HELPERS
 // ---------------------------------------------------------
 
+/// Instantiates a downscaled thumbnail from disk on a background task.
 fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
     let path = PathBuf::from(path_str);
     if let Ok(mut img) = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path) {
@@ -166,6 +187,7 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
     None
 }
 
+/// Converts core rust clustering models into the Slint-friendly row representation.
 fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for (g_idx, group) in groups.iter().enumerate() {
@@ -173,7 +195,7 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
             continue;
         }
 
-        // Add Header row for duplicate cluster
+        // 1. Add Group Cluster Header row
         rows.push(ResultsRowData {
             is_header: true,
             is_qc: false,
@@ -192,7 +214,7 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
             thumbnail_data: None,
         });
 
-        // Add file rows inside the duplicate cluster
+        // 2. Add Child file rows belonging to this cluster
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
             let thumbnail_data = load_thumbnail_for_path(&file.path);
@@ -227,6 +249,7 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
     rows
 }
 
+/// Converts core technical Quality Control issues into Slint row models.
 fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for issue in issues {
@@ -254,6 +277,7 @@ fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData
     rows
 }
 
+/// Converts semantic vector database matches into Slint row models.
 fn map_ai_search_to_rows(matches: &[crate::state::AiSearchResultSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for res in matches {

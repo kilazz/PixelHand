@@ -1,7 +1,9 @@
 // src/state/models.rs
+
 use serde::{Deserialize, Serialize};
 
-/// Persistent settings structure (Saved to Settings.json)
+/// Persistent settings structure serialized and loaded from `Settings.json`.
+/// This holds the core state of checkboxes, configuration parameters, and slider thresholds.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppSettings {
     pub dir_a: String,
@@ -28,6 +30,16 @@ pub struct AppSettings {
     pub ext_tif: bool,
     pub ext_webp: bool,
     pub duplicates_panel_height: f32,
+
+    // --- UPDATED: Persisted width of the sidebar splitter ---
+    pub sidebar_width: f32,
+
+    // Persistent Properties for Asynchronous Visual Reports (Contact Sheets)
+    pub save_visuals: bool,
+    pub visuals_columns: i32,
+    pub visuals_max_count: i32,
+    pub visuals_font_size: i32,
+    pub visuals_scale: f32,
 }
 
 impl Default for AppSettings {
@@ -57,11 +69,21 @@ impl Default for AppSettings {
             ext_tif: true,
             ext_webp: true,
             duplicates_panel_height: 180.0,
+
+            // Default Sidebar Width to 380px
+            sidebar_width: 380.0,
+
+            // Default Visual Reports settings
+            save_visuals: false,
+            visuals_columns: 6,
+            visuals_max_count: 100,
+            visuals_font_size: 14,
+            visuals_scale: 1.5,
         }
     }
 }
 
-/// Represents a single duplicate image file
+/// Represents the details of a single duplicate image file within a duplicate cluster.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DuplicateFileSummary {
     pub path: String,
@@ -77,14 +99,14 @@ pub struct DuplicateFileSummary {
     pub similarity: f32,
 }
 
-/// Represents a cluster of duplicate files
+/// Represents a cluster of duplicate files.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DuplicateGroupSummary {
     pub hash: String,
     pub files: Vec<DuplicateFileSummary>,
 }
 
-/// Represents an issue found during Quality Control (QC)
+/// Represents an issue found during Quality Control (QC).
 #[derive(Serialize, Clone, Debug)]
 pub struct QcIssueSummary {
     pub path: String,
@@ -92,7 +114,7 @@ pub struct QcIssueSummary {
     pub details: String,
 }
 
-/// Represents a visual match from AI Semantic Search
+/// Represents a visual match from AI Semantic Search.
 #[derive(Serialize, Clone, Debug)]
 pub struct AiSearchResultSummary {
     pub path: String,

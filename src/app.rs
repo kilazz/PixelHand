@@ -1,4 +1,5 @@
 // src/app.rs
+
 use anyhow::{Context, Result};
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -26,6 +27,7 @@ static LOG_FILE: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();
 /// Custom writer that captures all tracing events, sending them to Slint Log Tab
 /// and writing them simultaneously to a physical log file on disk.
 struct UiLogWriter;
+
 impl std::io::Write for UiLogWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Ok(s) = std::str::from_utf8(buf) {
@@ -44,6 +46,7 @@ impl std::io::Write for UiLogWriter {
 
         Ok(buf.len())
     }
+
     fn flush(&mut self) -> std::io::Result<()> {
         if let Some(file_mutex) = LOG_FILE.get()
             && let Ok(mut lock) = file_mutex.lock()
@@ -54,6 +57,7 @@ impl std::io::Write for UiLogWriter {
         Ok(())
     }
 }
+
 impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for UiLogWriter {
     type Writer = UiLogWriter;
     fn make_writer(&self) -> Self::Writer {
@@ -199,13 +203,42 @@ pub fn run_gui() -> Result<()> {
 
         ui.set_is_scanning(true);
         ui.set_status_text("Scanning assets...".into());
+        ui.set_progress(0.0);
         tracing::info!("Starting scan on directory: {}", params.dir_a);
 
+        let params_for_task = params.clone();
+
         tokio::spawn(async move {
-            let scan_result = scanners::execute_scan(params).await;
+            let scan_result = scanners::execute_scan(params_for_task.clone()).await;
+
+            // Generate visuals sheets if requested and scan completed successfully (Clippy Optimized Block)
+            if params_for_task.save_visuals
+                && let Ok((ref groups, _)) = scan_result
+            {
+                let _ = app_copy.upgrade_in_event_loop(|ui| {
+                    ui.set_status_text("Generating contact sheet reports...".into());
+                });
+
+                if let Ok(app_dir) = crate::utils::settings::get_portable_app_data_dir() {
+                    let out_dir = app_dir.join("duplicate_visuals");
+                    if let Err(e) = crate::core::visuals::generate_visual_reports(
+                        groups.clone(),
+                        params_for_task.visuals_columns,
+                        params_for_task.visuals_max_count,
+                        params_for_task.visuals_font_size,
+                        params_for_task.visuals_scale,
+                        out_dir,
+                    )
+                    .await
+                    {
+                        tracing::error!("Failed to generate visual reports: {}", e);
+                    }
+                }
+            }
 
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_is_scanning(false);
+                ui.set_progress(1.0);
                 match scan_result {
                     Ok((groups, rows)) => {
                         let mut state_lock = state_copy.lock().unwrap();
@@ -214,7 +247,13 @@ pub fn run_gui() -> Result<()> {
                         state_lock.results = rows;
 
                         utils::ui::update_results_ui(&ui, &state_lock);
-                        ui.set_status_text("Scan finished successfully!".into());
+
+                        let msg = if params_for_task.save_visuals {
+                            "Scan and visual reports finished successfully!"
+                        } else {
+                            "Scan finished successfully!"
+                        };
+                        ui.set_status_text(msg.into());
                         tracing::info!("Scan completed.");
                     }
                     Err(e) => {
@@ -419,6 +458,16 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_ext_tif(settings.ext_tif);
     app.set_ext_webp(settings.ext_webp);
     app.set_duplicates_panel_height(settings.duplicates_panel_height);
+
+    // --- UPDATED: Load dynamic sidebar width constraint into AppWindow state ---
+    app.set_sidebar_width(settings.sidebar_width);
+
+    // Apply Visual Reports configurations to Slint UI
+    app.set_save_visuals(settings.save_visuals);
+    app.set_visuals_columns(settings.visuals_columns);
+    app.set_visuals_max_count(settings.visuals_max_count);
+    app.set_visuals_font_size(settings.visuals_font_size);
+    app.set_visuals_scale(settings.visuals_scale);
 }
 
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
