@@ -497,7 +497,7 @@ pub fn run_gui() -> Result<()> {
     let state_clone = state.clone();
     app.on_expand_all_groups(move || {
         let mut lock = state_clone.lock().unwrap();
-        lock.collapsed_groups.clear(); // Полностью очищаем маску скрытия
+        lock.collapsed_groups.clear();
         if let Some(ui) = app_weak.upgrade() {
             utils::ui::update_results_ui(&ui, &lock);
         }
@@ -509,7 +509,6 @@ pub fn run_gui() -> Result<()> {
         let mut lock = state_clone.lock().unwrap();
         lock.collapsed_groups.clear();
 
-        // Сначала собираем индексы заголовков во временный буфер во избежание конфликта ссылок
         let header_indices: Vec<i32> = lock
             .results
             .iter()
