@@ -34,9 +34,9 @@
 *   **Standard Formats**: `.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.tiff`, and `.webp`.
 
 ## Tech Stack
-*   **GUI Engine**: [Slint UI](https://slint.dev/) (GPU-accelerated, native compiled)
+*   **GUI Engine**: [Slint UI](https://slint.dev/)
 *   **Machine Learning**: [ONNX Runtime](https://onnxruntime.ai/)
-*   **Vector Database**: [LanceDB](https://lancedb.com/) (disk-backed transactional storage, isolated schemas per-model to prevent collisions)
+*   **Vector Database**: [LanceDB](https://lancedb.com/)
 *   **Concurrencies**: Thread-safe background tasks built with `Rayon` (data-parallelism CPU threads) and `Tokio` (asynchronous state runtimes)
 
 ## Development
