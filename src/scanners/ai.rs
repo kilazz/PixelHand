@@ -12,6 +12,18 @@ use crate::core::inference::{InferenceEngine, PreprocessingConfig};
 use crate::state::{AiSearchResultSummary, DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::discover_files;
 
+/// Maps our Slint Search Precision ComboBox index (0: Fast, 1: Balanced, 2: Accurate, 3: Exhaustive)
+/// into dynamic IVF-PQ index probing parameters (nprobes, refine_factor) to optimize database lookups.
+fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
+    match precision_idx {
+        0 => (8, 1),    // Fast (Low overhead, minimal cluster lookups)
+        1 => (20, 3),   // Balanced (Default)
+        2 => (80, 8),   // Accurate
+        3 => (256, 20), // Exhaustive (High accuracy, slower queries)
+        _ => (20, 3),
+    }
+}
+
 pub async fn run_ai_duplicate_scan(
     params: super::ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
@@ -94,6 +106,9 @@ pub async fn run_ai_duplicate_scan(
     let dist_threshold = 1.0 - (params.similarity / 100.0);
     let mut uf = crate::utils::clustering::UnionFind::new(records.len());
 
+    // Resolve Dynamic Search precision options
+    let (nprobes, refine_factor) = map_precision_presets(params.search_precision);
+
     {
         use futures::StreamExt;
         let query_items: Vec<(usize, Vec<f32>)> = records
@@ -106,7 +121,10 @@ pub async fn run_ai_duplicate_scan(
             .map(|(idx, query_vec)| {
                 let db_clone = db.clone();
                 async move {
-                    let matches = db_clone.search_similarity(&query_vec, 10).await?;
+                    // --- FIXED: Invoked unified search_similarity query signature cleanly ---
+                    let matches = db_clone
+                        .search_similarity(&query_vec, 10, Some(nprobes), Some(refine_factor))
+                        .await?;
                     Ok::<_, anyhow::Error>((idx, matches))
                 }
             })
@@ -119,7 +137,9 @@ pub async fn run_ai_duplicate_scan(
 
             let (src_idx, matches) = res?;
             for m in matches {
-                if let Some(target_idx) = records.iter().position(|r| r.path == m.path)
+                if let Some(target_idx) = records
+                    .iter()
+                    .position(|r| r.path == m.path && r.channel == m.channel)
                     && target_idx != src_idx
                     && m.distance <= dist_threshold
                 {
@@ -132,7 +152,6 @@ pub async fn run_ai_duplicate_scan(
     let groups = uf.get_groups();
     let mut results = Vec::new();
 
-    // Pre-fixed with underscore to prevent unused variable warnings
     for (_root_idx, member_indices) in groups {
         if params.cancel_token.load(Ordering::Relaxed) {
             return Err(anyhow!("Scan cancelled by user."));
@@ -193,7 +212,6 @@ pub async fn run_ai_duplicate_scan(
             }
         });
 
-        // --- FIXED: Cloned best_path to break the immutable borrow constraints loop ---
         let best_path = file_summaries[0].path.clone();
         let best_vector = records
             .iter()
@@ -309,8 +327,14 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
     db.add_batch(&records).await?;
     db.create_vector_index().await?;
 
+    let (nprobes, refine_factor) = map_precision_presets(params.search_precision);
+
     let query_vector = engine.encode_text(&params.query_text)?;
-    let search_results = db.search_similarity(&query_vector, 20).await?;
+
+    // --- FIXED: Invoked unified search_similarity query signature cleanly ---
+    let search_results = db
+        .search_similarity(&query_vector, 20, Some(nprobes), Some(refine_factor))
+        .await?;
 
     let results = search_results
         .into_iter()

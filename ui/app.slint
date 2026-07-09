@@ -266,6 +266,7 @@ component PanelSection {
 }
 
 // Custom interactive Wipe comparative viewport (Responsive rendering)
+// Kept private to avoid standalone Rust interface generation warnings
 component WipeViewport {
     in property <image> original;
     in property <image> duplicate;
@@ -367,7 +368,7 @@ export component AppWindow inherits Window {
     in-out property <string> dir_a: "";
     in-out property <string> dir_b: "";
     in-out property <string> query_text: "";
-    in-out property <float> similarity_threshold: 90; // Switch to float for two-way binding with Slider
+    in-out property <float> similarity_threshold: 90;
     in-out property <int> batch_size: 128;
     in-out property <bool> is_scanning: false;
     in-out property <float> progress: 0.0;
@@ -404,19 +405,20 @@ export component AppWindow inherits Window {
     in-out property <length> pan_x: 0px;
     in-out property <length> pan_y: 0px;
 
-    // Slicing Options
+    // Slicing and Verification Options
     in-out property <string> excluded_folders: ".git, .svn, cache, temp";
     in-out property <bool> qc_match_by_stem: true;
     in-out property <bool> qc_hide_same_resolution: false;
+
+    // Dynamic LanceDB IVF-PQ Precision state bindings
+    in-out property <int> search_precision: 1; // 0: Fast, 1: Balanced, 2: Accurate, 3: Exhaustive
 
     // Draggable Splitters states (Persisted dynamically)
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
 
-    // Global checkerboard pattern loaded from Rust
     in-out property <image> checkerboard_pattern;
 
-    // Metadata tables data structures
     in-out property <SelectedFile> original_meta: {
         name: "-",
         size_str: "-",
@@ -442,17 +444,14 @@ export component AppWindow inherits Window {
         path: ""
     };
 
-    // Comparative canvas assets bindings
     in-out property <image> image_original;
     in-out property <image> image_duplicate;
     in-out property <image> image_heatmap;
 
-    // Comparer canvas configuration options: 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference Heatmap
     in-out property <int> compare_mode: 0;
     in-out property <float> wipe_slider_val: 0.5;
     in-out property <float> bg_alpha: 1.0;
 
-    // Channel preview filters states
     in-out property <bool> active_r: false;
     in-out property <bool> active_g: false;
     in-out property <bool> active_b: false;
@@ -485,7 +484,6 @@ export component AppWindow inherits Window {
     in-out property <[ResultsRow]> results: [];
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
-    // Coordinate variables tracking File Format filter dropdown locations
     in-out property <length> ext_popup_x: 0px;
     in-out property <length> ext_popup_y: 0px;
 
@@ -815,7 +813,7 @@ export component AppWindow inherits Window {
                                                 minimum: 2;
                                                 maximum: 12;
                                                 height: 22px;
-                                                width: 80px;
+                                                width: 100px;
                                             }
 
                                             Text {
@@ -831,7 +829,7 @@ export component AppWindow inherits Window {
                                                 minimum: 1;
                                                 maximum: 1000;
                                                 height: 22px;
-                                                width: 90px;
+                                                width: 110px;
                                             }
 
                                             Rectangle {
@@ -839,7 +837,6 @@ export component AppWindow inherits Window {
                                             }
                                         }
 
-                                        // --- FIXED: Removed alignment: start; and used horizontal-stretch: 1; on Slider to dynamically scale the track perfectly! ---
                                         HorizontalLayout {
                                             spacing: 8px;
 
@@ -856,7 +853,7 @@ export component AppWindow inherits Window {
                                                 minimum: 8;
                                                 maximum: 36;
                                                 height: 22px;
-                                                width: 80px;
+                                                width: 100px;
                                             }
 
                                             Text {
@@ -873,7 +870,8 @@ export component AppWindow inherits Window {
                                                 maximum: 3.0;
                                                 height: 22px;
                                                 horizontal-stretch: 1;
-                                            } // Elastic track fills space
+                                            }
+
                                             Text {
                                                 text: (Math.round(root.visuals_scale * 10) / 10) + "x";
                                                 width: 26px;
@@ -1052,6 +1050,15 @@ export component AppWindow inherits Window {
                                         "AI Semantic/Visual Search"
                                     ];
                                     current-index <=> root.search_method;
+                                    height: 24px;
+                                }
+                            }
+
+                            if root.search_method == 2: PanelSection {
+                                title: "Search Precision (LanceDB)";
+                                ComboBox {
+                                    model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
+                                    current-index <=> root.search_precision;
                                     height: 24px;
                                 }
                             }
@@ -1416,7 +1423,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Selection tools section box
                     Rectangle {
                         background: #2b2d31;
                         border-color: #1f2023;
@@ -1467,7 +1473,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Link actions footer section
                     HorizontalLayout {
                         spacing: 8px;
                         height: 24px;
@@ -1583,6 +1588,7 @@ export component AppWindow inherits Window {
                             }
 
                             scroll-event(evt) => {
+                                // Normalized float division of evt.delta-y via 1px explicitly to prevent type errors
                                 let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
                                 root.zoom_factor = (root.zoom_factor + zoom_delta).clamp(1.0, 10.0);
                                 if (root.zoom_factor == 1.0) {

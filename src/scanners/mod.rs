@@ -14,6 +14,8 @@ use crate::core::perceptual::AnalysisType;
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
 /// All configuration parameters gathered from the UI panel to orchestrate a scan.
+/// Derived `Clone` is required to allow app.rs to query the configuration parameters
+/// after execute_scan consumes ownership of the original struct.
 #[derive(Clone)]
 pub struct ScanParams {
     pub dir_a: String,
@@ -51,10 +53,13 @@ pub struct ScanParams {
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
 
-    // Global filters and relative validations rules
+    // Exclude Filter and QC Matching controls
     pub excluded_folders: String,
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
+
+    // IVF-PQ Index Tuning Parameters (Search Precision)
+    pub search_precision: i32,
 }
 
 impl ScanParams {
@@ -140,6 +145,9 @@ impl ScanParams {
             excluded_folders: ui.get_excluded_folders().to_string(),
             qc_match_by_stem: ui.get_qc_match_by_stem(),
             qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
+
+            // Precision parameters
+            search_precision: ui.get_search_precision(),
         }
     }
 }

@@ -41,6 +41,8 @@ pub fn save_settings(ui: &AppWindow) {
         qc_solid_colors: ui.get_qc_solid_colors(),
         qc_normals: ui.get_qc_normals(),
         qc_normals_tags: ui.get_qc_normals_tags().to_string(),
+        qc_match_by_stem: ui.get_qc_match_by_stem(),
+        qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
 
         // Target Extensions
         ext_png: ui.get_ext_png(),
@@ -73,10 +75,9 @@ pub fn save_settings(ui: &AppWindow) {
         prep_tags: ui.get_prep_tags().to_string(),
         prep_ignore_solid: ui.get_prep_ignore_solid(),
 
-        // --- NEW: Save Exclude Folders & Match logic settings on exit ---
+        // Exclude Filters and LanceDB Precision Configuration
         excluded_folders: ui.get_excluded_folders().to_string(),
-        qc_match_by_stem: ui.get_qc_match_by_stem(),
-        qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
+        search_precision: ui.get_search_precision(),
     };
 
     if let Ok(dir) = get_portable_app_data_dir() {

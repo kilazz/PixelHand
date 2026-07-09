@@ -114,6 +114,9 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         excluded_folders: ".git, .svn, cache, temp".to_string(),
         qc_match_by_stem: true,
         qc_hide_same_resolution: false,
+
+        // --- FIXED: Configured dynamic search precision level defaults ---
+        search_precision: 1, // Balanced (Default)
     };
 
     match exact::run_exact_scan(params).await {
@@ -203,6 +206,9 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         excluded_folders: ".git, .svn, cache, temp".to_string(),
         qc_match_by_stem: true,
         qc_hide_same_resolution: false,
+
+        // --- FIXED: Configured dynamic search precision level defaults ---
+        search_precision: 1, // Balanced (Default)
     };
 
     match qc::run_qc_scan_internal(params).await {

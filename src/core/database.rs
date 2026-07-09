@@ -1,4 +1,5 @@
 // src/core/database.rs
+
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::Arc;
@@ -26,9 +27,11 @@ pub struct DbRecord {
 }
 
 /// Represents the normalized result of a vector similarity query.
+/// Includes channel information to accurately distinguish split-channel queries.
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub path: String,
+    pub channel: String,
     pub distance: f32,
 }
 
@@ -170,22 +173,29 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Performs a high-speed vector similarity search using Cosine metrics.
+    /// Performs a high-speed vector similarity search using Cosine metrics with optional IVF-PQ indexing options (nprobes, refine_factor).
     pub async fn search_similarity(
         &self,
         query_vector: &[f32],
         limit: usize,
+        nprobes: Option<usize>,
+        refine_factor: Option<usize>,
     ) -> Result<Vec<SearchResult>> {
         let table = self
             .table
             .as_ref()
             .context("Database table is not initialized")?;
-        let query_result = table
-            .query()
-            .nearest_to(query_vector)?
-            .limit(limit)
-            .execute()
-            .await?;
+
+        let mut query = table.query().nearest_to(query_vector)?;
+
+        if let Some(np) = nprobes {
+            query = query.nprobes(np);
+        }
+        if let Some(rf) = refine_factor {
+            query = query.refine_factor(rf as u32);
+        }
+
+        let query_result = query.limit(limit).execute().await?;
         let record_batches = query_result.try_collect::<Vec<RecordBatch>>().await?;
         let mut results = Vec::new();
 
@@ -200,6 +210,12 @@ impl DatabaseService {
                 .downcast_ref::<StringArray>()
                 .context("Failed to downcast path column")?;
 
+            let channels_array = batch
+                .column(3)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .context("Failed to downcast channel column")?;
+
             let distance_col_idx = batch
                 .schema()
                 .index_of("_distance")
@@ -213,6 +229,7 @@ impl DatabaseService {
             for i in 0..batch.num_rows() {
                 results.push(SearchResult {
                     path: paths_array.value(i).to_string(),
+                    channel: channels_array.value(i).to_string(),
                     distance: distances_array.value(i),
                 });
             }

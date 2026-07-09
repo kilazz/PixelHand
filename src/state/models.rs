@@ -58,8 +58,9 @@ pub struct AppSettings {
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
 
-    // General Filters
+    // Directory Traversing and Vector Matching Limits
     pub excluded_folders: String,
+    pub search_precision: i32,
 }
 
 impl Default for AppSettings {
@@ -112,6 +113,7 @@ impl Default for AppSettings {
             prep_ignore_solid: true,
 
             excluded_folders: ".git, .svn, cache, temp".to_string(),
+            search_precision: 1, // Maps to 'Balanced (Default)' LanceDB parameters
         }
     }
 }
@@ -132,14 +134,14 @@ pub struct DuplicateFileSummary {
     pub similarity: f32,
 }
 
-/// Represents a cluster of duplicate files.
+/// Represents an isolated duplicate cluster containing a list of matching duplicate files.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DuplicateGroupSummary {
     pub hash: String,
     pub files: Vec<DuplicateFileSummary>,
 }
 
-/// Represents an issue found during Quality Control (QC).
+/// Represents a technical issue identified during Quality Control auditing.
 #[derive(Serialize, Clone, Debug)]
 pub struct QcIssueSummary {
     pub path: String,
@@ -147,7 +149,7 @@ pub struct QcIssueSummary {
     pub details: String,
 }
 
-/// Represents a visual match from AI Semantic Search.
+/// Represents a visual similarity match returned from the AI database search.
 #[derive(Serialize, Clone, Debug)]
 pub struct AiSearchResultSummary {
     pub path: String,
