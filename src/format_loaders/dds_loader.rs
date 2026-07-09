@@ -477,6 +477,19 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
             .map_err(|e| anyhow::anyhow!("JXL decoding pipeline failed: {:?}", e))?;
 
         Ok(img)
+    } else if ext == "heic" || ext == "heif" {
+        // Pure-Rust zero-dependency HEIC/HEIF image decoder
+        let bytes = std::fs::read(path_ref).context("Failed to read HEIC/HEIF file")?;
+        let output = heic::DecoderConfig::new()
+            .decode(&bytes, heic::PixelLayout::Rgba8)
+            .map_err(|e| anyhow::anyhow!("HEIC decoding failed: {:?}", e))?;
+
+        let width = output.width as u32;
+        let height = output.height as u32;
+        let buffer = image::RgbaImage::from_raw(width, height, output.data)
+            .ok_or_else(|| anyhow::anyhow!("Failed to map raw HEIC pixel data buffer"))?;
+
+        Ok(DynamicImage::ImageRgba8(buffer))
     } else {
         // Load standard image formats via the standard 'image' library
         let img = image::open(path_ref).context("Failed to decode standard image format")?;

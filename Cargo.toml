@@ -62,10 +62,11 @@ thiserror = "2.0.18"
 
 open = "5.3.6"
 
-rusttype = "0.9.3"
 imageproc = "0.27.0"
 
 ab_glyph = "0.2.32"
+
+heic = "0.1.6"
 
 [patch.crates-io]
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
