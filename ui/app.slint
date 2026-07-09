@@ -431,7 +431,7 @@ export component AppWindow inherits Window {
     in-out property <int> search_precision: 1; // 0: Fast, 1: Balanced, 2: Accurate, 3: Exhaustive
 
     // Dynamic Model switching state bindings
-    in-out property <int> ai_model: 0; // 0: CLIP-B, 1: CLIP-L, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: Custom
+    in-out property <int> ai_model: 0; // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: Custom
 
     // Custom local ONNX properties
     in-out property <string> custom_model_path: "";
@@ -518,7 +518,7 @@ export component AppWindow inherits Window {
 
     in-out property <[ResultsRow]> results: [];
     in-out property <[ResultsRow]> grid_results: []; // Contiguous Best items for level Left-To-Right grid mapping
-    
+
     in-out property <string> results_search_query: "";
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
@@ -1029,13 +1029,13 @@ export component AppWindow inherits Window {
                                                 minimum: 1.0;
                                                 maximum: 3.0;
                                                 height: 22px;
-                                                horizontal-stretch: 1;
+                                                width: 80px;
                                                 changed(val) => { root.save_settings(); }
                                             }
 
                                             Text {
                                                 text: (Math.round(root.visuals_scale * 10) / 10) + "x";
-                                                width: 26px;
+                                                width: 30px;
                                                 horizontal-alignment: right;
                                                 vertical-alignment: center;
                                                 font-size: 11px;
@@ -1523,7 +1523,7 @@ export component AppWindow inherits Window {
                                     height: 24px;
                                     clicked => {
                                         root.skipped_popup_x = self.absolute-position.x - 120px;
-                                        skipped_popup_y = self.absolute-position.y + self.height;
+                                        root.skipped_popup_y = self.absolute-position.y + self.height;
                                         skipped_popup.show();
                                     }
                                 }
