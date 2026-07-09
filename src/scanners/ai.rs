@@ -32,7 +32,6 @@ impl SyncSemaphore {
         }
     }
 
-    // --- FIXED: Explicitly declared elided anonymous lifetime signature to prevent compiler warning ---
     pub fn acquire(&self) -> SyncSemaphoreGuard<'_> {
         let mut lock = self.count.lock().unwrap();
         while *lock == 0 {
@@ -53,7 +52,7 @@ impl<'a> Drop for SyncSemaphoreGuard<'a> {
 
 static DECODE_SEMAPHORE: OnceLock<SyncSemaphore> = OnceLock::new();
 
-/// Prevents more than 2 heavy textures (>10MB or >2048px) from decoding concurrently
+/// Limit concurrent decoding threads for heavy assets to prevent peak RAM spikes (MAX_CONCURRENT_IMAGE_LOADS = 2)
 fn get_decode_semaphore() -> &'static SyncSemaphore {
     DECODE_SEMAPHORE.get_or_init(|| SyncSemaphore::new(2))
 }
@@ -89,16 +88,21 @@ pub async fn run_ai_duplicate_scan(
         crate::app::append_to_console_log(&warn);
     }
 
+    // Dynamic ИИ Model and Database Dimension mapping
+    let (folder_name, dim) = match params.ai_model {
+        1 => ("siglip_base", 768),
+        2 => ("dinov2_base", 768),
+        _ => ("clip_vit_b32", 512),
+    };
+
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
-    let model_dir = app_dir
-        .join("models")
-        .join("CLIP-ViT-B-32-laion2B-s34B-b79K_fp16");
+    let model_dir = app_dir.join("models").join(folder_name);
 
     let mut db = DatabaseService::new();
-    db.initialize(&db_dir, "images", 512).await?;
+    db.initialize(&db_dir, "images", dim).await?;
 
-    let engine = InferenceEngine::new(&model_dir, 512, 4, &params.execution_provider)?;
+    let engine = InferenceEngine::new(&model_dir, dim, 4, &params.execution_provider)?;
 
     // Explode input files into logical channel splitting/luminance comparison tasks
     let items = super::generate_analysis_items(&paths, &params);
@@ -126,7 +130,7 @@ pub async fn run_ai_duplicate_scan(
                     Err(_) => (0, 0),
                 };
 
-                // Acquire semaphore lock if decoding a heavy texture
+                // Acquire semaphore lock if decoding a heavy texture to prevent RAM spikes
                 let _guard = if file_size > 10 * 1024 * 1024 || width > 2048 || height > 2048 {
                     Some(get_decode_semaphore().acquire())
                 } else {
@@ -217,6 +221,7 @@ pub async fn run_ai_duplicate_scan(
 
             let (src_idx, matches) = res?;
             for m in matches {
+                // Match path AND tagged channel explicitly to avoid crossing channel spaces
                 if let Some(target_idx) = records
                     .iter()
                     .position(|r| r.path == m.path && r.channel == m.channel)
@@ -292,6 +297,7 @@ pub async fn run_ai_duplicate_scan(
             }
         });
 
+        // Decouple mutable and immutable borrows cleanly by cloning path strings
         let best_path = file_summaries[0].path.clone();
         let best_vector = records
             .iter()
@@ -349,16 +355,21 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
         crate::app::append_to_console_log(&warn);
     }
 
+    // Dynamic ИИ Model and Database Dimension mapping
+    let (folder_name, dim) = match params.ai_model {
+        1 => ("siglip_base", 768),
+        2 => ("dinov2_base", 768),
+        _ => ("clip_vit_b32", 512),
+    };
+
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
     let db_dir = app_dir.join(".lancedb_cache");
-    let model_dir = app_dir
-        .join("models")
-        .join("CLIP-ViT-B-32-laion2B-s34B-b79K_fp16");
+    let model_dir = app_dir.join("models").join(folder_name);
 
     let mut db = DatabaseService::new();
-    db.initialize(&db_dir, "images", 512).await?;
+    db.initialize(&db_dir, "images", dim).await?;
 
-    let engine = InferenceEngine::new(&model_dir, 512, 4, &params.execution_provider)?;
+    let engine = InferenceEngine::new(&model_dir, dim, 4, &params.execution_provider)?;
 
     let items = super::generate_analysis_items(&paths, &params);
     let chunks: Vec<&[AnalysisItem]> = items.chunks(params.batch_size).collect();

@@ -61,6 +61,9 @@ pub struct AppSettings {
     // Directory Traversing and Vector Matching Limits
     pub excluded_folders: String,
     pub search_precision: i32,
+
+    // --- FIXED: Registered active AI model state persistent property ---
+    pub ai_model: i32, // 0: CLIP-B/32, 1: SigLIP-B, 2: DINOv2-B
 }
 
 impl Default for AppSettings {
@@ -113,7 +116,10 @@ impl Default for AppSettings {
             prep_ignore_solid: true,
 
             excluded_folders: ".git, .svn, cache, temp".to_string(),
-            search_precision: 1, // Maps to 'Balanced (Default)' LanceDB parameters
+            search_precision: 1, // Balanced (Default)
+
+            // Default model index CLIP-B/32
+            ai_model: 0,
         }
     }
 }

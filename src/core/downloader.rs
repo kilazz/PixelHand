@@ -1,4 +1,5 @@
 // src/core/downloader.rs
+
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use reqwest::Client;
@@ -6,6 +7,8 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
 
+/// Progress-aware HTTP download utility.
+/// Streams bytes directly to disk and feeds back percentage indicators to UI callbacks.
 pub async fn download_file_with_progress<F>(
     progress_callback: F,
     url: &str,
@@ -48,31 +51,61 @@ where
     Ok(())
 }
 
-/// Orchestrates the startup model verification and downloads.
-/// (We accept the `slint::Weak<AppWindow>` here just to cleanly bridge UI updates).
+/// Orchestrates the verification and download of the selected AI model weights.
+/// Automatically handles vision-only (DINOv2) vs multimodal (CLIP/SigLIP) layout boundaries.
 pub async fn verify_and_download_models(
     app_weak: slint::Weak<crate::app::AppWindow>,
+    model_idx: i32,
 ) -> Result<()> {
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
-    let model_dir = app_dir
-        .join("models")
-        .join("CLIP-ViT-B-32-laion2B-s34B-b79K_fp16");
-    fs::create_dir_all(&model_dir)?;
 
-    let files = [
-        (
-            "tokenizer.json",
-            "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
+    // Map selected model index to HuggingFace Xenova ONNX repositories
+    let (folder_name, files) = match model_idx {
+        1 => (
+            "siglip_base",
+            vec![
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/tokenizer.json",
+                ),
+                (
+                    "text.onnx",
+                    "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/onnx/text_model.onnx",
+                ),
+                (
+                    "visual.onnx",
+                    "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/onnx/vision_model.onnx",
+                ),
+            ],
         ),
-        (
-            "text.onnx",
-            "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model.onnx",
+        2 => (
+            "dinov2_base",
+            vec![(
+                "visual.onnx",
+                "https://huggingface.co/Xenova/dinov2-base/resolve/main/onnx/model.onnx",
+            )],
         ),
-        (
-            "visual.onnx",
-            "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx",
+        _ => (
+            "clip_vit_b32",
+            vec![
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
+                ),
+                (
+                    "text.onnx",
+                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model.onnx",
+                ),
+                (
+                    "visual.onnx",
+                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx",
+                ),
+            ],
         ),
-    ];
+    };
+
+    let model_dir = app_dir.join("models").join(folder_name);
+    fs::create_dir_all(&model_dir)?;
 
     for (name, url) in files {
         let dest = model_dir.join(name);

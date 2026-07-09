@@ -60,6 +60,9 @@ pub struct ScanParams {
 
     // IVF-PQ Index Tuning Parameters (Search Precision)
     pub search_precision: i32,
+
+    // Active AI Model selection property
+    pub ai_model: i32,
 }
 
 impl ScanParams {
@@ -148,6 +151,9 @@ impl ScanParams {
 
             // Precision parameters
             search_precision: ui.get_search_precision(),
+
+            // AI Model selection index
+            ai_model: ui.get_ai_model(),
         }
     }
 }

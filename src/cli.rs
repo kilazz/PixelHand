@@ -93,14 +93,12 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         extensions: default_exts,
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
-        // Setup default visual configurations for CLI tasks
         save_visuals: false,
         visuals_columns: 6,
         visuals_max_count: 100,
         visuals_font_size: 14,
         visuals_scale: 1.0,
 
-        // Image Pre-processing Configurations
         prep_luminance: false,
         prep_channels: false,
         prep_r: true,
@@ -110,13 +108,13 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         prep_tags: String::new(),
         prep_ignore_solid: true,
 
-        // CLI Defaults
         excluded_folders: ".git, .svn, cache, temp".to_string(),
         qc_match_by_stem: true,
         qc_hide_same_resolution: false,
+        search_precision: 1,
 
-        // --- FIXED: Configured dynamic search precision level defaults ---
-        search_precision: 1, // Balanced (Default)
+        // --- FIXED: Inject default model value for exact binary CLI scans ---
+        ai_model: 0,
     };
 
     match exact::run_exact_scan(params).await {
@@ -191,7 +189,6 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         visuals_font_size: 14,
         visuals_scale: 1.0,
 
-        // Image Pre-processing Configurations
         prep_luminance: false,
         prep_channels: false,
         prep_r: true,
@@ -202,13 +199,13 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         prep_ignore_solid: true,
         execution_provider: "CPU".to_string(),
 
-        // CLI Defaults
         excluded_folders: ".git, .svn, cache, temp".to_string(),
         qc_match_by_stem: true,
         qc_hide_same_resolution: false,
+        search_precision: 1,
 
-        // --- FIXED: Configured dynamic search precision level defaults ---
-        search_precision: 1, // Balanced (Default)
+        // --- FIXED: Inject default model value for technical QC CLI scans ---
+        ai_model: 0,
     };
 
     match qc::run_qc_scan_internal(params).await {

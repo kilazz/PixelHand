@@ -75,9 +75,10 @@ pub fn save_settings(ui: &AppWindow) {
         prep_tags: ui.get_prep_tags().to_string(),
         prep_ignore_solid: ui.get_prep_ignore_solid(),
 
-        // Exclude Filters and LanceDB Precision Configuration
+        // Exclude Filters, LanceDB Precision, and AI Model Configuration
         excluded_folders: ui.get_excluded_folders().to_string(),
         search_precision: ui.get_search_precision(),
+        ai_model: ui.get_ai_model(),
     };
 
     if let Ok(dir) = get_portable_app_data_dir() {

@@ -31,11 +31,11 @@ struct UiLogWriter;
 impl std::io::Write for UiLogWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if let Ok(s) = std::str::from_utf8(buf) {
-            // 1. Write to the GUI Log Tab queue
+            // Write to the GUI Log Tab queue
             append_to_console_log(s.trim_end());
         }
 
-        // 2. Write to the physical log file on disk (thread-safe append)
+        // Write to the physical log file on disk (thread-safe append)
         if let Some(file_mutex) = LOG_FILE.get()
             && let Ok(mut lock) = file_mutex.lock()
             && let Some(ref mut file) = *lock
@@ -207,8 +207,24 @@ pub fn run_gui() -> Result<()> {
         tracing::info!("Starting scan on directory: {}", params.dir_a);
 
         let params_for_task = params.clone();
+        let app_weak_download = app_weak.clone();
 
         tokio::spawn(async move {
+            // --- FIXED: Collapsed the outer if check and nested let-bindings into a single condition line ---
+            if params_for_task.search_method == 2
+                && let Err(e) = crate::core::downloader::verify_and_download_models(
+                    app_weak_download.clone(),
+                    params_for_task.ai_model,
+                )
+                .await
+            {
+                let _ = app_weak_download.upgrade_in_event_loop(move |ui| {
+                    ui.set_is_scanning(false);
+                    ui.set_status_text(format!("AI Model download failed: {}", e).into());
+                });
+                return;
+            }
+
             let scan_result = scanners::execute_scan(params_for_task.clone()).await;
 
             // Generate visuals sheets if requested and scan completed successfully (Clippy Optimized Block)
@@ -480,16 +496,23 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_prep_tags(settings.prep_tags.clone().into());
     app.set_prep_ignore_solid(settings.prep_ignore_solid);
 
-    // Apply dynamic exclusions, name stem-matching options, and search precision level
+    // Apply Exclude Folders, QC match logic, AI Model index, and Search Precision level
     app.set_excluded_folders(settings.excluded_folders.clone().into());
     app.set_qc_match_by_stem(settings.qc_match_by_stem);
     app.set_qc_hide_same_resolution(settings.qc_hide_same_resolution);
+    app.set_ai_model(settings.ai_model);
     app.set_search_precision(settings.search_precision);
 }
 
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
+    let app = app_weak.unwrap();
+    // Fetch active model settings on launch to verify dynamic weights first
+    let active_model = app.get_ai_model();
+
     tokio::spawn(async move {
-        match crate::core::downloader::verify_and_download_models(app_weak.clone()).await {
+        match crate::core::downloader::verify_and_download_models(app_weak.clone(), active_model)
+            .await
+        {
             Ok(_) => {
                 let _ = app_weak.upgrade_in_event_loop(|ui| {
                     ui.set_status_text("AI models verified. System ready.".into());
