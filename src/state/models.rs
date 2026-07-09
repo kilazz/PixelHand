@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// This holds the core state of checkboxes, configuration parameters, and slider thresholds.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppSettings {
+    // Directories and Search Context
     pub dir_a: String,
     pub dir_b: String,
     pub query_text: String,
@@ -13,6 +14,8 @@ pub struct AppSettings {
     pub batch_size: i32,
     pub search_method: i32,
     pub execution_provider: i32,
+
+    // Quality Control (QC) Options
     pub qc_mode: bool,
     pub qc_npot: bool,
     pub qc_mipmaps: bool,
@@ -21,6 +24,8 @@ pub struct AppSettings {
     pub qc_solid_colors: bool,
     pub qc_normals: bool,
     pub qc_normals_tags: String,
+
+    // File Extensions
     pub ext_png: bool,
     pub ext_tga: bool,
     pub ext_dds: bool,
@@ -29,17 +34,27 @@ pub struct AppSettings {
     pub ext_hdr: bool,
     pub ext_tif: bool,
     pub ext_webp: bool,
-    pub duplicates_panel_height: f32,
 
-    // --- UPDATED: Persisted width of the sidebar splitter ---
+    // UI Layout States
+    pub duplicates_panel_height: f32,
     pub sidebar_width: f32,
 
-    // Persistent Properties for Asynchronous Visual Reports (Contact Sheets)
+    // Visual Reports (Contact Sheets)
     pub save_visuals: bool,
     pub visuals_columns: i32,
     pub visuals_max_count: i32,
     pub visuals_font_size: i32,
     pub visuals_scale: f32,
+
+    // Image Pre-processing Options (New)
+    pub prep_luminance: bool,
+    pub prep_channels: bool,
+    pub prep_r: bool,
+    pub prep_g: bool,
+    pub prep_b: bool,
+    pub prep_a: bool,
+    pub prep_tags: String,
+    pub prep_ignore_solid: bool,
 }
 
 impl Default for AppSettings {
@@ -52,6 +67,7 @@ impl Default for AppSettings {
             batch_size: 128,
             search_method: 0,
             execution_provider: 0,
+
             qc_mode: false,
             qc_npot: true,
             qc_mipmaps: true,
@@ -60,6 +76,7 @@ impl Default for AppSettings {
             qc_solid_colors: true,
             qc_normals: true,
             qc_normals_tags: String::new(),
+
             ext_png: true,
             ext_tga: true,
             ext_dds: true,
@@ -68,17 +85,25 @@ impl Default for AppSettings {
             ext_hdr: true,
             ext_tif: true,
             ext_webp: true,
-            duplicates_panel_height: 180.0,
 
-            // Default Sidebar Width to 380px
+            duplicates_panel_height: 180.0,
             sidebar_width: 380.0,
 
-            // Default Visual Reports settings
             save_visuals: false,
             visuals_columns: 6,
             visuals_max_count: 100,
             visuals_font_size: 14,
             visuals_scale: 1.5,
+
+            // Default Pre-processing Settings
+            prep_luminance: false,
+            prep_channels: false,
+            prep_r: true,
+            prep_g: true,
+            prep_b: true,
+            prep_a: true,
+            prep_tags: String::new(),
+            prep_ignore_solid: true,
         }
     }
 }
@@ -99,14 +124,14 @@ pub struct DuplicateFileSummary {
     pub similarity: f32,
 }
 
-/// Represents a cluster of duplicate files.
+/// Represents an isolated duplicate cluster containing a list of matching duplicate files.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DuplicateGroupSummary {
     pub hash: String,
     pub files: Vec<DuplicateFileSummary>,
 }
 
-/// Represents an issue found during Quality Control (QC).
+/// Represents a technical issue identified during absolute or relative Quality Control auditing.
 #[derive(Serialize, Clone, Debug)]
 pub struct QcIssueSummary {
     pub path: String,
@@ -114,7 +139,7 @@ pub struct QcIssueSummary {
     pub details: String,
 }
 
-/// Represents a visual match from AI Semantic Search.
+/// Represents a visual similarity match returned from the AI semantic or visual image database.
 #[derive(Serialize, Clone, Debug)]
 pub struct AiSearchResultSummary {
     pub path: String,

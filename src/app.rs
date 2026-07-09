@@ -386,7 +386,7 @@ pub fn run_gui() -> Result<()> {
                 }
                 Err(e) => {
                     ui.set_status_text(format!("Action failed: {}", e).into());
-                    tracing::error!("Action failed: {}", e);
+                    tracing::error!("Action execution failed: {}", e);
                 }
             });
         });
@@ -414,6 +414,7 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Native Drag and Drop integration via unstable winit events channel integration
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
         if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
@@ -422,7 +423,7 @@ pub fn run_gui() -> Result<()> {
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 ui.set_query_text(path_str.clone().into());
                 ui.set_search_method(2);
-                ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
+                ui.set_status_text(format!("Reference image registered: {}", path_str).into());
             });
         }
         slint::winit_030::EventResult::Propagate
@@ -433,6 +434,7 @@ pub fn run_gui() -> Result<()> {
     Ok(())
 }
 
+/// Binds serialized disk settings properties onto Slint window properties.
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_dir_a(settings.dir_a.clone().into());
     app.set_dir_b(settings.dir_b.clone().into());
@@ -441,6 +443,7 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_batch_size(settings.batch_size);
     app.set_search_method(settings.search_method);
     app.set_execution_provider(settings.execution_provider);
+
     app.set_qc_mode(settings.qc_mode);
     app.set_qc_npot(settings.qc_npot);
     app.set_qc_mipmaps(settings.qc_mipmaps);
@@ -449,6 +452,7 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_qc_solid_colors(settings.qc_solid_colors);
     app.set_qc_normals(settings.qc_normals);
     app.set_qc_normals_tags(settings.qc_normals_tags.clone().into());
+
     app.set_ext_png(settings.ext_png);
     app.set_ext_tga(settings.ext_tga);
     app.set_ext_dds(settings.ext_dds);
@@ -457,19 +461,29 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_ext_hdr(settings.ext_hdr);
     app.set_ext_tif(settings.ext_tif);
     app.set_ext_webp(settings.ext_webp);
-    app.set_duplicates_panel_height(settings.duplicates_panel_height);
 
-    // --- UPDATED: Load dynamic sidebar width constraint into AppWindow state ---
+    app.set_duplicates_panel_height(settings.duplicates_panel_height);
     app.set_sidebar_width(settings.sidebar_width);
 
-    // Apply Visual Reports configurations to Slint UI
+    // Visual Reports configurations
     app.set_save_visuals(settings.save_visuals);
     app.set_visuals_columns(settings.visuals_columns);
     app.set_visuals_max_count(settings.visuals_max_count);
     app.set_visuals_font_size(settings.visuals_font_size);
     app.set_visuals_scale(settings.visuals_scale);
+
+    // Image Pre-processing Configurations
+    app.set_prep_luminance(settings.prep_luminance);
+    app.set_prep_channels(settings.prep_channels);
+    app.set_prep_r(settings.prep_r);
+    app.set_prep_g(settings.prep_g);
+    app.set_prep_b(settings.prep_b);
+    app.set_prep_a(settings.prep_a);
+    app.set_prep_tags(settings.prep_tags.clone().into());
+    app.set_prep_ignore_solid(settings.prep_ignore_solid);
 }
 
+/// Asynchronously checks the target runtime weights and verifies local integrity.
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     tokio::spawn(async move {
         match crate::core::downloader::verify_and_download_models(app_weak.clone()).await {
@@ -489,6 +503,7 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     });
 }
 
+/// Thread-safe comparative viewport render task, extracting channels and generating heatmaps at 100% original scale.
 fn trigger_viewport_update(app_weak: slint::Weak<AppWindow>, orig_path: String, dup_path: String) {
     let ui = app_weak.unwrap();
     let channel = utils::ui::get_current_active_channel(&ui).to_string();

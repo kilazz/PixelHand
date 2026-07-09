@@ -23,6 +23,7 @@ pub fn get_portable_app_data_dir() -> anyhow::Result<PathBuf> {
 /// This extracts properties directly from the active Slint GUI AppWindow.
 pub fn save_settings(ui: &AppWindow) {
     let settings = AppSettings {
+        // Directories and Search Context
         dir_a: ui.get_dir_a().to_string(),
         dir_b: ui.get_dir_b().to_string(),
         query_text: ui.get_query_text().to_string(),
@@ -30,6 +31,8 @@ pub fn save_settings(ui: &AppWindow) {
         batch_size: ui.get_batch_size(),
         search_method: ui.get_search_method(),
         execution_provider: ui.get_execution_provider(),
+
+        // Quality Control Options
         qc_mode: ui.get_qc_mode(),
         qc_npot: ui.get_qc_npot(),
         qc_mipmaps: ui.get_qc_mipmaps(),
@@ -38,6 +41,8 @@ pub fn save_settings(ui: &AppWindow) {
         qc_solid_colors: ui.get_qc_solid_colors(),
         qc_normals: ui.get_qc_normals(),
         qc_normals_tags: ui.get_qc_normals_tags().to_string(),
+
+        // Target Extensions
         ext_png: ui.get_ext_png(),
         ext_tga: ui.get_ext_tga(),
         ext_dds: ui.get_ext_dds(),
@@ -46,17 +51,27 @@ pub fn save_settings(ui: &AppWindow) {
         ext_hdr: ui.get_ext_hdr(),
         ext_tif: ui.get_ext_tif(),
         ext_webp: ui.get_ext_webp(),
-        duplicates_panel_height: ui.get_duplicates_panel_height(),
 
-        // --- UPDATED: Save the dynamic sidebar splitter width on exit ---
+        // UI Drag States
+        duplicates_panel_height: ui.get_duplicates_panel_height(),
         sidebar_width: ui.get_sidebar_width(),
 
-        // Synchronize and write visual reports configuration states
+        // Visual Reports Configurations
         save_visuals: ui.get_save_visuals(),
         visuals_columns: ui.get_visuals_columns(),
         visuals_max_count: ui.get_visuals_max_count(),
         visuals_font_size: ui.get_visuals_font_size(),
         visuals_scale: ui.get_visuals_scale(),
+
+        // Image Pre-processing Logic Configurations
+        prep_luminance: ui.get_prep_luminance(),
+        prep_channels: ui.get_prep_channels(),
+        prep_r: ui.get_prep_r(),
+        prep_g: ui.get_prep_g(),
+        prep_b: ui.get_prep_b(),
+        prep_a: ui.get_prep_a(),
+        prep_tags: ui.get_prep_tags().to_string(),
+        prep_ignore_solid: ui.get_prep_ignore_solid(),
     };
 
     if let Ok(dir) = get_portable_app_data_dir() {
@@ -67,7 +82,7 @@ pub fn save_settings(ui: &AppWindow) {
     }
 }
 
-/// Loads persistent settings structure from disk
+/// Loads persistent settings structure from disk.
 pub fn load_settings() -> Option<AppSettings> {
     let path = get_portable_app_data_dir().ok()?.join("Settings.json");
     if path.exists() {

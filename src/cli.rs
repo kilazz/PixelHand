@@ -81,6 +81,7 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         similarity: 100.0,
         batch_size: 128,
         search_method: 0,
+        execution_provider: "CPU".to_string(),
         qc_mode: false,
         qc_npot: false,
         qc_mipmaps: false,
@@ -90,15 +91,24 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         qc_normals: false,
         qc_normals_tags: String::new(),
         extensions: default_exts,
-        perceptual_channel: "Composite".to_string(),
-        execution_provider: "CPU".to_string(),
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+
         // Setup default visual configurations for CLI tasks
         save_visuals: false,
         visuals_columns: 6,
         visuals_max_count: 100,
         visuals_font_size: 14,
         visuals_scale: 1.0,
+
+        // Image Pre-processing Configurations
+        prep_luminance: false,
+        prep_channels: false,
+        prep_r: true,
+        prep_g: true,
+        prep_b: true,
+        prep_a: true,
+        prep_tags: String::new(),
+        prep_ignore_solid: true,
     };
 
     match exact::run_exact_scan(params).await {
@@ -124,7 +134,7 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
     Ok(())
 }
 
-/// Executes a technical QC audit based on command parameters and prints results.
+/// Executes Quality Control validations on a target directory.
 async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
     let check_npot = args.iter().any(|arg| arg == "--check-npot");
     let check_mipmaps = args.iter().any(|arg| arg == "--check-mipmaps");
@@ -157,6 +167,7 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         similarity: 90.0,
         batch_size: 128,
         search_method: 0,
+        execution_provider: "CPU".to_string(),
         qc_mode: true,
         qc_npot: check_npot,
         qc_mipmaps: check_mipmaps,
@@ -166,8 +177,6 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         qc_normals: validate_normals,
         qc_normals_tags: String::new(),
         extensions: default_exts,
-        perceptual_channel: "Composite".to_string(),
-        execution_provider: "CPU".to_string(),
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         // Setup default visual configurations for CLI tasks
         save_visuals: false,
@@ -175,6 +184,16 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         visuals_max_count: 100,
         visuals_font_size: 14,
         visuals_scale: 1.0,
+
+        // Image Pre-processing Configurations
+        prep_luminance: false,
+        prep_channels: false,
+        prep_r: true,
+        prep_g: true,
+        prep_b: true,
+        prep_a: true,
+        prep_tags: String::new(),
+        prep_ignore_solid: true,
     };
 
     match qc::run_qc_scan_internal(params).await {

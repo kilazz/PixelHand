@@ -354,6 +354,7 @@ export component AppWindow inherits Window {
 
     title: "PixelHand - AI Duplicate & Graphical QC Auditor";
 
+    // Default size and flexible constraints for free OS scaling
     preferred-width: 1320px;
     preferred-height: 880px;
     min-width: 1000px;
@@ -381,17 +382,31 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_tif: true;
     in-out property <bool> ext_webp: true;
 
+    // Visual Reports (Contact Sheets) Settings
     in-out property <bool> save_visuals: false;
     in-out property <int> visuals_columns: 6;
     in-out property <int> visuals_max_count: 100;
     in-out property <int> visuals_font_size: 14;
     in-out property <float> visuals_scale: 1.5;
 
+    // Image Pre-processing Options Settings
+    in-out property <bool> prep_luminance: false;
+    in-out property <bool> prep_channels: false;
+    in-out property <bool> prep_r: true;
+    in-out property <bool> prep_g: true;
+    in-out property <bool> prep_b: true;
+    in-out property <bool> prep_a: true;
+    in-out property <string> prep_tags: "";
+    in-out property <bool> prep_ignore_solid: true;
+
+    // Draggable Splitters states (Persisted dynamically)
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
 
+    // Global checkerboard pattern loaded from Rust
     in-out property <image> checkerboard_pattern;
 
+    // Metadata tables data structures
     in-out property <SelectedFile> original_meta: {
         name: "-",
         size_str: "-",
@@ -417,19 +432,23 @@ export component AppWindow inherits Window {
         path: ""
     };
 
+    // Comparative canvas assets bindings
     in-out property <image> image_original;
     in-out property <image> image_duplicate;
     in-out property <image> image_heatmap;
 
+    // Comparer canvas configuration options: 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference Heatmap
     in-out property <int> compare_mode: 0;
     in-out property <float> wipe_slider_val: 0.5;
     in-out property <float> bg_alpha: 1.0;
 
+    // Channel preview filters states
     in-out property <bool> active_r: false;
     in-out property <bool> active_g: false;
     in-out property <bool> active_b: false;
     in-out property <bool> active_a: false;
 
+    // Quality Control options configuration parameters
     in-out property <bool> qc_mode: false;
     in-out property <bool> qc_npot: true;
     in-out property <bool> qc_mipmaps: true;
@@ -439,32 +458,37 @@ export component AppWindow inherits Window {
     in-out property <bool> qc_normals: true;
     in-out property <string> qc_normals_tags: "";
 
+    // General options
     in-out property <bool> ignore_hidden: true;
     in-out property <bool> ignore_errors: true;
     in-out property <bool> skip_system: true;
 
-    in-out property <int> search_method: 0;
+    // Search options
+    in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: dHash, 2: AI Embeddings
     in-out property <int> execution_provider: 0;
 
+    // UI layouts states
     in-out property <bool> results_grid_mode: false;
     in-out property <[ResultsRow]> selected_group_files: [];
 
+    // Project files models & console log output
     in-out property <[ResultsRow]> results: [];
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
     in-out property <length> ext_popup_x: 0px;
     in-out property <length> ext_popup_y: 0px;
 
+    // Navigation and folder browser commands callbacks
     callback select_folder_a();
     callback select_folder_b();
     callback run_scan();
     callback cancel_scan();
     callback open_file_in_viewer(string);
-    callback trigger_action(string);
-    callback row_clicked(int, bool, int, string);
-    callback row_checkbox_toggled(int);
+    callback trigger_action(string); // "hardlink", "reflink", "trash"
+    callback row_clicked(int, bool, int, string); // idx, is_header, group_idx, path
+    callback row_checkbox_toggled(int); // idx
     callback channel_toggled();
-    callback trigger_selection_rule(string);
+    callback trigger_selection_rule(string); // "all", "none", "except_best", "invert"
 
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
@@ -480,7 +504,7 @@ export component AppWindow inherits Window {
             border-radius: 4px;
 
             VerticalLayout {
-                padding: 10px;
+                padding: 10px; // Padding applied directly to layout to prevent warnings
                 spacing: 8px;
                 Text {
                     text: "File Formats Selector";
@@ -583,6 +607,7 @@ export component AppWindow inherits Window {
             }
         }
 
+        // --- Container with relative dimensions (100%) to safely bypass strict property loops ---
         Rectangle {
             vertical-stretch: 1;
             horizontal-stretch: 1;
@@ -741,7 +766,7 @@ export component AppWindow inherits Window {
                                     }
 
                                     if root.save_visuals: VerticalLayout {
-                                        spacing: 6px;
+                                        spacing: 8px;
                                         padding-left: 12px;
                                         padding-bottom: 4px;
 
@@ -762,7 +787,7 @@ export component AppWindow inherits Window {
                                                 minimum: 2;
                                                 maximum: 12;
                                                 height: 22px;
-                                                width: 80px;
+                                                width: 100px;
                                             }
 
                                             Text {
@@ -778,7 +803,7 @@ export component AppWindow inherits Window {
                                                 minimum: 1;
                                                 maximum: 1000;
                                                 height: 22px;
-                                                width: 90px;
+                                                width: 110px;
                                             }
 
                                             Rectangle {
@@ -803,7 +828,7 @@ export component AppWindow inherits Window {
                                                 minimum: 8;
                                                 maximum: 36;
                                                 height: 22px;
-                                                width: 80px;
+                                                width: 100px;
                                             }
 
                                             Text {
@@ -839,6 +864,82 @@ export component AppWindow inherits Window {
                                         height: 28px;
                                         clicked => {
                                             if root.is_scanning { root.cancel_scan(); } else { root.run_scan(); }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- NEW BLOCK: Image Preparation (Pre-processing) Options panel ---
+                            PanelSection {
+                                title: "Image Preparation Options";
+                                VerticalLayout {
+                                    spacing: 6px;
+
+                                    CheckBox {
+                                        text: "Compare by luminance only (Grayscale)";
+                                        checked <=> root.prep_luminance;
+                                        height: 20px;
+                                    }
+
+                                    CheckBox {
+                                        text: "Compare by specific channels";
+                                        checked <=> root.prep_channels;
+                                        height: 20px;
+                                    }
+
+                                    if root.prep_channels: VerticalLayout {
+                                        spacing: 6px;
+                                        padding-left: 12px;
+                                        padding-bottom: 4px;
+
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            CheckBox {
+                                                text: "R";
+                                                checked <=> root.prep_r;
+                                            }
+
+                                            CheckBox {
+                                                text: "G";
+                                                checked <=> root.prep_g;
+                                            }
+
+                                            CheckBox {
+                                                text: "B";
+                                                checked <=> root.prep_b;
+                                            }
+
+                                            CheckBox {
+                                                text: "A";
+                                                checked <=> root.prep_a;
+                                            }
+
+                                            Rectangle {
+                                                horizontal-stretch: 1;
+                                            }
+                                        }
+
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            Text {
+                                                text: "Tags:";
+                                                vertical-alignment: center;
+                                                font-size: 11px;
+                                                color: #dcddde;
+                                                width: 35px;
+                                            }
+
+                                            LineEdit {
+                                                text <=> root.prep_tags;
+                                                placeholder-text: "_mask, _ddn (empty = all)";
+                                                height: 22px;
+                                            }
+                                        }
+
+                                        CheckBox {
+                                            text: "Ignore solid channels";
+                                            checked <=> root.prep_ignore_solid;
+                                            height: 20px;
                                         }
                                     }
                                 }
