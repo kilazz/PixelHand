@@ -367,7 +367,7 @@ export component AppWindow inherits Window {
     in-out property <string> dir_a: "";
     in-out property <string> dir_b: "";
     in-out property <string> query_text: "";
-    in-out property <float> similarity_threshold: 90;
+    in-out property <float> similarity_threshold: 90; // Switch to float for two-way binding with Slider
     in-out property <int> batch_size: 128;
     in-out property <bool> is_scanning: false;
     in-out property <float> progress: 0.0;
@@ -618,7 +618,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Tab switches root content boundary element
+        // Tab Content switches root container
         Rectangle {
             vertical-stretch: 1;
             horizontal-stretch: 1;
@@ -815,7 +815,7 @@ export component AppWindow inherits Window {
                                                 minimum: 2;
                                                 maximum: 12;
                                                 height: 22px;
-                                                width: 100px;
+                                                width: 80px;
                                             }
 
                                             Text {
@@ -831,7 +831,7 @@ export component AppWindow inherits Window {
                                                 minimum: 1;
                                                 maximum: 1000;
                                                 height: 22px;
-                                                width: 110px;
+                                                width: 90px;
                                             }
 
                                             Rectangle {
@@ -839,8 +839,8 @@ export component AppWindow inherits Window {
                                             }
                                         }
 
+                                        // --- FIXED: Removed alignment: start; and used horizontal-stretch: 1; on Slider to dynamically scale the track perfectly! ---
                                         HorizontalLayout {
-                                            alignment: start;
                                             spacing: 8px;
 
                                             Text {
@@ -856,7 +856,7 @@ export component AppWindow inherits Window {
                                                 minimum: 8;
                                                 maximum: 36;
                                                 height: 22px;
-                                                width: 100px;
+                                                width: 80px;
                                             }
 
                                             Text {
@@ -873,8 +873,7 @@ export component AppWindow inherits Window {
                                                 maximum: 3.0;
                                                 height: 22px;
                                                 horizontal-stretch: 1;
-                                            }
-
+                                            } // Elastic track fills space
                                             Text {
                                                 text: (Math.round(root.visuals_scale * 10) / 10) + "x";
                                                 width: 26px;
@@ -1417,6 +1416,7 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    // Selection tools section box
                     Rectangle {
                         background: #2b2d31;
                         border-color: #1f2023;
@@ -1467,6 +1467,7 @@ export component AppWindow inherits Window {
                         }
                     }
 
+                    // Link actions footer section
                     HorizontalLayout {
                         spacing: 8px;
                         height: 24px;
@@ -1582,7 +1583,6 @@ export component AppWindow inherits Window {
                             }
 
                             scroll-event(evt) => {
-                                // --- FIXED: Normalized float division of evt.delta-y via 1px explicitly to prevent type errors ---
                                 let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
                                 root.zoom_factor = (root.zoom_factor + zoom_delta).clamp(1.0, 10.0);
                                 if (root.zoom_factor == 1.0) {
@@ -1809,6 +1809,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // Specifications tables & Group Details (Right Panel)
                 VerticalLayout {
                     width: 440px;
                     spacing: 12px;
