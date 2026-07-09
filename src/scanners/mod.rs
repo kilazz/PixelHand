@@ -60,6 +60,12 @@ pub struct ScanParams {
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
 
+    // Relative Quality Control parameters
+    pub qc_check_bloat: bool,
+    pub qc_check_alpha: bool,
+    pub qc_check_colorspace: bool,
+    pub qc_check_compression: bool,
+
     // IVF-PQ Index Tuning Parameters (Search Precision)
     pub search_precision: i32,
 
@@ -150,6 +156,12 @@ impl ScanParams {
             excluded_folders: ui.get_excluded_folders().to_string(),
             qc_match_by_stem: ui.get_qc_match_by_stem(),
             qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
+
+            // Relative Quality Control parameters
+            qc_check_bloat: ui.get_qc_check_bloat(),
+            qc_check_alpha: ui.get_qc_check_alpha(),
+            qc_check_colorspace: ui.get_qc_check_colorspace(),
+            qc_check_compression: ui.get_qc_check_compression(),
 
             // Precision parameters
             search_precision: ui.get_search_precision(),
@@ -255,6 +267,10 @@ pub async fn execute_scan(
                 params.qc_match_by_stem,
                 params.qc_hide_same_resolution,
                 ex_folders,
+                params.qc_check_bloat,
+                params.qc_check_alpha,
+                params.qc_check_colorspace,
+                params.qc_check_compression,
             )
             .await?;
             let rows = map_qc_to_rows(&issues);
@@ -375,6 +391,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             continue;
         }
 
+        // 1. Add Group Cluster Header row
         rows.push(ResultsRowData {
             is_header: true,
             is_qc: false,
@@ -394,6 +411,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             similarity: 100.0,
         });
 
+        // 2. Add Child file rows belonging to this cluster
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
             let thumbnail_data = load_thumbnail_for_path(&file.path);
@@ -429,6 +447,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
     rows
 }
 
+/// Converts core technical Quality Control issues into Slint row models.
 pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for issue in issues {
@@ -457,6 +476,7 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
     rows
 }
 
+/// Converts semantic vector database matches into Slint row models.
 pub fn map_ai_search_to_rows(
     matches: &[crate::state::AiSearchResultSummary],
 ) -> Vec<ResultsRowData> {

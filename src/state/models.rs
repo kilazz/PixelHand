@@ -27,6 +27,12 @@ pub struct AppSettings {
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
 
+    // Relative QC Toggles
+    pub qc_check_bloat: bool,
+    pub qc_check_alpha: bool,
+    pub qc_check_colorspace: bool,
+    pub qc_check_compression: bool,
+
     // File Extensions
     pub ext_png: bool,
     pub ext_tga: bool,
@@ -63,7 +69,7 @@ pub struct AppSettings {
     pub search_precision: i32,
 
     // Registered active AI model state persistent property
-    pub ai_model: i32, // 0: CLIP-B/32, 1: SigLIP-B, 2: DINOv2-B
+    pub ai_model: i32, // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B
 
     // HDR Tonemapping Configuration
     pub tonemap_enabled: bool,
@@ -91,6 +97,11 @@ impl Default for AppSettings {
             qc_normals_tags: String::new(),
             qc_match_by_stem: true,
             qc_hide_same_resolution: false,
+
+            qc_check_bloat: true,
+            qc_check_alpha: true,
+            qc_check_colorspace: true,
+            qc_check_compression: true,
 
             ext_png: true,
             ext_tga: true,

@@ -421,11 +421,17 @@ export component AppWindow inherits Window {
     in-out property <bool> qc_match_by_stem: true;
     in-out property <bool> qc_hide_same_resolution: false;
 
+    // Relative Quality Control Checkboxes
+    in-out property <bool> qc_check_bloat: true;
+    in-out property <bool> qc_check_alpha: true;
+    in-out property <bool> qc_check_colorspace: true;
+    in-out property <bool> qc_check_compression: true;
+
     // Dynamic LanceDB IVF-PQ Precision state bindings
     in-out property <int> search_precision: 1; // 0: Fast, 1: Balanced, 2: Accurate, 3: Exhaustive
 
     // Dynamic Model switching state bindings
-    in-out property <int> ai_model: 0; // 0: CLIP-B/32, 1: SigLIP-B, 2: DINOv2-B
+    in-out property <int> ai_model: 0; // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B
 
     // Accumulate skipped/corrupted files during scanning
     in-out property <[string]> skipped_files_list: [];
@@ -542,6 +548,7 @@ export component AppWindow inherits Window {
     callback results_filter_changed();
     callback results_sort_changed(int);
     callback clear_cache();
+    callback clear_models();
 
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
@@ -841,8 +848,8 @@ export component AppWindow inherits Window {
 
                                         LineEdit {
                                             text <=> root.query_text;
-                                            placeholder-text: root.ai_model == 2 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
-                                            enabled: root.ai_model != 2;
+                                            placeholder-text: root.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                            enabled: root.ai_model != 4;
                                             height: 24px;
                                             edited => { root.save_settings(); }
                                         }
@@ -898,8 +905,8 @@ export component AppWindow inherits Window {
                                     HorizontalLayout {
                                         spacing: 8px;
                                         CustomButton {
-                                            text: "File Types...";
-                                            width: 85px;
+                                            text: "File Types";
+                                            width: 80px;
                                             height: 24px;
                                             clicked => {
                                                 root.ext_popup_x = self.absolute-position.x;
@@ -913,6 +920,13 @@ export component AppWindow inherits Window {
                                             width: 85px;
                                             height: 24px;
                                             clicked => { root.clear_cache(); }
+                                        }
+
+                                        CustomButton {
+                                            text: "Clear Models";
+                                            width: 85px;
+                                            height: 24px;
+                                            clicked => { root.clear_models(); }
                                         }
 
                                         Rectangle {
@@ -1211,6 +1225,35 @@ export component AppWindow inherits Window {
                                             height: 24px;
                                             edited => { root.save_settings(); }
                                         }
+
+                                        // Relative QC parameters
+                                        CheckBox {
+                                            text: "Check Size Bloat";
+                                            checked <=> root.qc_check_bloat;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+
+                                        CheckBox {
+                                            text: "Check Alpha Mismatch";
+                                            checked <=> root.qc_check_alpha;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+
+                                        CheckBox {
+                                            text: "Check Color Space";
+                                            checked <=> root.qc_check_colorspace;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+
+                                        CheckBox {
+                                            text: "Check Compression Change";
+                                            checked <=> root.qc_check_compression;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
                                     }
                                 }
                             }
@@ -1232,7 +1275,13 @@ export component AppWindow inherits Window {
                             if root.search_method == 2: PanelSection {
                                 title: "AI Model";
                                 ComboBox {
-                                    model: ["Fastest (CLIP-B/32)", "Compact (SigLIP-B)", "Visual Structure (DINOv2-B)"];
+                                    model: [
+                                        "Fastest (CLIP-B/32)",
+                                        "Balanced (CLIP-L/14)",
+                                        "Compact (SigLIP-B)",
+                                        "High Quality (SigLIP-L)",
+                                        "Visual Structure (DINOv2-B)"
+                                    ];
                                     current-index <=> root.ai_model;
                                     height: 24px;
                                     selected(val) => { root.save_settings(); }
@@ -1407,7 +1456,7 @@ export component AppWindow inherits Window {
                                     height: 24px;
                                     clicked => {
                                         root.skipped_popup_x = self.absolute-position.x - 120px;
-                                        root.skipped_popup_y = self.absolute-position.y + self.height;
+                                        skipped_popup_y = self.absolute-position.y + self.height;
                                         skipped_popup.show();
                                     }
                                 }

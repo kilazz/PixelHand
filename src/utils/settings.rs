@@ -44,6 +44,12 @@ pub fn save_settings(ui: &AppWindow) {
         qc_match_by_stem: ui.get_qc_match_by_stem(),
         qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
 
+        // Relative Quality Control parameters
+        qc_check_bloat: ui.get_qc_check_bloat(),
+        qc_check_alpha: ui.get_qc_check_alpha(),
+        qc_check_colorspace: ui.get_qc_check_colorspace(),
+        qc_check_compression: ui.get_qc_check_compression(),
+
         // Target Extensions
         ext_png: ui.get_ext_png(),
         ext_tga: ui.get_ext_tga(),

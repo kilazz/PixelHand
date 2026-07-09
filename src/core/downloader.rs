@@ -62,6 +62,23 @@ pub async fn verify_and_download_models(
     // Map selected model index to HuggingFace Xenova ONNX repositories
     let (folder_name, files) = match model_idx {
         1 => (
+            "clip_vit_l14",
+            vec![
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/tokenizer.json",
+                ),
+                (
+                    "text.onnx",
+                    "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/onnx/text_model.onnx",
+                ),
+                (
+                    "visual.onnx",
+                    "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/onnx/vision_model.onnx",
+                ),
+            ],
+        ),
+        2 => (
             "siglip_base",
             vec![
                 (
@@ -78,7 +95,24 @@ pub async fn verify_and_download_models(
                 ),
             ],
         ),
-        2 => (
+        3 => (
+            "siglip_large",
+            vec![
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/tokenizer.json",
+                ),
+                (
+                    "text.onnx",
+                    "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/onnx/text_model.onnx",
+                ),
+                (
+                    "visual.onnx",
+                    "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/onnx/vision_model.onnx",
+                ),
+            ],
+        ),
+        4 => (
             "dinov2_base",
             vec![(
                 "visual.onnx",

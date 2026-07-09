@@ -23,12 +23,24 @@ impl PreprocessingConfig {
     pub fn for_model(model_idx: i32) -> Self {
         match model_idx {
             1 => Self {
+                // CLIP-L/14 (224x224, OpenAI CLIP normalization)
+                target_size: (224, 224),
+                mean: [0.48145466, 0.4578275, 0.40821073],
+                std: [0.26862954, 0.2613026, 0.2757771],
+            },
+            2 => Self {
                 // SigLIP-B (384x384, Symmetric normalization: [-1, 1])
                 target_size: (384, 384),
                 mean: [0.5, 0.5, 0.5],
                 std: [0.5, 0.5, 0.5],
             },
-            2 => Self {
+            3 => Self {
+                // SigLIP-L (384x384, Symmetric normalization: [-1, 1])
+                target_size: (384, 384),
+                mean: [0.5, 0.5, 0.5],
+                std: [0.5, 0.5, 0.5],
+            },
+            4 => Self {
                 // DINOv2-B (224x224, standard ImageNet normalization)
                 target_size: (224, 224),
                 mean: [0.485, 0.456, 0.406],

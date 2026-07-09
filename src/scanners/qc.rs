@@ -15,6 +15,7 @@ use crate::utils::helpers::discover_files;
 
 pub use crate::core::qc::calculate_diff_map;
 
+/// Executes an absolute local directory Quality Control audit
 pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
     let path = PathBuf::from(params.dir_a);
     if !path.is_dir() {
@@ -66,6 +67,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     mipmap_count: 1,
                 });
 
+            // 1. Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
             let abs_issues = check_absolute(
                 &qc_meta,
                 params.qc_npot,
@@ -81,6 +83,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 });
             }
 
+            // 2. Perform optional solid flat color checking
             if params.qc_solid_colors
                 && let Some((issue, details)) = check_solid_texture(p)
             {
@@ -91,6 +94,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 });
             }
 
+            // 3. Perform optional normal maps vector integrity audits
             if params.qc_normals {
                 let path_str = p.to_string_lossy().to_lowercase();
                 let should_check = if params.qc_normals_tags.is_empty() {
@@ -123,6 +127,9 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
     Ok(issues)
 }
 
+/// Compares contents of two folders.
+/// Suppress too_many_arguments warning as multiple flags are critical to direct parameter parsing pipelines.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_folder_compare(
     directory_a: String,
     directory_b: String,
@@ -130,6 +137,10 @@ pub async fn run_folder_compare(
     match_by_stem: bool,
     hide_same_resolution: bool,
     excluded_folders: Vec<String>,
+    check_bloat: bool,
+    check_alpha: bool,
+    check_colorspace: bool,
+    check_compression: bool,
 ) -> Result<Vec<QcIssueSummary>> {
     let path_a = PathBuf::from(directory_a);
     let path_b = PathBuf::from(directory_b);
@@ -146,7 +157,6 @@ pub async fn run_folder_compare(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic co-relation key builder (Directly implements dynamic match_by_stem!)
     let get_key = |p: &Path| -> String {
         if match_by_stem {
             p.file_stem()
@@ -215,17 +225,30 @@ pub async fn run_folder_compare(
                     mipmap_count: 1,
                 });
 
-            // Filter out exact matches with same resolution if configured
             if hide_same_resolution
                 && (meta_a.width == meta_b.width && meta_a.height == meta_b.height)
             {
-                let rel_issues = check_relative(&meta_a, &meta_b, true, true, true, true);
+                let rel_issues = check_relative(
+                    &meta_a,
+                    &meta_b,
+                    check_bloat,
+                    check_alpha,
+                    check_colorspace,
+                    check_compression,
+                );
                 if rel_issues.is_empty() {
-                    continue; // Skip matching configurations
+                    continue;
                 }
             }
 
-            let rel_issues = check_relative(&meta_a, &meta_b, true, true, true, true);
+            let rel_issues = check_relative(
+                &meta_a,
+                &meta_b,
+                check_bloat,
+                check_alpha,
+                check_colorspace,
+                check_compression,
+            );
             for issue in rel_issues {
                 issues.push(QcIssueSummary {
                     path: p_b.to_string_lossy().to_string(),

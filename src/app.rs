@@ -580,6 +580,16 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Clear AI Models Weights Action
+    app.on_clear_models(move || {
+        if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
+            let _ = std::fs::remove_dir_all(app_dir.join("models"));
+            crate::app::append_to_console_log(
+                "Downloaded AI model weights successfully cleared from disk.",
+            );
+        }
+    });
+
     // Real-Time Post Scan Filters & Searching
     let app_weak = app.as_weak();
     let state_clone = state.clone();
@@ -676,6 +686,11 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_qc_solid_colors(settings.qc_solid_colors);
     app.set_qc_normals(settings.qc_normals);
     app.set_qc_normals_tags(settings.qc_normals_tags.clone().into());
+
+    app.set_qc_check_bloat(settings.qc_check_bloat);
+    app.set_qc_check_alpha(settings.qc_check_alpha);
+    app.set_qc_check_colorspace(settings.qc_check_colorspace);
+    app.set_qc_check_compression(settings.qc_check_compression);
 
     app.set_ext_png(settings.ext_png);
     app.set_ext_tga(settings.ext_tga);

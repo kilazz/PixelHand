@@ -113,8 +113,13 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         qc_hide_same_resolution: false,
         search_precision: 1,
 
-        // --- FIXED: Inject default model value for exact binary CLI scans ---
         ai_model: 0,
+
+        // Initialize relative QC check toggles to run exhaustive audits
+        qc_check_bloat: true,
+        qc_check_alpha: true,
+        qc_check_colorspace: true,
+        qc_check_compression: true,
     };
 
     match exact::run_exact_scan(params).await {
@@ -204,8 +209,13 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         qc_hide_same_resolution: false,
         search_precision: 1,
 
-        // --- FIXED: Inject default model value for technical QC CLI scans ---
         ai_model: 0,
+
+        // Initialize relative QC check toggles to run exhaustive audits
+        qc_check_bloat: true,
+        qc_check_alpha: true,
+        qc_check_colorspace: true,
+        qc_check_compression: true,
     };
 
     match qc::run_qc_scan_internal(params).await {

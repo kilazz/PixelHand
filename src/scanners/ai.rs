@@ -88,10 +88,12 @@ pub async fn run_ai_duplicate_scan(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic AI Model and Database Dimension mapping
+    // Dynamic AI Model and Database Dimension mapping supporting the full 5-model roster
     let (folder_name, dim) = match params.ai_model {
-        1 => ("siglip_base", 768),
-        2 => ("dinov2_base", 768),
+        1 => ("clip_vit_l14", 768),
+        2 => ("siglip_base", 768),
+        3 => ("siglip_large", 1024),
+        4 => ("dinov2_base", 768),
         _ => ("clip_vit_b32", 512),
     };
 
@@ -369,10 +371,12 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic AI Model and Database Dimension mapping
+    // Dynamic AI Model and Database Dimension mapping supporting the full 5-model roster
     let (folder_name, dim) = match params.ai_model {
-        1 => ("siglip_base", 768),
-        2 => ("dinov2_base", 768),
+        1 => ("clip_vit_l14", 768),
+        2 => ("siglip_base", 768),
+        3 => ("siglip_large", 1024),
+        4 => ("dinov2_base", 768),
         _ => ("clip_vit_b32", 512),
     };
 
