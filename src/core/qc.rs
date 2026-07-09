@@ -1,4 +1,5 @@
 // src/core/qc.rs
+
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
@@ -186,7 +187,9 @@ pub fn check_relative(
 }
 
 pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
-    let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(path).ok()?;
+    // --- OPTIMIZED: Request low-res 128px mipmap during solid color check ---
+    let img =
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
     let processed_img = if img.width() > 128 || img.height() > 128 {
         img.resize(128, 128, image::imageops::FilterType::Nearest)
     } else {
@@ -216,7 +219,9 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
 }
 
 pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String, String)> {
-    let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(path).ok()?;
+    // --- OPTIMIZED: Request low-res 512px mipmap directly during normal map check ---
+    let img =
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(512)).ok()?;
     let processed_img = if img.width() > 512 || img.height() > 512 {
         img.resize(512, 512, image::imageops::FilterType::Nearest)
     } else {
@@ -290,8 +295,9 @@ pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String
 
 /// Helper to run visual difference mapping at 100% original resolution and save output to disk
 pub async fn calculate_diff_map(file1: &str, file2: &str) -> Result<String> {
-    let img1 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file1)?;
-    let img2 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file2)?;
+    // --- OPTIMIZED: Diff map requires pixel-perfect 1:1 original resolution details (passed None) ---
+    let img1 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file1, None)?;
+    let img2 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file2, None)?;
 
     let diff =
         super::tonemapper::calculate_difference_map(&img1.to_rgba8(), &img2.to_rgba8(), true)?;

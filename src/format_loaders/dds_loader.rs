@@ -1,4 +1,5 @@
 // src/format_loaders/dds_loader.rs
+
 use anyhow::{Context, Result, anyhow};
 use image::DynamicImage;
 use rayon::prelude::*;
@@ -19,7 +20,6 @@ const FOURCC_ATI2: u32 = u32::from_le_bytes(*b"ATI2");
 const FOURCC_BC5U: u32 = u32::from_le_bytes(*b"BC5U");
 const FOURCC_BC5S: u32 = u32::from_le_bytes(*b"BC5S");
 
-// CryEngine markers
 const FOURCC_CRYF: u32 = u32::from_le_bytes(*b"CRYF");
 const FOURCC_FYRC: u32 = u32::from_le_bytes(*b"FYRC");
 
@@ -48,14 +48,14 @@ fn read_u32_le(bytes: &[u8], offset: usize) -> Option<u32> {
 fn is_xbox_360_format(fourcc: u32) -> bool {
     matches!(
         fourcc,
-        0x44585431 | // "1TXD"
-        0x44585433 | // "3TXD"
-        0x44585435 | // "5TXD"
-        0x44583130 | // "01XD"
-        0x41544931 | // "1ITA"
-        0x41544932 | // "2ITA"
-        0x42433455 | // "U4CB"
-        0x42433555 // "U5CB"
+        0x44585431
+            | 0x44585433
+            | 0x44585435
+            | 0x44583130
+            | 0x41544931
+            | 0x41544932
+            | 0x42433455
+            | 0x42433555
     )
 }
 
@@ -302,7 +302,8 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo> {
     })
 }
 
-pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage> {
+/// Decodes DDS raw bytes, dynamically seeking the most optimal mipmap layer if a target size is supplied.
+pub fn decode_dds_bytes(dds_bytes: &[u8], target_size: Option<u32>) -> Result<DynamicImage> {
     let info = analyze_header(dds_bytes)?;
 
     let clean_dds_bytes = if info.is_swizzled || info.is_xbox {
@@ -396,13 +397,36 @@ pub fn decode_dds_bytes(dds_bytes: &[u8]) -> Result<DynamicImage> {
     let dds = image_dds::ddsfile::Dds::read(Cursor::new(&*clean_dds_bytes))
         .context("Failed to parse DDS file structure")?;
 
-    let rgba_img =
-        image_dds::image_from_dds(&dds, 0).context("Failed to decode compressed DDS payload")?;
+    // --- FIXED: Uses exact mip_map_count field directly to fetch correct scaled levels ---
+    let mip_level = if let Some(target) = target_size {
+        let mut level = 0;
+        let mut w = dds.header.width;
+        let mut h = dds.header.height;
+        for mip in 0..dds.header.mip_map_count.unwrap_or(1) {
+            if w >= target && h >= target {
+                level = mip;
+            } else {
+                break;
+            }
+            w /= 2;
+            h /= 2;
+        }
+        level
+    } else {
+        0
+    };
+
+    let rgba_img = image_dds::image_from_dds(&dds, mip_level)
+        .context("Failed to decode compressed DDS payload")?;
 
     Ok(DynamicImage::ImageRgba8(rgba_img))
 }
 
-pub fn open_image_with_dds_fallback<P: AsRef<Path>>(path: P) -> Result<DynamicImage> {
+/// Helper wrapper that opens any supported graphics asset, utilizing fast mipmap seeking for DDS.
+pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
+    path: P,
+    target_size: Option<u32>,
+) -> Result<DynamicImage> {
     let path_ref = path.as_ref();
     let ext = path_ref
         .extension()
@@ -412,7 +436,7 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(path: P) -> Result<DynamicIm
     if ext == "dds" {
         let file = std::fs::File::open(path_ref).context("Failed to open DDS file")?;
         let mmap = unsafe { memmap2::Mmap::map(&file).context("Failed to memory map DDS file")? };
-        decode_dds_bytes(&mmap)
+        decode_dds_bytes(&mmap, target_size)
     } else if ext == "exr" {
         let (hdr_pixels, width, height) = crate::core::tonemapper::load_exr_rgba(path_ref)
             .context("Failed to load EXR float pixels")?;

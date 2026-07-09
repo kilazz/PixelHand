@@ -1,9 +1,10 @@
 // src/core/perceptual.rs
+
 use image::{DynamicImage, RgbaImage};
 use image_hasher::{HashAlg, HasherConfig};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AnalysisType {
     Composite,
     Luminance,
@@ -31,17 +32,17 @@ pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
     max_alpha == 0 && max_rgb > 0
 }
 
-pub fn calculate_perceptual_hashes(
-    path: &Path,
+/// Shared color-channel splitting and luminance processing logic
+/// for both Perceptual and AI scanning pipelines.
+pub fn preprocess_image_channels(
+    img: &DynamicImage,
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
-) -> Option<PerceptualHashes> {
-    let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(path).ok()?;
-    let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
-    let rgba_img = resized_img.to_rgba8();
+) -> Option<DynamicImage> {
+    let rgba_img = img.to_rgba8();
 
-    let processed_image: DynamicImage = match analysis_type {
-        AnalysisType::Luminance => DynamicImage::ImageLuma8(resized_img.to_luma8()),
+    let processed: DynamicImage = match analysis_type {
+        AnalysisType::Luminance => DynamicImage::ImageLuma8(img.to_luma8()),
         AnalysisType::R | AnalysisType::G | AnalysisType::B | AnalysisType::A => {
             let idx = match analysis_type {
                 AnalysisType::R => 0,
@@ -67,7 +68,7 @@ pub fn calculate_perceptual_hashes(
         }
         AnalysisType::Composite => {
             if is_vfx_transparent_texture(&rgba_img) || !rgba_img.pixels().any(|p| p[3] < 255) {
-                DynamicImage::ImageRgb8(resized_img.to_rgb8())
+                DynamicImage::ImageRgb8(img.to_rgb8())
             } else {
                 let mut bg = RgbaImage::new(rgba_img.width(), rgba_img.height());
                 for (x, y, pixel) in rgba_img.enumerate_pixels() {
@@ -81,6 +82,21 @@ pub fn calculate_perceptual_hashes(
             }
         }
     };
+    Some(processed)
+}
+
+pub fn calculate_perceptual_hashes(
+    path: &Path,
+    analysis_type: AnalysisType,
+    ignore_solid_channels: bool,
+) -> Option<PerceptualHashes> {
+    // --- OPTIMIZED: Request downscaled 128px mipmap directly during DDS parse step ---
+    let img =
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
+    let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
+
+    let processed_image =
+        preprocess_image_channels(&resized_img, analysis_type, ignore_solid_channels)?;
 
     let dhash_result = HasherConfig::new()
         .hash_alg(HashAlg::Gradient)

@@ -1,4 +1,5 @@
 // src/utils/cache.rs
+
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -10,11 +11,8 @@ struct DecodedCacheItem {
     image: image::RgbaImage,
 }
 
-// Thread-safe global cache of decoded preview images.
 static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
 
-/// Extracts a chosen pixel channel in grayscale to display in the comparative viewport.
-/// Uses a custom MRU (Most Recently Used) caching strategy at 100% original resolution.
 pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::RgbaImage> {
     let p = PathBuf::from(path);
     if !p.is_file() {
@@ -28,7 +26,6 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     let cache_mutex = DECODED_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache_mutex.lock().ok()?;
 
-    // Invalidate stale cache if file modified
     if let Some(item) = cache.get_mut(path) {
         if item.mtime == current_mtime {
             item.last_accessed = std::time::Instant::now();
@@ -38,10 +35,9 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     }
 
     if !cache.contains_key(path) {
-        // Load image at 100% full original resolution (no downscaling!)
-        let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p).ok()?;
+        // --- FIXED: Load 1:1 original full-resolution pixel buffers for split-pane inspects ---
+        let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p, None).ok()?;
 
-        // Reduce cache limit to 4 items to strictly bound RAM usage when using full-res 4K/8K images
         if cache.len() >= 4 {
             let mut oldest_key = None;
             let mut oldest_time = std::time::Instant::now();
@@ -70,7 +66,6 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     let rgba = &cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {
-        // If it's a VFX transparent texture, ignore black backgrounds
         if crate::core::perceptual::is_vfx_transparent_texture(rgba) {
             image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8())
         } else {

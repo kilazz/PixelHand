@@ -288,9 +288,13 @@ pub async fn execute_scan(
 // ---------------------------------------------------------
 
 /// Instantiates a downscaled thumbnail from disk on a background task.
+/// Utilizes smart DDS mipmap decimation at level 64px to minimize peak RAM usages.
 fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
     let path = PathBuf::from(path_str);
-    if let Ok(mut img) = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path) {
+    // --- OPTIMIZED: Request tiny 64px mipmap directly during thumbnail load step ---
+    if let Ok(mut img) =
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(64))
+    {
         if img.width() > 64 || img.height() > 64 {
             img = img.thumbnail(64, 64);
         }

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use crate::state::DuplicateGroupSummary;
 
-// Nominal base layout measurements which scale proportionally
+// Nominal base dimensions to be scaled proportionally
 const BASE_THUMB_SIZE: f32 = 300.0;
 const BASE_PADDING: f32 = 25.0;
 const BASE_TEXT_AREA: f32 = 120.0;
@@ -20,8 +20,7 @@ const IMGS_PER_FILE: usize = 50;
 
 const FONT_DATA: &[u8] = include_bytes!("../../assets/font.ttf");
 
-/// Generates visual comparison reports (Contact Sheets) with custom DPI scaling and font size bounds.
-/// Operates on blocking worker threads to ensure no thread starvation in the async UI stack.
+/// Generates visual comparison reports (Contact Sheets) with custom scaling and font size
 pub async fn generate_visual_reports(
     groups: Vec<DuplicateGroupSummary>,
     max_columns: usize,
@@ -92,6 +91,7 @@ pub async fn generate_visual_reports(
                     let thumb =
                         match crate::format_loaders::dds_loader::open_image_with_dds_fallback(
                             Path::new(&file.path),
+                            Some(thumb_size),
                         ) {
                             Ok(img) => {
                                 let resized =
@@ -240,7 +240,6 @@ pub async fn generate_visual_reports(
     Ok(())
 }
 
-/// Simple text helper to shorten extremely long file paths by cropping out the middle.
 fn elide_text(text: &str, max_chars: usize) -> String {
     if text.len() <= max_chars {
         return text.to_string();
