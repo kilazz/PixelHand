@@ -483,6 +483,40 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Wire up dynamic collapse and expand triggers to update Slint's state
+    let app_weak = app.as_weak();
+    let state_clone = state.clone();
+    app.on_expand_all_groups(move || {
+        let mut lock = state_clone.lock().unwrap();
+        lock.collapsed_groups.clear(); // Полностью очищаем маску скрытия
+        if let Some(ui) = app_weak.upgrade() {
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
+    let app_weak = app.as_weak();
+    let state_clone = state.clone();
+    app.on_collapse_all_groups(move || {
+        let mut lock = state_clone.lock().unwrap();
+        lock.collapsed_groups.clear();
+
+        // Сначала собираем индексы заголовков во временный буфер во избежание конфликта ссылок
+        let header_indices: Vec<i32> = lock
+            .results
+            .iter()
+            .filter(|row| row.is_header)
+            .map(|row| row.group_index)
+            .collect();
+
+        for group_index in header_indices {
+            lock.collapsed_groups.insert(group_index);
+        }
+
+        if let Some(ui) = app_weak.upgrade() {
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
     let app_weak = app.as_weak();
     app.on_channel_toggled(move || {
         let app_copy = app_weak.clone();
@@ -625,9 +659,11 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
                 });
             }
             Err(e) => {
+                let err_msg = e.to_string();
+                tracing::error!("Model download failed: {}", err_msg);
                 let _ = app_weak.upgrade_in_event_loop(move |ui| {
-                    ui.set_status_text(format!("Model verification failed: {}", e).into());
-                    tracing::error!("Model download failed: {}", e);
+                    ui.set_is_scanning(false);
+                    ui.set_status_text(format!("Model verification failed: {}", err_msg).into());
                 });
             }
         }

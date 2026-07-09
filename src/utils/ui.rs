@@ -3,6 +3,7 @@
 use crate::app::{AppWindow, ResultsRow, SelectedFile};
 use crate::state::{AppState, DuplicateFileSummary, ResultsRowData};
 use slint::{ModelRc, SharedPixelBuffer, VecModel};
+use std::path::Path;
 use std::rc::Rc;
 
 /// Generates a tile-able checkerboard pattern inside memory directly
@@ -79,10 +80,19 @@ pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize>
     None
 }
 
-/// Syncs the Slint ListView based on the expanded/collapsed group masks with pre-allocated buffer sizes
+/// Syncs the Slint ListView based on the expanded/collapsed group masks with pre-allocated buffer sizes.
+/// Dynamically filters and maps best items into a clean flat grid model to guarantee seamless horizontal grid alignments.
 pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
     let mut slint_rows = Vec::with_capacity(state.results.len());
+    let mut grid_rows = Vec::new();
+
     for row in &state.results {
+        // Collect best representations of groups for Grid view,
+        // ensuring the array is strictly contiguous and flat for level left-to-right mapping
+        if !row.is_header && row.is_best {
+            grid_rows.push(convert_to_slint_row(row));
+        }
+
         if row.is_header {
             let mut slint_row = convert_to_slint_row(row);
             slint_row.meta_str = if state.collapsed_groups.contains(&row.group_index) {
@@ -95,7 +105,9 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
             slint_rows.push(convert_to_slint_row(row));
         }
     }
+
     ui.set_results(ModelRc::from(Rc::new(VecModel::from(slint_rows))));
+    ui.set_grid_results(ModelRc::from(Rc::new(VecModel::from(grid_rows))));
 }
 
 pub fn get_current_active_channel(ui: &AppWindow) -> &'static str {
@@ -108,28 +120,47 @@ pub fn get_current_active_channel(ui: &AppWindow) -> &'static str {
     } else if ui.get_active_a() {
         "A"
     } else {
-        "Composite"
+        "RGB"
     }
 }
 
-/// Applies global selection rules to the table items (All, None, Except Best, Invert)
+/// Applies selection checkboxes rules to the overall state
 pub fn apply_selection_rule(state: &mut AppState, rule: &str) {
-    for row in &mut state.results {
-        if !row.is_header {
-            match rule {
-                "all" => row.is_checked = true,
-                "none" => row.is_checked = false,
-                "except_best" => row.is_checked = !row.is_best,
-                "invert" => row.is_checked = !row.is_checked,
-                _ => {}
+    match rule {
+        "all" => {
+            for row in &mut state.results {
+                if !row.is_header {
+                    row.is_checked = true;
+                }
             }
         }
+        "none" => {
+            for row in &mut state.results {
+                if !row.is_header {
+                    row.is_checked = false;
+                }
+            }
+        }
+        "except_best" => {
+            for row in &mut state.results {
+                if !row.is_header {
+                    row.is_checked = !row.is_best;
+                }
+            }
+        }
+        "invert" => {
+            for row in &mut state.results {
+                if !row.is_header {
+                    row.is_checked = !row.is_checked;
+                }
+            }
+        }
+        _ => {}
     }
 }
 
-/// Maps an internal core Summary File into a Slint UI display Struct using highly optimized string references
 pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) -> SelectedFile {
-    let name = std::path::Path::new(&file.path)
+    let name = Path::new(&file.path)
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();

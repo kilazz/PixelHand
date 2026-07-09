@@ -436,6 +436,9 @@ export component AppWindow inherits Window {
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
 
+    // Interactive Grid Card Size configuration
+    in-out property <length> grid_card_size: 135px;
+
     // Checkerboard asset
     in-out property <image> checkerboard_pattern;
 
@@ -475,11 +478,13 @@ export component AppWindow inherits Window {
     in-out property <float> wipe_slider_val: 0.5;
     in-out property <float> bg_alpha: 1.0;
 
+    // Active channels
     in-out property <bool> active_r: false;
     in-out property <bool> active_g: false;
     in-out property <bool> active_b: false;
     in-out property <bool> active_a: false;
 
+    // Quality Control flags
     in-out property <bool> qc_mode: false;
     in-out property <bool> qc_npot: true;
     in-out property <bool> qc_mipmaps: true;
@@ -489,6 +494,7 @@ export component AppWindow inherits Window {
     in-out property <bool> qc_normals: true;
     in-out property <string> qc_normals_tags: "";
 
+    // Unused config states (kept for compatibility)
     in-out property <bool> ignore_hidden: true;
     in-out property <bool> ignore_errors: true;
     in-out property <bool> skip_system: true;
@@ -500,6 +506,7 @@ export component AppWindow inherits Window {
     in-out property <[ResultsRow]> selected_group_files: [];
 
     in-out property <[ResultsRow]> results: [];
+    in-out property <[ResultsRow]> grid_results: []; // Contiguous Best items for level Left-To-Right grid mapping
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
     in-out property <length> ext_popup_x: 0px;
@@ -521,6 +528,10 @@ export component AppWindow inherits Window {
     callback save_settings();
     callback tonemap_toggled();
     callback export_log(string);
+
+    // Global folding controllers
+    callback expand_all_groups();
+    callback collapse_all_groups();
 
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
@@ -1276,16 +1287,59 @@ export component AppWindow inherits Window {
 
                         HorizontalLayout {
                             alignment: space-between;
-                            Text {
-                                text: "Results (" + root.results.length + " items)";
-                                font-size: 14px;
-                                font-weight: 700;
-                                color: #ffffff;
-                                vertical-alignment: center;
+
+                            // Left-side header with count & Collapse/Expand triggers
+                            HorizontalLayout {
+                                spacing: 12px;
+                                Text {
+                                    text: "Results (" + root.results.length + " items)";
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+
+                                if !root.results_grid_mode && root.results.length > 0: HorizontalLayout {
+                                    spacing: 6px;
+                                    CustomButton {
+                                        text: "Expand All";
+                                        height: 24px;
+                                        clicked => { root.expand_all_groups(); }
+                                    }
+
+                                    CustomButton {
+                                        text: "Collapse All";
+                                        height: 24px;
+                                        clicked => { root.collapse_all_groups(); }
+                                    }
+                                }
                             }
 
                             HorizontalLayout {
-                                spacing: 6px;
+                                spacing: 8px;
+
+                                // Card size slider for grid mode
+                                if root.results_grid_mode && root.grid_results.length > 0: HorizontalLayout {
+                                    spacing: 6px;
+                                    Text {
+                                        text: "Card Size:";
+                                        vertical-alignment: center;
+                                        font-size: 12px;
+                                        color: #dcddde;
+                                    }
+
+                                    Slider {
+                                        value: root.grid_card_size / 1px;
+                                        minimum: 100;
+                                        maximum: 250;
+                                        width: 100px;
+                                        height: 24px;
+                                        changed(val) => {
+                                            root.grid_card_size = val * 1px;
+                                            root.save_settings();
+                                        }
+                                    }
+                                }
 
                                 if root.skipped_files_list.length > 0: CustomButton {
                                     text: "⚠️ Skipped Files (" + root.skipped_files_list.length + ")";
@@ -1423,29 +1477,30 @@ export component AppWindow inherits Window {
                                 }
                             }
 
-                            if root.results_grid_mode && root.results.length > 0: ScrollView {
+                            // True Wrapping 4-Column Responsive Grid View
+                            if root.results_grid_mode && root.grid_results.length > 0: ScrollView {
                                 HorizontalLayout {
                                     spacing: 12px;
                                     padding: 10px;
+                                    alignment: start; // Align to the left beautifully
+
+                                    // Column 0
                                     VerticalLayout {
-                                        spacing: 0px;
+                                        width: root.grid_results.length > 0 ? root.grid_card_size : 0px;
+                                        spacing: 12px;
                                         alignment: start;
-                                        for row[idx] in root.results: Rectangle {
-                                            property <bool> show: idx.mod(3) == 0 && !row.is_header && row.is_best;
-                                            width: show ? 135px : 0px;
-                                            height: show ? 175px : 0px;
+                                        for row[idx] in root.grid_results: Rectangle {
+                                            property <bool> show: idx.mod(4) == 0;
+                                            width: show ? root.grid_card_size : 0px;
+                                            height: show ? root.grid_card_size + 45px : 0px;
                                             visible: show;
-                                            Rectangle {
-                                                y: 0px;
-                                                height: parent.height - 10px;
-                                                width: parent.width;
-                                                background: #2b2d31;
-                                                border-color: #1f2023;
-                                                border-width: 1px;
-                                                border-radius: 6px;
-                                                TouchArea {
-                                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; }
-                                                }
+                                            background: show ? #2b2d31 : transparent;
+                                            border-color: show ? #1f2023 : transparent;
+                                            border-width: show ? 1px : 0px;
+                                            border-radius: 6px;
+
+                                            if show: TouchArea {
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
 
                                                 VerticalLayout {
                                                     padding: 8px;
@@ -1455,8 +1510,8 @@ export component AppWindow inherits Window {
                                                         path: row.path;
                                                         show_corners: false;
                                                         checkerboard: root.checkerboard_pattern;
-                                                        width: 115px;
-                                                        height: 95px;
+                                                        width: parent.width - 16px;
+                                                        height: parent.height - 52px;
                                                     }
 
                                                     Text {
@@ -1465,6 +1520,7 @@ export component AppWindow inherits Window {
                                                         font-size: 11px;
                                                         font-weight: 700;
                                                         horizontal-alignment: center;
+                                                        overflow: elide;
                                                     }
 
                                                     Text {
@@ -1472,31 +1528,30 @@ export component AppWindow inherits Window {
                                                         color: #949ba4;
                                                         font-size: 10px;
                                                         horizontal-alignment: center;
+                                                        overflow: elide;
                                                     }
                                                 }
                                             }
                                         }
                                     }
 
+                                    // Column 1
                                     VerticalLayout {
-                                        spacing: 0px;
+                                        width: root.grid_results.length > 1 ? root.grid_card_size : 0px;
+                                        spacing: 12px;
                                         alignment: start;
-                                        for row[idx] in root.results: Rectangle {
-                                            property <bool> show: idx.mod(3) == 1 && !row.is_header && row.is_best;
-                                            width: show ? 135px : 0px;
-                                            height: show ? 175px : 0px;
+                                        for row[idx] in root.grid_results: Rectangle {
+                                            property <bool> show: idx.mod(4) == 1;
+                                            width: show ? root.grid_card_size : 0px;
+                                            height: show ? root.grid_card_size + 45px : 0px;
                                             visible: show;
-                                            Rectangle {
-                                                y: 0px;
-                                                height: parent.height - 10px;
-                                                width: parent.width;
-                                                background: #2b2d31;
-                                                border-color: #1f2023;
-                                                border-width: 1px;
-                                                border-radius: 6px;
-                                                TouchArea {
-                                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; }
-                                                }
+                                            background: show ? #2b2d31 : transparent;
+                                            border-color: show ? #1f2023 : transparent;
+                                            border-width: show ? 1px : 0px;
+                                            border-radius: 6px;
+
+                                            if show: TouchArea {
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
 
                                                 VerticalLayout {
                                                     padding: 8px;
@@ -1506,8 +1561,8 @@ export component AppWindow inherits Window {
                                                         path: row.path;
                                                         show_corners: false;
                                                         checkerboard: root.checkerboard_pattern;
-                                                        width: 115px;
-                                                        height: 95px;
+                                                        width: parent.width - 16px;
+                                                        height: parent.height - 52px;
                                                     }
 
                                                     Text {
@@ -1516,6 +1571,7 @@ export component AppWindow inherits Window {
                                                         font-size: 11px;
                                                         font-weight: 700;
                                                         horizontal-alignment: center;
+                                                        overflow: elide;
                                                     }
 
                                                     Text {
@@ -1523,31 +1579,30 @@ export component AppWindow inherits Window {
                                                         color: #949ba4;
                                                         font-size: 10px;
                                                         horizontal-alignment: center;
+                                                        overflow: elide;
                                                     }
                                                 }
                                             }
                                         }
                                     }
 
+                                    // Column 2
                                     VerticalLayout {
-                                        spacing: 0px;
+                                        width: root.grid_results.length > 2 ? root.grid_card_size : 0px;
+                                        spacing: 12px;
                                         alignment: start;
-                                        for row[idx] in root.results: Rectangle {
-                                            property <bool> show: idx.mod(3) == 2 && !row.is_header && row.is_best;
-                                            width: show ? 135px : 0px;
-                                            height: show ? 175px : 0px;
+                                        for row[idx] in root.grid_results: Rectangle {
+                                            property <bool> show: idx.mod(4) == 2;
+                                            width: show ? root.grid_card_size : 0px;
+                                            height: show ? root.grid_card_size + 45px : 0px;
                                             visible: show;
-                                            Rectangle {
-                                                y: 0px;
-                                                height: parent.height - 10px;
-                                                width: parent.width;
-                                                background: #2b2d31;
-                                                border-color: #1f2023;
-                                                border-width: 1px;
-                                                border-radius: 6px;
-                                                TouchArea {
-                                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; }
-                                                }
+                                            background: show ? #2b2d31 : transparent;
+                                            border-color: show ? #1f2023 : transparent;
+                                            border-width: show ? 1px : 0px;
+                                            border-radius: 6px;
+
+                                            if show: TouchArea {
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
 
                                                 VerticalLayout {
                                                     padding: 8px;
@@ -1557,8 +1612,8 @@ export component AppWindow inherits Window {
                                                         path: row.path;
                                                         show_corners: false;
                                                         checkerboard: root.checkerboard_pattern;
-                                                        width: 115px;
-                                                        height: 95px;
+                                                        width: parent.width - 16px;
+                                                        height: parent.height - 52px;
                                                     }
 
                                                     Text {
@@ -1567,6 +1622,7 @@ export component AppWindow inherits Window {
                                                         font-size: 11px;
                                                         font-weight: 700;
                                                         horizontal-alignment: center;
+                                                        overflow: elide;
                                                     }
 
                                                     Text {
@@ -1574,6 +1630,58 @@ export component AppWindow inherits Window {
                                                         color: #949ba4;
                                                         font-size: 10px;
                                                         horizontal-alignment: center;
+                                                        overflow: elide;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Column 3
+                                    VerticalLayout {
+                                        width: root.grid_results.length > 3 ? root.grid_card_size : 0px;
+                                        spacing: 12px;
+                                        alignment: start;
+                                        for row[idx] in root.grid_results: Rectangle {
+                                            property <bool> show: idx.mod(4) == 3;
+                                            width: show ? root.grid_card_size : 0px;
+                                            height: show ? root.grid_card_size + 45px : 0px;
+                                            visible: show;
+                                            background: show ? #2b2d31 : transparent;
+                                            border-color: show ? #1f2023 : transparent;
+                                            border-width: show ? 1px : 0px;
+                                            border-radius: 6px;
+
+                                            if show: TouchArea {
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
+
+                                                VerticalLayout {
+                                                    padding: 8px;
+                                                    spacing: 6px;
+                                                    InteractiveThumbnail {
+                                                        source: row.thumbnail;
+                                                        path: row.path;
+                                                        show_corners: false;
+                                                        checkerboard: root.checkerboard_pattern;
+                                                        width: parent.width - 16px;
+                                                        height: parent.height - 52px;
+                                                    }
+
+                                                    Text {
+                                                        text: "Group #" + (row.group_index + 1);
+                                                        color: #ffffff;
+                                                        font-size: 11px;
+                                                        font-weight: 700;
+                                                        horizontal-alignment: center;
+                                                        overflow: elide;
+                                                    }
+
+                                                    Text {
+                                                        text: row.size_str;
+                                                        color: #949ba4;
+                                                        font-size: 10px;
+                                                        horizontal-alignment: center;
+                                                        overflow: elide;
                                                     }
                                                 }
                                             }
