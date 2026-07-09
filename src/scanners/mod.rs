@@ -368,14 +368,13 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
 }
 
 /// Converts core rust clustering models into the Slint-friendly row representation.
-fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
+pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for (g_idx, group) in groups.iter().enumerate() {
         if group.files.is_empty() {
             continue;
         }
 
-        // 1. Add Group Cluster Header row
         rows.push(ResultsRowData {
             is_header: true,
             is_qc: false,
@@ -392,9 +391,9 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
             is_best: false,
             is_checked: false,
             thumbnail_data: None,
+            similarity: 100.0,
         });
 
-        // 2. Add Child file rows belonging to this cluster
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
             let thumbnail_data = load_thumbnail_for_path(&file.path);
@@ -423,14 +422,14 @@ fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
                 is_best,
                 is_checked: false,
                 thumbnail_data,
+                similarity: file.similarity,
             });
         }
     }
     rows
 }
 
-/// Converts core technical Quality Control issues into Slint row models.
-fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData> {
+pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for issue in issues {
         let thumbnail_data = load_thumbnail_for_path(&issue.path);
@@ -452,13 +451,15 @@ fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData
             is_best: false,
             is_checked: false,
             thumbnail_data,
+            similarity: 0.0,
         });
     }
     rows
 }
 
-/// Converts semantic vector database matches into Slint row models.
-fn map_ai_search_to_rows(matches: &[crate::state::AiSearchResultSummary]) -> Vec<ResultsRowData> {
+pub fn map_ai_search_to_rows(
+    matches: &[crate::state::AiSearchResultSummary],
+) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
     for res in matches {
         let thumbnail_data = load_thumbnail_for_path(&res.path);
@@ -480,6 +481,7 @@ fn map_ai_search_to_rows(matches: &[crate::state::AiSearchResultSummary]) -> Vec
             is_best: false,
             is_checked: false,
             thumbnail_data,
+            similarity: res.similarity,
         });
     }
     rows

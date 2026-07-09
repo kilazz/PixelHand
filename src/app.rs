@@ -580,6 +580,54 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Real-Time Post Scan Filters & Searching
+    let app_weak = app.as_weak();
+    let state_clone = state.clone();
+    app.on_results_filter_changed(move || {
+        if let Some(ui) = app_weak.upgrade() {
+            let lock = state_clone.lock().unwrap();
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
+    // Real-Time Sorting
+    let app_weak = app.as_weak();
+    let state_clone = state.clone();
+    app.on_results_sort_changed(move |sort_idx| {
+        let mut lock = state_clone.lock().unwrap();
+        if !lock.groups.is_empty() {
+            match sort_idx {
+                0 => lock
+                    .groups
+                    .sort_by_key(|g| std::cmp::Reverse(g.files.len())),
+                1 => lock.groups.sort_by_key(|g| {
+                    std::cmp::Reverse(g.files.iter().map(|f| f.size).sum::<u64>())
+                }),
+                2 => lock.groups.sort_by(|a, b| {
+                    let name_a = a.files.first().map(|f| f.path.as_str()).unwrap_or("");
+                    let name_b = b.files.first().map(|f| f.path.as_str()).unwrap_or("");
+                    name_a.cmp(name_b)
+                }),
+                _ => {}
+            }
+            lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
+        }
+        if let Some(ui) = app_weak.upgrade() {
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
+    // Clear caches handler
+    app.on_clear_cache(move || {
+        if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
+            let _ = std::fs::remove_dir_all(app_dir.join(".lancedb_cache"));
+            let _ = std::fs::remove_dir_all(app_dir.join(".cache"));
+            crate::app::append_to_console_log(
+                "Scan database and thumbnail caches cleared successfully.",
+            );
+        }
+    });
+
     // Smart Drag & Drop file/folder drop handler on the window surface
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {

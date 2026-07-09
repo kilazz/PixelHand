@@ -1,4 +1,5 @@
-//src/state/store.rs
+// src/state/store.rs
+
 use super::models::DuplicateGroupSummary;
 use std::collections::HashSet;
 
@@ -19,6 +20,7 @@ pub struct ResultsRowData {
     pub is_best: bool,
     pub is_checked: bool,
     pub thumbnail_data: Option<image::RgbaImage>, // Thread-safe raw pixels
+    pub similarity: f32,                          // Utilized for real-time post-scan filtering
 }
 
 /// The global application state holding our scan results and UI view states.

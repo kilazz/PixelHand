@@ -96,7 +96,18 @@ pub async fn run_ai_duplicate_scan(
     };
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
-    let db_dir = app_dir.join(".lancedb_cache");
+
+    // Hash the directory path to partition the database workspace per scan target
+    let folder_hash = {
+        let mut hasher = Xxh64::new(0);
+        hasher.update(params.dir_a.as_bytes());
+        hasher.digest()
+    };
+
+    // Isolating caches strictly by model name and workspace path hash prevents schema dimension collisions
+    let db_dir = app_dir
+        .join(".lancedb_cache")
+        .join(format!("{}_{:016x}", folder_name, folder_hash));
     let model_dir = app_dir.join("models").join(folder_name);
 
     let mut db = DatabaseService::new();
@@ -151,7 +162,6 @@ pub async fn run_ai_duplicate_scan(
                 )?;
 
                 let mut final_img = processed;
-                // Hard clamp at 512x512 before passing to ONNX engine to save tensor processing overhead
                 if final_img.width() > 512 || final_img.height() > 512 {
                     final_img =
                         final_img.resize_exact(512, 512, image::imageops::FilterType::Triangle);
@@ -367,7 +377,18 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
     };
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
-    let db_dir = app_dir.join(".lancedb_cache");
+
+    // Hash the directory path to partition the database workspace per scan target
+    let folder_hash = {
+        let mut hasher = Xxh64::new(0);
+        hasher.update(params.dir_a.as_bytes());
+        hasher.digest()
+    };
+
+    // Isolating caches strictly by model name and workspace path hash prevents schema dimension collisions
+    let db_dir = app_dir
+        .join(".lancedb_cache")
+        .join(format!("{}_{:016x}", folder_name, folder_hash));
     let model_dir = app_dir.join("models").join(folder_name);
 
     let mut db = DatabaseService::new();

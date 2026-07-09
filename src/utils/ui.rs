@@ -83,16 +83,46 @@ pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize>
 /// Syncs the Slint ListView based on the expanded/collapsed group masks with pre-allocated buffer sizes.
 /// Dynamically filters and maps best items into a clean flat grid model to guarantee seamless horizontal grid alignments.
 pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
+    let search_query = ui.get_results_search_query().to_string().to_lowercase();
+    let min_sim = ui.get_results_min_similarity();
+
+    // Determine which groups contain files matching the search query
+    let mut visible_groups = std::collections::HashSet::new();
+    if !search_query.is_empty() {
+        for row in &state.results {
+            if !row.is_header && row.name.to_lowercase().contains(&search_query) {
+                visible_groups.insert(row.group_index);
+            }
+        }
+    }
+
     let mut slint_rows = Vec::with_capacity(state.results.len());
     let mut grid_rows = Vec::new();
 
     for row in &state.results {
-        // Collect best representations of groups for Grid view,
+        // 1. Text Search Filter
+        if !search_query.is_empty() && !visible_groups.contains(&row.group_index) {
+            continue; // Hide entire group if no children match
+        }
+        if !row.is_header
+            && !search_query.is_empty()
+            && !row.name.to_lowercase().contains(&search_query)
+        {
+            continue; // Hide non-matching children
+        }
+
+        // 2. Similarity Post-Filter (Only to non-best duplicates)
+        if !row.is_header && !row.is_best && row.similarity > 0.0 && row.similarity < min_sim {
+            continue;
+        }
+
+        // 3. Collect best representations of groups for Grid view,
         // ensuring the array is strictly contiguous and flat for level left-to-right mapping
         if !row.is_header && row.is_best {
             grid_rows.push(convert_to_slint_row(row));
         }
 
+        // 4. List Collection & Collapse Logic
         if row.is_header {
             let mut slint_row = convert_to_slint_row(row);
             slint_row.meta_str = if state.collapsed_groups.contains(&row.group_index) {
@@ -179,7 +209,7 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
 
     SelectedFile {
         name: slint::SharedString::from(name.as_ref()),
-        size_str: slint::SharedString::from(super::helpers::format_size(file.size)),
+        size_str: slint::SharedString::from(crate::utils::helpers::format_size(file.size)),
         format: slint::SharedString::from(&file.compression_format),
         resolution: slint::SharedString::from(format!("{}x{}", file.width, file.height)),
         bit_depth: slint::SharedString::from(format!("{}-bit", file.bit_depth)),
