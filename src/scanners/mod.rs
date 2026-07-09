@@ -8,7 +8,9 @@ pub mod qc;
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
@@ -293,18 +295,74 @@ pub async fn execute_scan(
 // PRIVATE RESULT-MAPPING DATA HELPERS
 // ---------------------------------------------------------
 
-/// Instantiates a downscaled thumbnail from disk on a background task.
-/// Utilizes smart DDS mipmap decimation at level 64px to minimize peak RAM usages.
+static CACHE_DIR_INITIALIZED: OnceLock<()> = OnceLock::new();
+
+/// Instantiates a downscaled thumbnail from disk or retrieves it from the dynamic disk-backed thumbnail cache.
+/// Utilizes microsecond keys generated from path + file-size + modified time to prevent reading heavy originals.
 fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
     let path = PathBuf::from(path_str);
-    // --- OPTIMIZED: Request tiny 64px mipmap directly during thumbnail load step ---
+    if !path.is_file() {
+        return None;
+    }
+
+    // Locate the local portable cache directory: PixelHand_Data/.cache/thumbnails/
+    let cache_dir = crate::utils::settings::get_portable_app_data_dir()
+        .ok()
+        .map(|p| p.join(".cache").join("thumbnails"));
+
+    let cache_path = if let Some(ref dir) = cache_dir {
+        // Guarantee cache folder directory is initialized exactly once per run to reduce disk syscall overhead
+        CACHE_DIR_INITIALIZED.get_or_init(|| {
+            let _ = std::fs::create_dir_all(dir);
+        });
+
+        // Fast metadata inspection for a bulletproof dynamic key
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            let size = metadata.len();
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+
+            // Compute high-speed xxh64 hash of the file key properties
+            let mut hasher = Xxh64::new(0);
+            hasher.update(path.to_string_lossy().as_bytes());
+            hasher.update(&size.to_le_bytes());
+            hasher.update(&mtime.to_le_bytes());
+
+            Some(dir.join(format!("{:016x}.png", hasher.digest())))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // 1. Try reading the tiny pre-rendered PNG from the disk cache (takes <1ms)
+    // Collapse the conditional statements cleanly according to Clippy recommendations
+    if let Some(ref cp) = cache_path
+        && cp.is_file()
+        && let Ok(img) = image::open(cp)
+    {
+        return Some(img.to_rgba8());
+    }
+
+    // 2. Fallback: Parse the actual texture and downscale to 64px
     if let Ok(mut img) =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(64))
     {
         if img.width() > 64 || img.height() > 64 {
             img = img.thumbnail(64, 64);
         }
-        return Some(img.to_rgba8());
+        let rgba = img.to_rgba8();
+
+        // Save compressed PNG to local disk cache for instant subsequent loading
+        if let Some(ref cp) = cache_path {
+            let _ = rgba.save(cp);
+        }
+        return Some(rgba);
     }
     None
 }

@@ -500,7 +500,6 @@ pub fn run_gui() -> Result<()> {
         let mut lock = state_clone.lock().unwrap();
         lock.collapsed_groups.clear();
 
-        // Сначала собираем индексы заголовков во временный буфер во избежание конфликта ссылок
         let header_indices: Vec<i32> = lock
             .results
             .iter()
@@ -566,15 +565,42 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Export console diagnostics logs callback handler via RFD save dialog
+    app.on_export_log(move |log_text| {
+        if let Some(path) = rfd::FileDialog::new()
+            .set_title("Export Console Log")
+            .add_filter("Log Files", &["log", "txt"])
+            .set_file_name("PixelHand_Diagnostics.log")
+            .save_file()
+        {
+            match fs::write(&path, log_text.as_str()) {
+                Ok(_) => tracing::info!("Console log successfully exported to: {:?}", path),
+                Err(e) => tracing::error!("Failed to export console log: {}", e),
+            }
+        }
+    });
+
+    // Smart Drag & Drop file/folder drop handler on the window surface
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
         if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
             let path_str = path_buf.to_string_lossy().to_string();
+            let is_dir = path_buf.is_dir();
+            let is_file = path_buf.is_file();
             let app_copy = app_weak_dnd.clone();
+
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
-                ui.set_query_text(path_str.clone().into());
-                ui.set_search_method(2);
-                ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
+                if is_dir {
+                    // Dropped directory: Set as source Folder A
+                    ui.set_dir_a(path_str.clone().into());
+                    ui.set_status_text(format!("Scan folder updated: {}", path_str).into());
+                } else if is_file {
+                    // Dropped file: Load as a reference image for semantic similarity queries
+                    ui.set_query_text(path_str.clone().into());
+                    ui.set_search_method(2); // Instantly shift search mode combobox to AI
+                    ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
+                }
+                utils::settings::save_settings(&ui);
             });
         }
         slint::winit_030::EventResult::Propagate
