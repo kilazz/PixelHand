@@ -37,7 +37,6 @@
 *   **GUI Engine**: [Slint UI](https://slint.dev/)
 *   **Machine Learning**: [ONNX Runtime](https://onnxruntime.ai/)
 *   **Vector Database**: [LanceDB](https://lancedb.com/)
-*   **Concurrencies**: Thread-safe background tasks built with `Rayon` (data-parallelism CPU threads) and `Tokio` (asynchronous state runtimes)
 
 ## Development
 ```
