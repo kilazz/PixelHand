@@ -58,6 +58,13 @@ pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
         path: slint::SharedString::from(&rd.path),
         name: slint::SharedString::from(&rd.name),
         score_or_detail: slint::SharedString::from(&rd.score_or_detail),
+
+        // --- SEPARATED COLUMNS FOR ASSET INVENTORY ---
+        format_str: slint::SharedString::from(&rd.format_str),
+        dimensions_str: slint::SharedString::from(&rd.dimensions_str),
+        mipmaps_str: slint::SharedString::from(&rd.mipmaps_str),
+        cubemap_str: slint::SharedString::from(&rd.cubemap_str),
+
         size_str: slint::SharedString::from(&rd.size_str),
         meta_str: slint::SharedString::from(&rd.meta_str),
         is_best: rd.is_best,

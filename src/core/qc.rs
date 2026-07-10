@@ -15,6 +15,7 @@ pub struct QcImageMetadata {
     pub has_alpha: bool,
     pub bit_depth: u32,
     pub mipmap_count: u32,
+    pub is_cubemap: bool,
 }
 
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
@@ -35,6 +36,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
     let mut has_alpha = false;
     let mut bit_depth = 8;
     let mut mipmap_count = 1;
+    let mut is_cubemap = false; // Initialize to false by default
 
     if ext == "dds" {
         let bytes = fs::read(path).context("Failed to read DDS bytes")?;
@@ -49,6 +51,11 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
             } else {
                 1
             };
+
+            // --- CUBEMAP DETECTION ---
+            // dwCaps2 is located at offset 112. The flag 0x0000FE00 indicates a Cubemap.
+            let dw_caps2 = u32::from_le_bytes(bytes[112..116].try_into().unwrap_or_default());
+            is_cubemap = (dw_caps2 & 0x0000FE00) != 0;
 
             let pf_flags = u32::from_le_bytes(bytes[80..84].try_into().unwrap_or_default());
             if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
@@ -121,6 +128,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
         has_alpha,
         bit_depth,
         mipmap_count,
+        is_cubemap, // Set the flag in the returned struct
     })
 }
 

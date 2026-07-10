@@ -137,6 +137,7 @@ pub async fn run_perceptual_scan_internal(
                         has_alpha: false,
                         bit_depth: 8,
                         mipmap_count: 1,
+                        is_cubemap: false,
                     }
                 });
 
@@ -151,6 +152,7 @@ pub async fn run_perceptual_scan_internal(
                     has_alpha: qc_meta.has_alpha,
                     bit_depth: qc_meta.bit_depth,
                     mipmap_count: qc_meta.mipmap_count,
+                    is_cubemap: qc_meta.is_cubemap,
                     similarity: 100.0,
                 });
             }

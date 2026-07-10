@@ -444,6 +444,12 @@ export struct ResultsRow {
     path: string,
     name: string,
     score_or_detail: string,
+    
+    // --- NEW SEPARATED METADATA COLUMNS ---
+    format_str: string,
+    dimensions_str: string,
+    mipmaps_str: string,
+    cubemap_str: string,
     size_str: string,
     meta_str: string,
     is_best: bool,
@@ -646,6 +652,8 @@ export component AppWindow inherits Window {
     callback save_settings();
     callback tonemap_toggled();
     callback export_log(string);
+    callback export_csv(); // <--- NEW CSV EXPORT CALLBACK
+    callback sort_by_column(string); // <--- NEW COLUMN SORTING CALLBACK
     callback expand_all_groups();
     callback collapse_all_groups();
     callback results_filter_changed();
@@ -1385,7 +1393,8 @@ export component AppWindow inherits Window {
                                     model: [
                                         "Exact Match (xxHash)",
                                         "Simple Duplicates (dHash)",
-                                        "AI Semantic/Visual Search"
+                                        "AI Semantic/Visual Search",
+                                        "Asset Inventory (Detailed Audit)" // <--- NEW 4th MODE ADDED
                                     ];
                                     current-index <=> root.search_method;
                                     height: 22px;
@@ -1554,7 +1563,7 @@ export component AppWindow inherits Window {
                                 }
 
                                 ComboBox {
-                                    model: ["By Duplicate Count", "By Size on Disk", "By Filename"];
+                                    model: root.search_method == 3 ? ["By Format Type", "By Size on Disk", "By Filename"] : ["By Duplicate Count", "By Size on Disk", "By Filename"];
                                     current-index <=> root.results_sort_index;
                                     height: 24px;
                                     width: 145px;
@@ -1590,14 +1599,22 @@ export component AppWindow inherits Window {
 
                                 if !root.results_grid_mode && root.results.length > 0: HorizontalLayout {
                                     spacing: 6px;
-                                    CustomButton {
+
+                                    if root.search_method == 3: CustomButton {
+                                        text: "Export CSV";
+                                        height: 24px;
+                                        primary-color: #0e639c; // Blue branding
+                                        clicked => { root.export_csv(); }
+                                    }
+
+                                    if root.search_method != 3: CustomButton {
                                         text: "Expand All";
                                         height: 24px;
                                         primary-color: #5865f2;
                                         clicked => { root.expand_all_groups(); }
                                     }
 
-                                    CustomButton {
+                                    if root.search_method != 3: CustomButton {
                                         text: "Collapse All";
                                         height: 24px;
                                         primary-color: #5865f2;
@@ -1684,6 +1701,8 @@ export component AppWindow inherits Window {
                                     Rectangle {
                                         height: 24px;
                                         background: #1e1f22;
+
+                                        // DYNAMIC COLUMN HEADER RENDERING WITH TOUCHAREAS FOR COLUMNS SORTING
                                         HorizontalLayout {
                                             padding-left: 28px;
                                             padding-right: 8px;
@@ -1693,18 +1712,24 @@ export component AppWindow inherits Window {
                                                 width: 32px;
                                             } // Checkbox spacer
 
-                                            // 1. FILE
+                                            // COLUMN 1: FILE Name / Texture Path
                                             HorizontalLayout {
                                                 width: root.col_file_w;
-                                                Text {
-                                                    text: "FILE";
-                                                    color: #949ba4;
-                                                    font-size: 11px;
-                                                    font-weight: 700;
-                                                    vertical-alignment: center;
+                                                TouchArea {
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    mouse-cursor: pointer;
+                                                    clicked => { root.sort_by_column("name"); }
+                                                    Text {
+                                                        text: "FILE";
+                                                        color: #949ba4;
+                                                        font-size: 11px;
+                                                        font-weight: 700;
+                                                        vertical-alignment: center;
+                                                    }
                                                 }
                                             }
-                                            // Splitter FILE -> SCORE
+                                            // Splitter FILE
                                             Rectangle {
                                                 width: 8px;
                                                 background: file_split.has-hover ? #4e5058 : transparent;
@@ -1714,59 +1739,212 @@ export component AppWindow inherits Window {
                                                 }
                                             }
 
-                                            // 2. SCORE
-                                            HorizontalLayout {
-                                                width: root.col_score_w;
-                                                Text {
-                                                    text: "SCORE";
-                                                    color: #949ba4;
-                                                    font-size: 11px;
-                                                    font-weight: 700;
-                                                    vertical-alignment: center;
-                                                    horizontal-alignment: center;
-                                                    width: 100%;
+                                            // --- CONDITIONAL HEADERS FOR DUPLICATE MODES vs INVENTORY AUDIT ---
+                                            if root.search_method != 3: HorizontalLayout {
+                                                spacing: 0px;
+
+                                                // COLUMN 2: SCORE
+                                                HorizontalLayout {
+                                                    width: root.col_score_w;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("score"); }
+                                                        Text {
+                                                            text: "SCORE";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                            horizontal-alignment: center;
+                                                            width: 100%;
+                                                        }
+                                                    }
                                                 }
-                                            }
-                                            // Splitter SCORE -> PATH
-                                            Rectangle {
-                                                width: 8px;
-                                                background: score_split.has-hover ? #4e5058 : transparent;
-                                                score_split := TouchArea {
-                                                    mouse-cursor: col-resize;
-                                                    moved => { if (self.pressed) { root.col_score_w = (root.col_score_w + self.mouse-x - self.pressed-x).clamp(50px, 200px); } }
+                                                // Splitter SCORE
+                                                Rectangle {
+                                                    width: 8px;
+                                                    background: score_split.has-hover ? #4e5058 : transparent;
+                                                    score_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_score_w = (root.col_score_w + self.mouse-x - self.pressed-x).clamp(50px, 200px); } }
+                                                    }
+                                                }
+
+                                                // COLUMN 3: PATH
+                                                HorizontalLayout {
+                                                    width: root.col_path_w;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("path"); }
+                                                        Text {
+                                                            text: "PATH";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+                                                }
+                                                // Splitter PATH
+                                                Rectangle {
+                                                    width: 8px;
+                                                    background: path_split.has-hover ? #4e5058 : transparent;
+                                                    path_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_path_w = (root.col_path_w + self.mouse-x - self.pressed-x).clamp(100px, 1000px); } }
+                                                    }
+                                                }
+
+                                                // COLUMN 4: METADATA
+                                                HorizontalLayout {
+                                                    horizontal-stretch: 1;
+                                                    Text {
+                                                        text: "METADATA";
+                                                        color: #949ba4;
+                                                        font-size: 11px;
+                                                        font-weight: 700;
+                                                        vertical-alignment: center;
+                                                    }
                                                 }
                                             }
 
-                                            // 3. PATH
-                                            HorizontalLayout {
-                                                width: root.col_path_w;
-                                                Text {
-                                                    text: "PATH";
-                                                    color: #949ba4;
-                                                    font-size: 11px;
-                                                    font-weight: 700;
-                                                    vertical-alignment: center;
-                                                }
-                                            }
-                                            // Splitter PATH -> METADATA
-                                            Rectangle {
-                                                width: 8px;
-                                                background: path_split.has-hover ? #4e5058 : transparent;
-                                                path_split := TouchArea {
-                                                    mouse-cursor: col-resize;
-                                                    moved => { if (self.pressed) { root.col_path_w = (root.col_path_w + self.mouse-x - self.pressed-x).clamp(100px, 1000px); } }
-                                                }
-                                            }
+                                            if root.search_method == 3: HorizontalLayout {
+                                                spacing: 0px;
 
-                                            // 4. METADATA
-                                            HorizontalLayout {
-                                                horizontal-stretch: 1;
-                                                Text {
-                                                    text: "METADATA";
-                                                    color: #949ba4;
-                                                    font-size: 11px;
-                                                    font-weight: 700;
-                                                    vertical-alignment: center;
+                                                // COLUMN 2: FORMAT
+                                                HorizontalLayout {
+                                                    width: 110px;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("format"); }
+                                                        Text {
+                                                            text: "FORMAT";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    width: 8px;
+                                                }
+
+                                                // COLUMN 3: DIMENSIONS
+                                                HorizontalLayout {
+                                                    width: 110px;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("dimensions"); }
+                                                        Text {
+                                                            text: "DIMENSIONS";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    width: 8px;
+                                                }
+
+                                                // COLUMN 4: MIPMAPS
+                                                HorizontalLayout {
+                                                    width: 75px;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("mipmaps"); }
+                                                        Text {
+                                                            text: "MIPMAPS";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                            horizontal-alignment: center;
+                                                            width: 100%;
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    width: 8px;
+                                                }
+
+                                                // COLUMN 5: CUBEMAP
+                                                HorizontalLayout {
+                                                    width: 75px;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("cubemap"); }
+                                                        Text {
+                                                            text: "CUBEMAP";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                            horizontal-alignment: center;
+                                                            width: 100%;
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    width: 8px;
+                                                }
+
+                                                // COLUMN 6: SIZE
+                                                HorizontalLayout {
+                                                    width: 85px;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("size"); }
+                                                        Text {
+                                                            text: "SIZE";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    width: 8px;
+                                                }
+
+                                                // COLUMN 7: PATH
+                                                HorizontalLayout {
+                                                    horizontal-stretch: 1;
+                                                    TouchArea {
+                                                        width: 100%;
+                                                        height: 100%;
+                                                        mouse-cursor: pointer;
+                                                        clicked => { root.sort_by_column("path"); }
+                                                        Text {
+                                                            text: "PATH";
+                                                            color: #949ba4;
+                                                            font-size: 11px;
+                                                            font-weight: 700;
+                                                            vertical-alignment: center;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -1900,48 +2078,149 @@ export component AppWindow inherits Window {
                                                         width: 8px;
                                                     } // Spacer
 
-                                                    // SCORE
-                                                    HorizontalLayout {
-                                                        width: root.col_score_w;
-                                                        Text {
-                                                            text: row.is_best ? "[Best]" : row.score_or_detail;
-                                                            color: row.is_best ? #f0b132 : #dcddde;
-                                                            font-size: 12px;
-                                                            vertical-alignment: center;
-                                                            horizontal-alignment: center;
-                                                            width: 100%;
+                                                    // --- CONDITIONAL COLUMNS BASED ON THE ACTIVE SEARCH MODE ---
+                                                    if root.search_method != 3: HorizontalLayout {
+                                                        spacing: 0px;
+
+                                                        // SCORE
+                                                        HorizontalLayout {
+                                                            width: root.col_score_w;
+                                                            Text {
+                                                                text: row.is_best ? "[Best]" : row.score_or_detail;
+                                                                color: row.is_best ? #f0b132 : #dcddde;
+                                                                font-size: 12px;
+                                                                vertical-alignment: center;
+                                                                horizontal-alignment: center;
+                                                                width: 100%;
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        } // Spacer
+
+                                                        // PATH
+                                                        HorizontalLayout {
+                                                            width: root.col_path_w;
+                                                            Text {
+                                                                text: row.path;
+                                                                color: #949ba4;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                                overflow: elide;
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        } // Spacer
+
+                                                        // METADATA
+                                                        HorizontalLayout {
+                                                            horizontal-stretch: 1;
+                                                            Text {
+                                                                text: row.meta_str;
+                                                                color: #949ba4;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                                overflow: elide;
+                                                            }
                                                         }
                                                     }
 
-                                                    Rectangle {
-                                                        width: 8px;
-                                                    } // Spacer
+                                                    if root.search_method == 3: HorizontalLayout {
+                                                        spacing: 0px;
 
-                                                    // PATH
-                                                    HorizontalLayout {
-                                                        width: root.col_path_w;
-                                                        Text {
-                                                            text: row.path;
-                                                            color: #949ba4;
-                                                            font-size: 11px;
-                                                            vertical-alignment: center;
-                                                            overflow: elide;
+                                                        // FORMAT COLUMN
+                                                        HorizontalLayout {
+                                                            width: 110px;
+                                                            Text {
+                                                                text: row.format_str;
+                                                                color: #dcddde;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                            }
                                                         }
-                                                    }
 
-                                                    Rectangle {
-                                                        width: 8px;
-                                                    } // Spacer
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        }
 
-                                                    // METADATA
-                                                    HorizontalLayout {
-                                                        horizontal-stretch: 1;
-                                                        Text {
-                                                            text: row.meta_str;
-                                                            color: #949ba4;
-                                                            font-size: 11px;
-                                                            vertical-alignment: center;
-                                                            overflow: elide;
+                                                        // DIMENSIONS COLUMN
+                                                        HorizontalLayout {
+                                                            width: 110px;
+                                                            Text {
+                                                                text: row.dimensions_str;
+                                                                color: #dcddde;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        }
+
+                                                        // MIPMAPS COLUMN
+                                                        HorizontalLayout {
+                                                            width: 75px;
+                                                            Text {
+                                                                text: row.mipmaps_str;
+                                                                color: #dcddde;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                                horizontal-alignment: center;
+                                                                width: 100%;
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        }
+
+                                                        // CUBEMAP COLUMN
+                                                        HorizontalLayout {
+                                                            width: 75px;
+                                                            Text {
+                                                                text: row.cubemap_str;
+                                                                color: row.cubemap_str == "YES" ? #f0b132 : #dcddde;
+                                                                font-weight: row.cubemap_str == "YES" ? 700 : 400;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                                horizontal-alignment: center;
+                                                                width: 100%;
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        }
+
+                                                        // SIZE COLUMN
+                                                        HorizontalLayout {
+                                                            width: 85px;
+                                                            Text {
+                                                                text: row.size_str;
+                                                                color: #dcddde;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                            }
+                                                        }
+
+                                                        Rectangle {
+                                                            width: 8px;
+                                                        }
+
+                                                        // FULL PATH COLUMN
+                                                        HorizontalLayout {
+                                                            horizontal-stretch: 1;
+                                                            Text {
+                                                                text: row.path;
+                                                                color: #5865f2;
+                                                                font-size: 11px;
+                                                                vertical-alignment: center;
+                                                                overflow: elide;
+                                                            }
                                                         }
                                                     }
                                                 }

@@ -177,6 +177,8 @@ pub struct DuplicateFileSummary {
     pub has_alpha: bool,
     pub bit_depth: u32,
     pub mipmap_count: u32,
+    pub is_cubemap: bool,
+
     pub similarity: f32,
 }
 

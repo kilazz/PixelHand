@@ -49,7 +49,7 @@ pub struct ScanParams {
     pub query_text: String,
     pub similarity: f32,
     pub batch_size: usize,
-    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI Embeddings
+    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI Embeddings, 3: Asset Inventory
     pub execution_provider: String,
     pub qc_mode: bool,
     pub qc_npot: bool,
@@ -341,6 +341,12 @@ pub async fn execute_scan(
             let rows = map_qc_to_rows(&issues);
             Ok((Vec::new(), rows))
         }
+    } else if params.search_method == 3 {
+        // Asset Inventory (Detailed Audit)
+        let mut rows = qc::run_asset_audit(params).await?;
+        // Default sort by filename
+        rows.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok((Vec::new(), rows))
     } else if params.search_method == 2 {
         // AI Vector Space Similarity Searches
         if !params.query_text.trim().is_empty() {
@@ -464,6 +470,12 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             path: String::new(),
             name: String::new(),
             score_or_detail: String::new(),
+
+            format_str: String::new(),
+            dimensions_str: String::new(),
+            mipmaps_str: String::new(),
+            cubemap_str: String::new(),
+
             size_str: crate::utils::helpers::format_size(
                 group.files.first().map(|f| f.size).unwrap_or(0),
             ),
@@ -472,6 +484,9 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             is_checked: false,
             thumbnail_data: None,
             similarity: 100.0,
+
+            size_bytes: 0,
+            pixels_count: 0,
         });
 
         // 2. Add Child file rows belonging to this cluster
@@ -496,6 +511,16 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
                 } else {
                     format!("{:.1}%", file.similarity)
                 },
+
+                format_str: file.compression_format.clone(),
+                dimensions_str: format!("{} x {}", file.width, file.height),
+                mipmaps_str: file.mipmap_count.to_string(),
+                cubemap_str: if file.is_cubemap {
+                    "YES".to_string()
+                } else {
+                    "NO".to_string()
+                },
+
                 size_str: crate::utils::helpers::format_size(file.size),
                 meta_str: {
                     let size_mb = file.size as f64 / 1024.0 / 1024.0;
@@ -516,6 +541,9 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
                 is_checked: false,
                 thumbnail_data,
                 similarity: file.similarity,
+
+                size_bytes: file.size,
+                pixels_count: (file.width * file.height) as u64,
             });
         }
     }
@@ -552,12 +580,21 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
             path: String::new(),
             name: String::new(),
             score_or_detail: String::new(),
+
+            format_str: String::new(),
+            dimensions_str: String::new(),
+            mipmaps_str: String::new(),
+            cubemap_str: String::new(),
+
             size_str: format!("{} files", group_issues.len()),
             meta_str: String::new(),
             is_best: false,
             is_checked: false,
             thumbnail_data: None,
             similarity: 0.0,
+
+            size_bytes: 0,
+            pixels_count: 0,
         });
 
         // 2. Add Child Rows belonging to this issue category
@@ -576,12 +613,21 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
                     .to_string_lossy()
                     .into_owned(),
                 score_or_detail: issue.issue.clone(),
+
+                format_str: String::new(),
+                dimensions_str: String::new(),
+                mipmaps_str: String::new(),
+                cubemap_str: String::new(),
+
                 size_str: String::new(),
                 meta_str: issue.details.clone(),
                 is_best: false,
                 is_checked: false,
                 thumbnail_data,
                 similarity: 0.0,
+
+                size_bytes: 0,
+                pixels_count: 0,
             });
         }
     }
@@ -609,12 +655,21 @@ pub fn map_ai_search_to_rows(
                 .to_string_lossy()
                 .into_owned(),
             score_or_detail: format!("{:.1}%", res.similarity),
+
+            format_str: String::new(),
+            dimensions_str: String::new(),
+            mipmaps_str: String::new(),
+            cubemap_str: String::new(),
+
             size_str: String::new(),
             meta_str: String::new(),
             is_best: false,
             is_checked: false,
             thumbnail_data,
             similarity: res.similarity,
+
+            size_bytes: 0,
+            pixels_count: 0,
         });
     }
     rows

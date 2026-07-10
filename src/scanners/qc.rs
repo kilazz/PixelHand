@@ -67,6 +67,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     has_alpha: false,
                     bit_depth: 8,
                     mipmap_count: 1,
+                    is_cubemap: false,
                 });
 
             // 1. Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
@@ -220,6 +221,7 @@ pub async fn run_folder_compare(
                     has_alpha: false,
                     bit_depth: 8,
                     mipmap_count: 1,
+                    is_cubemap: false,
                 });
             let meta_b =
                 extract_qc_metadata(p_b).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
@@ -232,6 +234,7 @@ pub async fn run_folder_compare(
                     has_alpha: false,
                     bit_depth: 8,
                     mipmap_count: 1,
+                    is_cubemap: false,
                 });
 
             if hide_same_resolution
@@ -271,4 +274,109 @@ pub async fn run_folder_compare(
         }
     }
     Ok(issues)
+}
+
+/// Executes a flat-list technical Asset Inventory scan across all target directories
+pub async fn run_asset_audit(
+    params: super::ScanParams,
+) -> Result<Vec<crate::state::ResultsRowData>> {
+    let path = PathBuf::from(params.dir_a.clone());
+    if !path.is_dir() {
+        return Err(anyhow!("The specified path is not a valid directory"));
+    }
+
+    let ex_folders: Vec<String> = params
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let (paths, warnings) = discover_files(&path, &params.extensions, &ex_folders);
+    for warn in warnings {
+        crate::app::append_to_console_log(&warn);
+    }
+
+    let cancel_token = params.cancel_token.clone();
+    let total = paths.len();
+    let processed = std::sync::atomic::AtomicUsize::new(0);
+
+    let rows: Vec<crate::state::ResultsRowData> = paths
+        .par_iter()
+        .filter_map(|p| {
+            if cancel_token.load(Ordering::Relaxed) {
+                return None;
+            }
+
+            let (w, h) = match imagesize::size(p) {
+                Ok(dim) => (dim.width, dim.height),
+                Err(_) => (0, 0),
+            };
+            let ext = p
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+
+            let qc_meta =
+                extract_qc_metadata(p).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
+                    width: w as u32,
+                    height: h as u32,
+                    file_size: size,
+                    format_str: ext.clone(),
+                    compression_format: ext.clone(),
+                    color_space: "sRGB".into(),
+                    has_alpha: false,
+                    bit_depth: 8,
+                    mipmap_count: 1,
+                    is_cubemap: false,
+                });
+
+            // Increment atomic processed items and dispatch to the main progress callback
+            let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
+            if let Some(ref cb) = params.on_progress {
+                cb(current as f32 / total as f32);
+            }
+
+            Some(crate::state::ResultsRowData {
+                is_header: false,
+                is_qc: false,
+                is_ai: false,
+                group_index: -1,
+                hash_or_issue: String::new(),
+                path: p.to_string_lossy().to_string(),
+                name: p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+                score_or_detail: String::new(),
+
+                format_str: qc_meta.compression_format,
+                dimensions_str: format!("{} x {}", qc_meta.width, qc_meta.height),
+                mipmaps_str: qc_meta.mipmap_count.to_string(),
+                cubemap_str: if qc_meta.is_cubemap {
+                    "YES".to_string()
+                } else {
+                    "NO".to_string()
+                },
+                size_str: crate::utils::helpers::format_size(qc_meta.file_size),
+
+                meta_str: String::new(),
+                is_best: false,
+                is_checked: false,
+                thumbnail_data: None,
+                similarity: 0.0,
+
+                size_bytes: qc_meta.file_size,
+                pixels_count: (qc_meta.width * qc_meta.height) as u64,
+            })
+        })
+        .collect();
+
+    if params.cancel_token.load(Ordering::Relaxed) {
+        return Err(anyhow!("Scan cancelled by user."));
+    }
+
+    Ok(rows)
 }

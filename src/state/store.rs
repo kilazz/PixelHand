@@ -15,12 +15,23 @@ pub struct ResultsRowData {
     pub path: String,
     pub name: String,
     pub score_or_detail: String,
+
+    // --- SEPARATED COLUMNS FOR ASSET INVENTORY ---
+    pub format_str: String,
+    pub dimensions_str: String,
+    pub mipmaps_str: String,
+    pub cubemap_str: String,
+
     pub size_str: String,
-    pub meta_str: String,
+    pub meta_str: String, // Kept for backwards compatibility with legacy views
     pub is_best: bool,
     pub is_checked: bool,
     pub thumbnail_data: Option<image::RgbaImage>, // Thread-safe raw pixels
     pub similarity: f32,                          // Utilized for real-time post-scan filtering
+
+    // --- HIDDEN NUMERIC FIELDS FOR SORTING ---
+    pub size_bytes: u64,
+    pub pixels_count: u64,
 }
 
 /// The global application state holding our scan results and UI view states.
@@ -29,4 +40,8 @@ pub struct AppState {
     pub results: Vec<ResultsRowData>,
     pub groups: Vec<DuplicateGroupSummary>,
     pub collapsed_groups: HashSet<i32>, // Holds indexes of collapsed groups
+
+    // --- FIELDS FOR COLUMN SORTING ---
+    pub sort_column: String,
+    pub sort_ascending: bool,
 }
