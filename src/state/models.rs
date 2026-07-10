@@ -35,7 +35,7 @@ pub struct AppSettings {
 
     // File Extensions (Split PNG and JPG)
     pub ext_png: bool,
-    pub ext_jpg: bool, // <--- NEW SEPARATED EXTENSION FIELD
+    pub ext_jpg: bool,
     pub ext_tga: bool,
     pub ext_dds: bool,
     pub ext_bmp: bool,
@@ -85,6 +85,14 @@ pub struct AppSettings {
     // HDR Tonemapping Options
     pub tonemap_enabled: bool,
     pub tonemap_operator: i32, // 0: ACES Filmic, 1: ICtCp, 2: Khronos PBR Neutral
+
+    // --- NEW PREVIEW & SMART FILTER SETTINGS ---
+    pub enable_previews: bool,
+    pub preview_quality: i32, // 0: Fast, 1: Balanced, 2: High
+    pub filter_only_npot: bool,
+    pub filter_only_uncompressed: bool,
+    pub filter_only_missing_mips: bool,
+    pub filter_only_cubemaps: bool,
 }
 
 impl Default for AppSettings {
@@ -115,7 +123,7 @@ impl Default for AppSettings {
             qc_check_compression: true,
 
             ext_png: true,
-            ext_jpg: true, // Default to true
+            ext_jpg: true,
             ext_tga: true,
             ext_dds: true,
             ext_bmp: true,
@@ -162,6 +170,14 @@ impl Default for AppSettings {
             // Default Tonemapping Options
             tonemap_enabled: true,
             tonemap_operator: 0, // Default to ACES Filmic
+
+            // --- NEW PREVIEW & SMART FILTER DEFAULTS ---
+            enable_previews: true,
+            preview_quality: 1, // Balanced
+            filter_only_npot: false,
+            filter_only_uncompressed: false,
+            filter_only_missing_mips: false,
+            filter_only_cubemaps: false,
         }
     }
 }
@@ -179,10 +195,7 @@ pub struct DuplicateFileSummary {
     pub has_alpha: bool,
     pub bit_depth: u32,
     pub mipmap_count: u32,
-
-    // --- NEW FIELD FOR CUBEMAP IDENTIFICATION ---
     pub is_cubemap: bool,
-
     pub similarity: f32,
 }
 

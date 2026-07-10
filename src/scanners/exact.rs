@@ -67,7 +67,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
             // Progress tracking updates
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
-                cb(current as f32 / total as f32);
+                cb(current as f32 / total as f32, current, total);
             }
 
             Some(FileMetadata {

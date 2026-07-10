@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 pub struct DecodedCacheItem {
@@ -89,4 +89,85 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     };
 
     Some(out_img.into_rgba8())
+}
+
+// --- SMART LANCEDB VECTOR CACHE GARBAGE COLLECTOR ---
+
+/// Recursively calculates the total disk size of a directory in bytes.
+fn get_dir_size(path: &Path) -> u64 {
+    let mut total_size = 0;
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let metadata = entry.metadata();
+            if let Ok(meta) = metadata {
+                if meta.is_dir() {
+                    total_size += get_dir_size(&entry.path());
+                } else {
+                    total_size += meta.len();
+                }
+            }
+        }
+    }
+    total_size
+}
+
+/// Automatically runs a background cleaner over LanceDB caches.
+/// Removes DB databases that haven't been accessed for 14 days,
+/// or evicts the oldest caches if total `.lancedb_cache` folder size exceeds 1.0 GB.
+pub fn run_vector_cache_garbage_collector() {
+    let Ok(app_dir) = crate::utils::settings::get_portable_app_data_dir() else {
+        return;
+    };
+    let lancedb_cache_dir = app_dir.join(".lancedb_cache");
+    if !lancedb_cache_dir.is_dir() {
+        return;
+    }
+
+    let Ok(entries) = fs::read_dir(&lancedb_cache_dir) else {
+        return;
+    };
+
+    let mut cache_folders = Vec::new();
+    let now = std::time::SystemTime::now();
+    let max_age = std::time::Duration::from_secs(14 * 24 * 60 * 60); // 14 Days
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let Ok(meta) = path.metadata() else {
+                continue;
+            };
+            let accessed_time = meta.accessed().unwrap_or(now);
+
+            // COLLAPSED NESTED IF STATEMENTS WITH LET-CHAINS
+            if let Ok(age) = now.duration_since(accessed_time)
+                && age > max_age
+            {
+                let _ = fs::remove_dir_all(&path);
+                continue;
+            }
+
+            let folder_size = get_dir_size(&path);
+            cache_folders.push((path, accessed_time, folder_size));
+        }
+    }
+
+    // Sort folders by accessed time (oldest first)
+    cache_folders.sort_by_key(|f| f.1);
+
+    // IDENTITY OP MULTIPLICATION REMOVED
+    let max_cache_bytes: u64 = 1024_u64 * 1024 * 1024; // 1 GiB limit
+    let mut current_total_size: u64 = cache_folders.iter().map(|f| f.2).sum();
+
+    // Evict oldest caches until we are strictly under the 1.0 GB threshold
+    for (path, _, size) in cache_folders {
+        if current_total_size <= max_cache_bytes {
+            break;
+        }
+        if fs::remove_dir_all(&path).is_ok() {
+            current_total_size = current_total_size.saturating_sub(size);
+            #[cfg(debug_assertions)]
+            eprintln!("[GC] Evicted old LanceDB cache: {:?}", path);
+        }
+    }
 }

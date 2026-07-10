@@ -59,7 +59,7 @@ pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
         name: slint::SharedString::from(&rd.name),
         score_or_detail: slint::SharedString::from(&rd.score_or_detail),
 
-        // --- SEPARATED COLUMNS FOR ASSET INVENTORY ---
+        // --- NEW SEPARATED COLUMNS FOR ASSET INVENTORY ---
         format_str: slint::SharedString::from(&rd.format_str),
         dimensions_str: slint::SharedString::from(&rd.dimensions_str),
         mipmaps_str: slint::SharedString::from(&rd.mipmaps_str),
@@ -93,12 +93,38 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
     let search_query = ui.get_results_search_query().to_string().to_lowercase();
     let min_sim = ui.get_results_min_similarity();
 
-    // Determine which groups contain files matching the search query
+    // --- READ SMART FILTERING PRESETS ---
+    let filter_npot = ui.get_filter_only_npot();
+    let filter_uncompressed = ui.get_filter_only_uncompressed();
+    let filter_missing_mips = ui.get_filter_only_missing_mips();
+    let filter_cubemaps = ui.get_filter_only_cubemaps();
+
+    let has_filter = !search_query.is_empty()
+        || filter_npot
+        || filter_uncompressed
+        || filter_missing_mips
+        || filter_cubemaps;
+
+    // Determine which groups contain files matching the search and smart filters
     let mut visible_groups = std::collections::HashSet::new();
-    if !search_query.is_empty() {
+    if has_filter {
         for row in &state.results {
-            if !row.is_header && row.name.to_lowercase().contains(&search_query) {
-                visible_groups.insert(row.group_index);
+            if !row.is_header {
+                let matches_query =
+                    search_query.is_empty() || row.name.to_lowercase().contains(&search_query);
+                let matches_npot = !filter_npot || row.is_npot;
+                let matches_uncompressed = !filter_uncompressed || row.is_uncompressed;
+                let matches_missing_mips = !filter_missing_mips || row.is_missing_mips;
+                let matches_cubemaps = !filter_cubemaps || row.is_cubemap_bool;
+
+                if matches_query
+                    && matches_npot
+                    && matches_uncompressed
+                    && matches_missing_mips
+                    && matches_cubemaps
+                {
+                    visible_groups.insert(row.group_index);
+                }
             }
         }
     }
@@ -107,36 +133,44 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
     let mut grid_rows = Vec::new();
 
     for row in &state.results {
-        // 1. Text Search Filter
-        if !search_query.is_empty() && !visible_groups.contains(&row.group_index) {
-            continue; // Hide entire group if no children match
-        }
-        if !row.is_header
-            && !search_query.is_empty()
-            && !row.name.to_lowercase().contains(&search_query)
-        {
-            continue; // Hide non-matching children
+        // Hide entire group if no children match any of the active filters (spreadsheet rules)
+        if has_filter && !visible_groups.contains(&row.group_index) {
+            continue;
         }
 
-        // 2. Similarity Post-Filter (Only to non-best duplicates)
+        // Apply strict criteria tests to single child rows
+        if !row.is_header && has_filter {
+            let matches_query =
+                search_query.is_empty() || row.name.to_lowercase().contains(&search_query);
+            let matches_npot = !filter_npot || row.is_npot;
+            let matches_uncompressed = !filter_uncompressed || row.is_uncompressed;
+            let matches_missing_mips = !filter_missing_mips || row.is_missing_mips;
+            let matches_cubemaps = !filter_cubemaps || row.is_cubemap_bool;
+
+            if !(matches_query
+                && matches_npot
+                && matches_uncompressed
+                && matches_missing_mips
+                && matches_cubemaps)
+            {
+                continue; // Skip rendering this specific non-conforming item
+            }
+        }
+
+        // Similarity Post-Filter (Only to non-best duplicates)
         if !row.is_header && !row.is_best && row.similarity > 0.0 && row.similarity < min_sim {
             continue;
         }
 
-        // 3. Collect best representations of groups for Grid view,
-        // ensuring the array is strictly contiguous and flat for level left-to-right mapping
+        // Collect best representations of groups for Grid view
         if !row.is_header && row.is_best {
             grid_rows.push(convert_to_slint_row(row));
         }
 
-        // 4. List Collection & Collapse Logic
+        // List Collection & Collapse Logic
         if row.is_header {
             let mut slint_row = convert_to_slint_row(row);
-
-            // Pass the collapsed state via is_checked so Slint can render the ▶/▼ arrows natively
-            // instead of hardcoding ugly string overwrites into meta_str.
             slint_row.is_checked = state.collapsed_groups.contains(&row.group_index);
-
             slint_rows.push(slint_row);
         } else if !state.collapsed_groups.contains(&row.group_index) {
             slint_rows.push(convert_to_slint_row(row));

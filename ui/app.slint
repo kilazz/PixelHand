@@ -13,9 +13,11 @@ import {
     Slider,
 } from "std-widgets.slint";
 
-// IMPORT COMPONENTS WITH CORRECT RELATIVE PATHS
+// 1. ИМПОРТИРУЕМ ДЛЯ ЛОКАЛЬНОГО ИСПОЛЬЗОВАНИЯ ВНУТРИ ЭТОГО ФАЙЛА
 import { ResultsRow, SelectedFile } from "./structs.slint";
-export { ResultsRow, SelectedFile }from "./structs.slint";
+
+// 2. ЭКСПОРТИРУЕМ ДЛЯ ГЕНЕРАЦИИ Rust-КОДА В CRATE::APP
+export { ResultsRow, SelectedFile }
 import {
     MenuItem,
     TabButton,
@@ -77,7 +79,7 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_heic: true;
     in-out property <bool> ext_avif: true;
 
-    // Visual Reports (Contact Sheets) Settings
+    // Visual Reports Settings
     in-out property <bool> save_visuals: false;
     in-out property <int> visuals_columns: 6;
     in-out property <int> visuals_max_count: 100;
@@ -124,12 +126,19 @@ export component AppWindow inherits Window {
     in-out property <length> skipped_popup_x: 0px;
     in-out property <length> skipped_popup_y: 0px;
 
+    // --- COLS WIDTH PROPERTIES ---
     in-out property <length> col_file_w: 300px;
     in-out property <length> col_score_w: 70px;
     in-out property <length> col_path_w: 350px;
     in-out property <length> list_preview_size: 40px;
 
-    // Draggable Splitters states
+    // Widths for Audit Columns
+    in-out property <length> col_format_w: 110px;
+    in-out property <length> col_dimensions_w: 110px;
+    in-out property <length> col_mipmaps_w: 75px;
+    in-out property <length> col_cubemap_w: 75px;
+    in-out property <length> col_size_w: 85px;
+
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
     in-out property <length> compare_sidebar_width: 440px;
@@ -195,6 +204,14 @@ export component AppWindow inherits Window {
     in-out property <string> results_search_query: "";
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
+
+    // --- NEW PREVIEW & SMART FILTER PROPERTIES ---
+    in-out property <bool> enable_previews: true;
+    in-out property <int> preview_quality: 1;
+    in-out property <bool> filter_only_npot: false;
+    in-out property <bool> filter_only_uncompressed: false;
+    in-out property <bool> filter_only_missing_mips: false;
+    in-out property <bool> filter_only_cubemaps: false;
 
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
@@ -519,7 +536,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
 
                             VerticalLayout {
-                                alignment: start; // Forces natural heights on nested child panels!
+                                alignment: start;
                                 spacing: 12px;
 
                                 PanelSection {
@@ -533,7 +550,7 @@ export component AppWindow inherits Window {
                                             "Technical QC Audit"
                                         ];
                                         current-index <=> root.search_method;
-                                        height: 32px; // <--- FIX: Fixed height for the main ComboBox
+                                        height: 32px;
                                         selected(val) => {
                                             root.qc_mode = root.search_method == 4;
                                             root.save_settings();
@@ -609,8 +626,6 @@ export component AppWindow inherits Window {
                                 }
 
                                 // MODE DRIVEN DYNAMIC CONFIGURATIONS
-                                
-                                // A. Duplicates Parameters
                                 if root.search_method == 0 || root.search_method == 1: PanelSection {
                                     title: "Duplicates Finder Options";
                                     VerticalLayout {
@@ -802,7 +817,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // B. AI Parameters
                                 if root.search_method == 2: PanelSection {
                                     title: "AI Semantic Search Options";
                                     VerticalLayout {
@@ -841,7 +855,7 @@ export component AppWindow inherits Window {
                                                     "Custom (Local ONNX)"
                                                 ];
                                                 current-index <=> root.ai_model;
-                                                height: 32px; // <--- FIX: Fixed height for the Model ComboBox
+                                                height: 32px;
                                                 selected(val) => { root.save_settings(); }
                                             }
                                         }
@@ -905,7 +919,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // C. Technical QC Audit Parameters
                                 if root.search_method == 4: PanelSection {
                                     title: "QC Criteria List";
                                     VerticalLayout {
@@ -990,7 +1003,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // D. Collapsible Progressive Disclosure advanced parameters
                                 PanelSection {
                                     title: "Advanced System Settings";
                                     VerticalLayout {
@@ -1043,6 +1055,22 @@ export component AppWindow inherits Window {
                                             }
 
                                             CheckBox {
+                                                text: "Enable Previews Window";
+                                                checked <=> root.enable_previews;
+                                                toggled => { root.save_settings(); }
+                                            }
+
+                                            if root.enable_previews: FormRow {
+                                                title: "Preview Quality:";
+                                                ComboBox {
+                                                    model: ["Fast (64px)", "Balanced (128px)", "High Quality (256px)"];
+                                                    current-index <=> root.preview_quality;
+                                                    height: 32px;
+                                                    selected(val) => { root.save_settings(); }
+                                                }
+                                            }
+
+                                            CheckBox {
                                                 text: "Enable HDR Tonemapping";
                                                 checked <=> root.tonemap_enabled;
                                                 toggled => { root.tonemap_toggled(); }
@@ -1075,7 +1103,6 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // FIXED BOTTOM SCAN BUTTON
                         Rectangle {
                             height: 40px;
                             background: #1e1f22;
@@ -1100,7 +1127,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // SPLITTER
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
@@ -1120,7 +1146,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // MAIN RESULTS LIST
                 VerticalLayout {
                     padding-left: 12px;
                     horizontal-stretch: 1;
@@ -1252,6 +1277,43 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        if root.results.length > 0: HorizontalLayout {
+                            spacing: 12px;
+                            padding-left: 4px;
+                            padding-bottom: 4px;
+                            alignment: start;
+                            Text {
+                                text: "Smart Filters:";
+                                vertical-alignment: center;
+                                font-size: 12px;
+                                color: #949ba4;
+                            }
+
+                            CheckBox {
+                                text: "NPOT Only";
+                                checked <=> root.filter_only_npot;
+                                toggled => { root.results_filter_changed(); }
+                            }
+
+                            CheckBox {
+                                text: "Uncompressed Only";
+                                checked <=> root.filter_only_uncompressed;
+                                toggled => { root.results_filter_changed(); }
+                            }
+
+                            CheckBox {
+                                text: "Missing Mips Only";
+                                checked <=> root.filter_only_missing_mips;
+                                toggled => { root.results_filter_changed(); }
+                            }
+
+                            CheckBox {
+                                text: "Cubemaps Only";
+                                checked <=> root.filter_only_cubemaps;
+                                toggled => { root.results_filter_changed(); }
+                            }
+                        }
+
                         Rectangle {
                             border-color: #1f2023;
                             border-width: 1px;
@@ -1370,7 +1432,7 @@ export component AppWindow inherits Window {
                                             if root.search_method == 3: HorizontalLayout {
                                                 spacing: 0px;
                                                 HorizontalLayout {
-                                                    width: 110px;
+                                                    width: root.col_format_w;
                                                     TouchArea {
                                                         width: 100%;
                                                         height: 100%;
@@ -1388,10 +1450,15 @@ export component AppWindow inherits Window {
 
                                                 Rectangle {
                                                     width: 8px;
+                                                    background: format_split.has-hover ? #4e5058 : transparent;
+                                                    format_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_format_w = (root.col_format_w + self.mouse-x - self.pressed-x).clamp(50px, 300px); } }
+                                                    }
                                                 }
 
                                                 HorizontalLayout {
-                                                    width: 110px;
+                                                    width: root.col_dimensions_w;
                                                     TouchArea {
                                                         width: 100%;
                                                         height: 100%;
@@ -1409,10 +1476,15 @@ export component AppWindow inherits Window {
 
                                                 Rectangle {
                                                     width: 8px;
+                                                    background: dim_split.has-hover ? #4e5058 : transparent;
+                                                    dim_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_dimensions_w = (root.col_dimensions_w + self.mouse-x - self.pressed-x).clamp(50px, 300px); } }
+                                                    }
                                                 }
 
                                                 HorizontalLayout {
-                                                    width: 75px;
+                                                    width: root.col_mipmaps_w;
                                                     TouchArea {
                                                         width: 100%;
                                                         height: 100%;
@@ -1432,10 +1504,15 @@ export component AppWindow inherits Window {
 
                                                 Rectangle {
                                                     width: 8px;
+                                                    background: mips_split.has-hover ? #4e5058 : transparent;
+                                                    mips_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_mipmaps_w = (root.col_mipmaps_w + self.mouse-x - self.pressed-x).clamp(40px, 200px); } }
+                                                    }
                                                 }
 
                                                 HorizontalLayout {
-                                                    width: 75px;
+                                                    width: root.col_cubemap_w;
                                                     TouchArea {
                                                         width: 100%;
                                                         height: 100%;
@@ -1455,10 +1532,15 @@ export component AppWindow inherits Window {
 
                                                 Rectangle {
                                                     width: 8px;
+                                                    background: cube_split.has-hover ? #4e5058 : transparent;
+                                                    cube_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_cubemap_w = (root.col_cubemap_w + self.mouse-x - self.pressed-x).clamp(40px, 200px); } }
+                                                    }
                                                 }
 
                                                 HorizontalLayout {
-                                                    width: 85px;
+                                                    width: root.col_size_w;
                                                     TouchArea {
                                                         width: 100%;
                                                         height: 100%;
@@ -1476,6 +1558,11 @@ export component AppWindow inherits Window {
 
                                                 Rectangle {
                                                     width: 8px;
+                                                    background: size_split.has-hover ? #4e5058 : transparent;
+                                                    size_split := TouchArea {
+                                                        mouse-cursor: col-resize;
+                                                        moved => { if (self.pressed) { root.col_size_w = (root.col_size_w + self.mouse-x - self.pressed-x).clamp(40px, 250px); } }
+                                                    }
                                                 }
 
                                                 HorizontalLayout {
@@ -1560,7 +1647,7 @@ export component AppWindow inherits Window {
                                                 width: 8px;
                                             }
 
-                                            InteractiveThumbnail {
+                                            if root.enable_previews: InteractiveThumbnail {
                                                 source: row.thumbnail;
                                                 path: row.path;
                                                 show_corners: true;
@@ -1570,8 +1657,7 @@ export component AppWindow inherits Window {
                                                 corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                                 clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; }
                                             }
-
-                                            Rectangle {
+                                            if root.enable_previews: Rectangle {
                                                 width: 8px;
                                             }
 
@@ -1581,8 +1667,9 @@ export component AppWindow inherits Window {
                                                     spacing: 0px;
                                                     width: 100%;
                                                     height: 100%;
+
                                                     HorizontalLayout {
-                                                        width: root.col_file_w - root.list_preview_size - 16px;
+                                                        width: root.enable_previews ? (root.col_file_w - root.list_preview_size - 16px) : (root.col_file_w - 32px);
                                                         Text {
                                                             text: row.name;
                                                             color: #dcddde;
@@ -1643,7 +1730,7 @@ export component AppWindow inherits Window {
                                                     if root.search_method == 3: HorizontalLayout {
                                                         spacing: 0px;
                                                         HorizontalLayout {
-                                                            width: 110px;
+                                                            width: root.col_format_w;
                                                             Text {
                                                                 text: row.format_str;
                                                                 color: #dcddde;
@@ -1657,7 +1744,7 @@ export component AppWindow inherits Window {
                                                         }
 
                                                         HorizontalLayout {
-                                                            width: 110px;
+                                                            width: root.col_dimensions_w;
                                                             Text {
                                                                 text: row.dimensions_str;
                                                                 color: #dcddde;
@@ -1671,7 +1758,7 @@ export component AppWindow inherits Window {
                                                         }
 
                                                         HorizontalLayout {
-                                                            width: 75px;
+                                                            width: root.col_mipmaps_w;
                                                             Text {
                                                                 text: row.mipmaps_str;
                                                                 color: #dcddde;
@@ -1687,7 +1774,7 @@ export component AppWindow inherits Window {
                                                         }
 
                                                         HorizontalLayout {
-                                                            width: 75px;
+                                                            width: root.col_cubemap_w;
                                                             Text {
                                                                 text: row.cubemap_str;
                                                                 color: row.cubemap_str == "YES" ? #f0b132 : #dcddde;
@@ -1704,7 +1791,7 @@ export component AppWindow inherits Window {
                                                         }
 
                                                         HorizontalLayout {
-                                                            width: 85px;
+                                                            width: root.col_size_w;
                                                             Text {
                                                                 text: row.size_str;
                                                                 color: #dcddde;
@@ -1734,7 +1821,6 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // ---- GRID VIEW (DRY with GridCard) ----
                                 if root.results_grid_mode && root.grid_results.length > 0: ScrollView {
                                     HorizontalLayout {
                                         spacing: 12px;
@@ -1904,7 +1990,7 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-            } // End of Tab 0
+            }
 
             // ------------------ TAB 1: COMPARE ------------------
             if root.active_tab == 1: HorizontalLayout {
@@ -2156,7 +2242,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // SPLITTER
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
@@ -2176,7 +2261,6 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // RIGHT PANEL
                 VerticalLayout {
                     width: root.compare_sidebar_width;
                     padding-left: 12px;
@@ -2392,9 +2476,9 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
-            } // End of Tab 1
+            }
 
-            // ------------------ TAB 2: LOG (Console Output) ------------------
+            // ------------------ TAB 2: LOG ------------------
             if root.active_tab == 2: VerticalLayout {
                 padding: 15px;
                 spacing: 10px;
@@ -2436,7 +2520,7 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                     }
                 }
-            } // End of Tab 2
+            }
         }
 
         // Progress Overlay Container

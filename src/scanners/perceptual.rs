@@ -64,7 +64,7 @@ pub async fn run_perceptual_scan_internal(
             // Thread-safe progress updating pipeline
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
-                cb(current as f32 / total as f32);
+                cb(current as f32 / total as f32, current, total);
             }
 
             Some((item.clone(), res.dhash))
@@ -93,7 +93,6 @@ pub async fn run_perceptual_scan_internal(
                 continue;
             }
 
-            // Collapse the nested if statement to satisfy clippy rules
             if let Some(dist) = calculate_hamming_distance(&hashes[i].1, &hashes[j].1)
                 && dist <= max_dist
             {
@@ -102,7 +101,6 @@ pub async fn run_perceptual_scan_internal(
             }
         }
 
-        // If duplicate candidates are discovered, consolidate their metadata summary reports
         if group_members.len() > 1 {
             group_id += 1;
             let mut file_summaries = Vec::new();
@@ -158,7 +156,6 @@ pub async fn run_perceptual_scan_internal(
             }
 
             if file_summaries.len() > 1 {
-                // Heuristic sort: largest resolution first, then largest file size on disk
                 file_summaries.sort_by(|a, b| {
                     let area_a = a.width * a.height;
                     let area_b = b.width * b.height;

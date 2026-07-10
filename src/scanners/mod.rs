@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
@@ -20,6 +21,10 @@ use crate::state::{DuplicateGroupSummary, ResultsRowData};
 pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, image::RgbaImage>>> =
     OnceLock::new();
 
+// Global thread-safe configs for fast background thread access
+pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
+pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
+
 // Normalize Windows path keys to guarantee 100% cache hit accuracy [3]
 pub fn normalize_path_key(path_str: &str) -> String {
     path_str.replace("/", "\\").to_lowercase()
@@ -28,7 +33,6 @@ pub fn normalize_path_key(path_str: &str) -> String {
 fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut lock) = cache.lock() {
-        // Prevent RAM bloat: evict oldest items if the memory cache exceeds 200 thumbnails
         if lock.len() >= 200
             && let Some(key_to_remove) = lock.keys().next().cloned()
         {
@@ -40,8 +44,6 @@ fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
 }
 
 /// All configuration parameters gathered from the UI panel to orchestrate a scan.
-/// Derived `Clone` is required to allow app.rs to query the configuration parameters
-/// after execute_scan consumes ownership of the original struct.
 #[derive(Clone)]
 pub struct ScanParams {
     pub dir_a: String,
@@ -96,8 +98,9 @@ pub struct ScanParams {
     // Active AI Model selection property
     pub ai_model: i32,
 
-    // Live Progress Update handler (thread-safe Arc wrapper)
-    pub on_progress: Option<Arc<dyn Fn(f32) + Send + Sync>>,
+    // Live Progress Update handler (thread-safe Arc wrapper, transfers percentage, current, total)
+    #[allow(clippy::type_complexity)] // <-- Fixed: Allowed complex type warning locally
+    pub on_progress: Option<Arc<dyn Fn(f32, usize, usize) + Send + Sync>>,
 
     // Custom Model Local Options
     pub custom_model_path: String,
@@ -230,7 +233,6 @@ impl ScanParams {
             custom_model_arch: ui.get_custom_model_arch(),
             custom_model_dim: ui.get_custom_model_dim(),
 
-            // Initialized as None; the UI thread sets this callback handler directly
             on_progress: None,
         }
     }
@@ -346,7 +348,7 @@ pub async fn execute_scan(
             Ok((Vec::new(), rows))
         }
     } else if params.search_method == 3 {
-        // --- NEW MODE: Asset Inventory (Detailed Audit) ---
+        // Asset Inventory (Detailed Audit)
         let mut rows = qc::run_asset_audit(params).await?;
         // Default sort by filename
         rows.sort_by(|a, b| a.path.cmp(&b.path));
@@ -384,8 +386,12 @@ pub async fn execute_scan(
 static CACHE_DIR_INITIALIZED: OnceLock<()> = OnceLock::new();
 
 /// Instantiates a downscaled thumbnail from disk or retrieves it from the dynamic disk-backed thumbnail cache.
-/// Utilizes microsecond keys generated from path + file-size + modified time to prevent reading heavy originals.
-fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
+pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
+    // --- FAST BYPASS IF PREVIEWS ARE GLOBALLY DISABLED ---
+    if !ENABLE_PREVIEWS.load(Ordering::Relaxed) {
+        return None;
+    }
+
     let path = PathBuf::from(path_str);
     if !path.is_file() {
         return None;
@@ -435,12 +441,25 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
         return Some(rgba);
     }
 
-    // 2. Fallback: Parse the actual texture and downscale to 256px for high quality [1]
+    // --- DYNAMIC PREVIEW QUALITY & ALGORITHM TUNING ---
+    let quality = PREVIEW_QUALITY.load(Ordering::Relaxed);
+    let target_size = match quality {
+        0 => 64,  // Fast
+        1 => 128, // Balanced
+        _ => 256, // High
+    };
+    let filter = match quality {
+        0 => image::imageops::FilterType::Nearest,
+        1 => image::imageops::FilterType::Triangle,
+        _ => image::imageops::FilterType::Lanczos3,
+    };
+
+    // 2. Fallback: Parse the actual texture and downscale to tuned bounds for quality and speed
     if let Ok(mut img) =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(256))
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(target_size))
     {
-        if img.width() > 256 || img.height() > 256 {
-            img = img.resize(256, 256, image::imageops::FilterType::Lanczos3);
+        if img.width() > target_size || img.height() > target_size {
+            img = img.resize(target_size, target_size, filter);
         }
         let rgba = img.to_rgba8();
 
@@ -459,6 +478,8 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
 /// Converts core rust clustering models into the Slint-friendly row representation.
 pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
+    let is_pow2 = |n: usize| n != 0 && (n & (n - 1)) == 0;
+
     for (g_idx, group) in groups.iter().enumerate() {
         if group.files.is_empty() {
             continue;
@@ -491,6 +512,12 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
 
             size_bytes: 0,
             pixels_count: 0,
+
+            // Filter flags
+            is_npot: false,
+            is_uncompressed: false,
+            is_missing_mips: false,
+            is_cubemap_bool: false,
         });
 
         // 2. Add Child file rows belonging to this cluster
@@ -548,6 +575,15 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
 
                 size_bytes: file.size,
                 pixels_count: (file.width * file.height) as u64,
+
+                // Setup smart filter variables
+                is_npot: !is_pow2(file.width) || !is_pow2(file.height),
+                is_uncompressed: file
+                    .compression_format
+                    .to_lowercase()
+                    .contains("uncompressed"),
+                is_missing_mips: file.mipmap_count <= 1,
+                is_cubemap_bool: file.is_cubemap,
             });
         }
     }
@@ -561,13 +597,11 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
         return rows;
     }
 
-    // Group issues by the issue text (type of issue)
     let mut grouped: HashMap<String, Vec<&crate::state::QcIssueSummary>> = HashMap::new();
     for issue in issues {
         grouped.entry(issue.issue.clone()).or_default().push(issue);
     }
 
-    // Convert grouped issues to a sorted vector to maintain deterministic order
     let mut sorted_issue_types: Vec<String> = grouped.keys().cloned().collect();
     sorted_issue_types.sort();
 
@@ -599,6 +633,11 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
 
             size_bytes: 0,
             pixels_count: 0,
+
+            is_npot: false,
+            is_uncompressed: false,
+            is_missing_mips: false,
+            is_cubemap_bool: false,
         });
 
         // 2. Add Child Rows belonging to this issue category
@@ -632,6 +671,11 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
 
                 size_bytes: 0,
                 pixels_count: 0,
+
+                is_npot: false,
+                is_uncompressed: false,
+                is_missing_mips: false,
+                is_cubemap_bool: false,
             });
         }
     }
@@ -674,6 +718,11 @@ pub fn map_ai_search_to_rows(
 
             size_bytes: 0,
             pixels_count: 0,
+
+            is_npot: false,
+            is_uncompressed: false,
+            is_missing_mips: false,
+            is_cubemap_bool: false,
         });
     }
     rows

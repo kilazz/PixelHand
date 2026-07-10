@@ -98,6 +98,9 @@ pub fn append_to_console_log(msg: &str) {
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
+    // --- RUN EMBEDDED CACHE GARBAGE COLLECTOR ONCE ON STARTUP ---
+    utils::cache::run_vector_cache_garbage_collector();
+
     if let Ok(dir) = utils::settings::get_portable_app_data_dir() {
         let log_path = dir.join("PixelHand.log");
         if let Ok(file) = fs::OpenOptions::new()
@@ -283,6 +286,18 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
 
     app.set_tonemap_enabled(settings.tonemap_enabled);
     app.set_tonemap_operator(settings.tonemap_operator);
+
+    // --- APPLY NEW PREVIEW & SMART FILTER PROPERTIES ---
+    app.set_enable_previews(settings.enable_previews);
+    app.set_preview_quality(settings.preview_quality);
+    app.set_filter_only_npot(settings.filter_only_npot);
+    app.set_filter_only_uncompressed(settings.filter_only_uncompressed);
+    app.set_filter_only_missing_mips(settings.filter_only_missing_mips);
+    app.set_filter_only_cubemaps(settings.filter_only_cubemaps);
+
+    // Sync global atomics dynamically on startup/config load
+    crate::scanners::ENABLE_PREVIEWS.store(settings.enable_previews, Ordering::Relaxed);
+    crate::scanners::PREVIEW_QUALITY.store(settings.preview_quality, Ordering::Relaxed);
 }
 
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {

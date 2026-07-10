@@ -63,9 +63,14 @@ pub fn register_callbacks(
         let mut params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
 
         let app_weak_progress = app_copy.clone();
-        params.on_progress = Some(Arc::new(move |prog| {
+        params.on_progress = Some(Arc::new(move |prog, current, total| {
+            // <-- UPDATED RECEIVER
             let _ = app_weak_progress.upgrade_in_event_loop(move |ui| {
                 ui.set_progress(prog);
+                // DYNAMICALLY DISPLAY PROGRESS COUNTER ("Processed 145 / 10,000 files")
+                ui.set_status_text(
+                    format!("Processing assets ({} / {})...", current, total).into(),
+                );
             });
         }));
 

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 // Imports are referenced directly from LanceDB's re-exported Arrow modules
 use lancedb::arrow::arrow_array::{
-    ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, StringArray,
+    ArrayRef, FixedSizeListArray, Float32Array, Int64Array, RecordBatch, StringArray, UInt64Array,
 };
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 
@@ -24,6 +24,8 @@ pub struct DbRecord {
     pub vector: Vec<f32>,
     pub path: String,
     pub channel: String,
+    pub file_size: u64,
+    pub mtime: i64,
 }
 
 /// Represents the normalized result of a vector similarity query.
@@ -77,20 +79,21 @@ impl DatabaseService {
             ),
             Field::new("path", DataType::Utf8, false),
             Field::new("channel", DataType::Utf8, false),
+            Field::new("file_size", DataType::UInt64, false),
+            Field::new("mtime", DataType::Int64, false),
         ]));
 
         let table_names = db.table_names().execute().await?;
 
-        if table_names.contains(&table_name.to_string()) {
-            let empty_ns: Vec<String> = Vec::new();
-            db.drop_table(table_name, &empty_ns).await?;
-        }
-
-        let empty_batch = RecordBatch::new_empty(schema.clone());
-        let table = db
-            .create_table(table_name, vec![empty_batch])
-            .execute()
-            .await?;
+        // Open existing table instead of drop-recreation to preserve cache
+        let table = if table_names.contains(&table_name.to_string()) {
+            db.open_table(table_name).execute().await?
+        } else {
+            let empty_batch = RecordBatch::new_empty(schema.clone());
+            db.create_table(table_name, vec![empty_batch])
+                .execute()
+                .await?
+        };
 
         self.db = Some(db);
         self.table = Some(table);
@@ -121,6 +124,8 @@ impl DatabaseService {
             ),
             Field::new("path", DataType::Utf8, false),
             Field::new("channel", DataType::Utf8, false),
+            Field::new("file_size", DataType::UInt64, false),
+            Field::new("mtime", DataType::Int64, false),
         ]));
 
         let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
@@ -131,6 +136,12 @@ impl DatabaseService {
 
         let channels: Vec<&str> = records.iter().map(|r| r.channel.as_str()).collect();
         let channel_array = Arc::new(StringArray::from(channels)) as ArrayRef;
+
+        let file_sizes: Vec<u64> = records.iter().map(|r| r.file_size).collect();
+        let file_size_array = Arc::new(UInt64Array::from(file_sizes)) as ArrayRef;
+
+        let mtimes: Vec<i64> = records.iter().map(|r| r.mtime).collect();
+        let mtime_array = Arc::new(Int64Array::from(mtimes)) as ArrayRef;
 
         let mut flat_vectors = Vec::with_capacity(records.len() * self.dim);
         for r in records {
@@ -147,9 +158,94 @@ impl DatabaseService {
 
         let batch = RecordBatch::try_new(
             schema,
-            vec![id_array, vector_array, path_array, channel_array],
+            vec![
+                id_array,
+                vector_array,
+                path_array,
+                channel_array,
+                file_size_array,
+                mtime_array,
+            ],
         )?;
         table.add(vec![batch]).execute().await?;
+        Ok(())
+    }
+
+    /// Fetches all cached metadata from the DB so we can build a fast in-memory delta map.
+    pub async fn load_cache_metadata(&self) -> Result<Vec<(String, String, u64, i64, Vec<f32>)>> {
+        let table = self.table.as_ref().context("Table not initialized")?;
+        let query_result = table
+            .query()
+            .select(lancedb::query::Select::Columns(vec![
+                // <-- Fixed: Select type is now correct
+                "path".to_string(),
+                "channel".to_string(),
+                "file_size".to_string(),
+                "mtime".to_string(),
+                "vector".to_string(),
+            ]))
+            .execute()
+            .await?;
+
+        let record_batches = query_result.try_collect::<Vec<RecordBatch>>().await?;
+        let mut cache_entries = Vec::new();
+
+        for batch in record_batches {
+            if batch.num_rows() == 0 {
+                continue;
+            }
+
+            let paths_array = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .context("paths")?;
+            let channels_array = batch
+                .column(1)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .context("channels")?;
+            let sizes_array = batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .context("sizes")?;
+            let mtimes_array = batch
+                .column(3)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .context("mtimes")?;
+            let vectors_array = batch
+                .column(4)
+                .as_any()
+                .downcast_ref::<FixedSizeListArray>()
+                .context("vectors")?;
+
+            for i in 0..batch.num_rows() {
+                let path = paths_array.value(i).to_string();
+                let channel = channels_array.value(i).to_string();
+                let size = sizes_array.value(i);
+                let mtime = mtimes_array.value(i);
+
+                let list_val = vectors_array.value(i);
+                let float_arr = list_val
+                    .as_any()
+                    .downcast_ref::<Float32Array>()
+                    .context("floats")?;
+                let vec: Vec<f32> = (0..float_arr.len())
+                    .map(|idx| float_arr.value(idx))
+                    .collect();
+
+                cache_entries.push((path, channel, size, mtime, vec));
+            }
+        }
+        Ok(cache_entries)
+    }
+
+    /// Deletes records from LanceDB matching a custom SQL-like filter string.
+    pub async fn delete(&self, filter: &str) -> Result<()> {
+        let table = self.table.as_ref().context("Table not initialized")?;
+        table.delete(filter).await?;
         Ok(())
     }
 
@@ -161,7 +257,6 @@ impl DatabaseService {
             .context("Database table is not initialized")?;
         let row_count = table.count_rows(None).await?;
 
-        // Safety net: K-means IVF indexing crashes if there aren't enough rows to form clusters
         if row_count < 5000 {
             return Ok(());
         }

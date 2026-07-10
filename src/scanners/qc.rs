@@ -123,7 +123,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
             // Increment atomic processed items and dispatch to the main progress callback
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
-                cb(current as f32 / total as f32);
+                cb(current as f32 / total as f32, current, total); // <-- Fixed
             }
 
             file_issues
@@ -301,6 +301,9 @@ pub async fn run_asset_audit(
     let total = paths.len();
     let processed = std::sync::atomic::AtomicUsize::new(0);
 
+    // Predicate helper to check if dimension is power of two
+    let is_pow2 = |n: u32| n != 0 && (n & (n - 1)) == 0;
+
     let rows: Vec<crate::state::ResultsRowData> = paths
         .par_iter()
         .filter_map(|p| {
@@ -332,10 +335,13 @@ pub async fn run_asset_audit(
                     is_cubemap: false,
                 });
 
+            // Generates / loads high-res downscaled previews safely on threads
+            let thumbnail_data = super::load_thumbnail_for_path(&p.to_string_lossy());
+
             // Increment atomic processed items and dispatch to the main progress callback
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
-                cb(current as f32 / total as f32);
+                cb(current as f32 / total as f32, current, total); // <-- Fixed
             }
 
             Some(crate::state::ResultsRowData {
@@ -352,7 +358,7 @@ pub async fn run_asset_audit(
                     .to_string(),
                 score_or_detail: String::new(),
 
-                format_str: qc_meta.compression_format,
+                format_str: qc_meta.compression_format.clone(),
                 dimensions_str: format!("{} x {}", qc_meta.width, qc_meta.height),
                 mipmaps_str: qc_meta.mipmap_count.to_string(),
                 cubemap_str: if qc_meta.is_cubemap {
@@ -365,11 +371,20 @@ pub async fn run_asset_audit(
                 meta_str: String::new(),
                 is_best: false,
                 is_checked: false,
-                thumbnail_data: None,
+                thumbnail_data,
                 similarity: 0.0,
 
                 size_bytes: qc_meta.file_size,
                 pixels_count: (qc_meta.width * qc_meta.height) as u64,
+
+                // Setup smart filter variables for live-filtering in UI
+                is_npot: !is_pow2(qc_meta.width) || !is_pow2(qc_meta.height),
+                is_uncompressed: qc_meta
+                    .compression_format
+                    .to_lowercase()
+                    .contains("uncompressed"),
+                is_missing_mips: qc_meta.mipmap_count <= 1,
+                is_cubemap_bool: qc_meta.is_cubemap,
             })
         })
         .collect();

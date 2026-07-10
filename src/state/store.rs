@@ -32,6 +32,12 @@ pub struct ResultsRowData {
     // --- HIDDEN NUMERIC FIELDS FOR SORTING ---
     pub size_bytes: u64,
     pub pixels_count: u64,
+
+    // --- SMART FILTER FLAGS ---
+    pub is_npot: bool,
+    pub is_uncompressed: bool,
+    pub is_missing_mips: bool,
+    pub is_cubemap_bool: bool,
 }
 
 /// The global application state holding our scan results and UI view states.
