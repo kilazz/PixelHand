@@ -20,6 +20,11 @@ use crate::state::{DuplicateGroupSummary, ResultsRowData};
 pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, image::RgbaImage>>> =
     OnceLock::new();
 
+// Normalize Windows path keys to guarantee 100% cache hit accuracy [3]
+pub fn normalize_path_key(path_str: &str) -> String {
+    path_str.replace("/", "\\").to_lowercase()
+}
+
 fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut lock) = cache.lock() {
@@ -29,7 +34,8 @@ fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
         {
             lock.remove(&key_to_remove);
         }
-        lock.insert(path.to_string(), img);
+        let normalized_key = normalize_path_key(path);
+        lock.insert(normalized_key, img);
     }
 }
 

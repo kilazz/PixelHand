@@ -67,7 +67,7 @@ component FormRow {
     }
 }
 
-// Custom Interactive Thumbnail with Corner Zones (R / G / B / A)
+// Custom Interactive Thumbnail with Corner Zones (R / G / B / A) [2]
 component InteractiveThumbnail inherits TouchArea {
     in property <image> source;
     in property <string> path;
@@ -75,47 +75,18 @@ component InteractiveThumbnail inherits TouchArea {
     in property <image> checkerboard; // Checkerboard texture background
     callback corner_hovered(string, string); // path, channel
 
-    // Holds current active quadrant to prevent redundant Rust calls
-    out property <string> active_quadrant: "RGB";
+    // Declarative quadrant calculations based on reactive mouse coordinates
+    out property <string> active_quadrant: !self.has-hover ? "RGB" : (
+        self.mouse-x < self.width / 2 ? (
+        self.mouse-y < self.height / 2 ? "R" : "B") : (
+        self.mouse-y < self.height / 2 ? "G" : "A"));
 
     width: 32px;
     height: 32px;
 
-    // Real-time mouse quadrant calculation for lightning-fast channel scanning
-    pointer-event(evt) => {
-        if evt.kind == PointerEventKind.move {
-            let half_w = self.width / 2;
-            let half_h = self.height / 2;
-            if (self.mouse-x < half_w && self.mouse-y < half_h) {
-                if (active_quadrant != "R") {
-                    active_quadrant = "R";
-                    corner_hovered(path, "R");
-                }
-            } else if (self.mouse-x >= half_w && self.mouse-y < half_h) {
-                if (active_quadrant != "G") {
-                    active_quadrant = "G";
-                    corner_hovered(path, "G");
-                }
-            } else if (self.mouse-x < half_w && self.mouse-y >= half_h) {
-                if (active_quadrant != "B") {
-                    active_quadrant = "B";
-                    corner_hovered(path, "B");
-                }
-            } else {
-                if (active_quadrant != "A") {
-                    active_quadrant = "A";
-                    corner_hovered(path, "A");
-                }
-            }
-        }
-    }
-
-    // Revert to original composite on mouse leave
-    changed has-hover => {
-        if (!self.has-hover) {
-            active_quadrant = "RGB";
-            corner_hovered(path, "RGB");
-        }
+    // Triggers whenever active_quadrant changes natively
+    changed active-quadrant => {
+        corner_hovered(path, self.active-quadrant);
     }
 
     rect := Rectangle {
@@ -141,7 +112,7 @@ component InteractiveThumbnail inherits TouchArea {
             image-fit: contain;
         }
 
-        // Interactive Channel Hover Indicators (Highlighted dynamically based on active quadrant)
+        // Interactive Channel Hover Indicators (Highlighted dynamically)
         if show_corners && root.has-hover: Rectangle {
             // Top Left (R - Red Channel)
             Rectangle {
@@ -158,12 +129,6 @@ component InteractiveThumbnail inherits TouchArea {
                     color: #ffffff;
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                }
-
-                r_ta := TouchArea {
-                    pointer-event(evt) => {
-                        if evt.kind == PointerEventKind.move { corner_hovered(path, "R"); }
-                    }
                 }
             }
             // Top Right (G - Green Channel)
@@ -182,12 +147,6 @@ component InteractiveThumbnail inherits TouchArea {
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-
-                g_ta := TouchArea {
-                    pointer-event(evt) => {
-                        if evt.kind == PointerEventKind.move { corner_hovered(path, "G"); }
-                    }
-                }
             }
             // Bottom Left (B - Blue Channel)
             Rectangle {
@@ -205,12 +164,6 @@ component InteractiveThumbnail inherits TouchArea {
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-
-                b_ta := TouchArea {
-                    pointer-event(evt) => {
-                        if evt.kind == PointerEventKind.move { corner_hovered(path, "B"); }
-                    }
-                }
             }
             // Bottom Right (A - Alpha Channel)
             Rectangle {
@@ -227,12 +180,6 @@ component InteractiveThumbnail inherits TouchArea {
                     color: root.active_quadrant == "A" ? #000000 : #ffffff;
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                }
-
-                a_ta := TouchArea {
-                    pointer-event(evt) => {
-                        if evt.kind == PointerEventKind.move { corner_hovered(path, "A"); }
-                    }
                 }
             }
         }
@@ -567,7 +514,6 @@ export component AppWindow inherits Window {
     in-out property <string> prep_tags: "";
     in-out property <bool> prep_ignore_solid: true;
 
-    // Viewport transform configurations
     in-out property <float> zoom_factor: 1.0;
     in-out property <length> pan_x: 0px;
     in-out property <length> pan_y: 0px;
@@ -1556,12 +1502,12 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Tactile Horizontal Draggable Splitter
+                // Tactile Horizontal Draggable Splitter (Perfect Centered Handle)
                 Rectangle {
                     width: 8px;
                     background: sidebar-splitter-ta.has-hover ? #4e5058 : #1e1f22;
 
-                    // Centered handle - no layouts needed, Slint automatically centers children of a Rectangle
+                    // Centered handle line without layout nesting
                     Rectangle {
                         width: 2px;
                         height: 20px;
@@ -1673,7 +1619,7 @@ export component AppWindow inherits Window {
                                         height: 24px;
                                         primary-color: #4e5058;
                                         clicked => { root.col_file_w = 300px; root.col_score_w = 70px; root.col_path_w = 350px; }
-                                    }
+                                    } // Removed list_preview_size reset [1]
                                 }
                             }
 

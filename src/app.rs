@@ -795,12 +795,13 @@ pub fn run_gui() -> Result<()> {
             let mut lock = state_hover.lock().unwrap();
             let path_std = path_str.to_string();
             let channel_std = channel.to_string();
+            let normalized_path = scanners::normalize_path_key(&path_std);
 
-            // Instantly fetch the high-resolution cached thumbnail directly from memory
+            // Instantly fetch the high-resolution cached thumbnail directly from memory [3]
             let cached_img = {
                 let cache = scanners::THUMBNAIL_MEMORY_CACHE
                     .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-                cache.lock().unwrap().get(&path_std).cloned()
+                cache.lock().unwrap().get(&normalized_path).cloned()
             };
 
             if let Some(rgba) = cached_img {
@@ -826,9 +827,9 @@ pub fn run_gui() -> Result<()> {
                     out_rgba
                 };
 
-                // Hot-swap the active row thumbnail data inside the results model
+                // Hot-swap the active row thumbnail data inside the results model using normalized paths [3]
                 for row in &mut lock.results {
-                    if row.path == path_std {
+                    if scanners::normalize_path_key(&row.path) == normalized_path {
                         row.thumbnail_data = Some(channel_img.clone());
                     }
                 }
@@ -839,7 +840,7 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // Select Reference Photo Callback Handler [2]
+    // Select Reference Photo Callback Handler [5]
     let app_weak_ref = app.as_weak();
     app.on_select_reference_image(move || {
         if let Some(file) = rfd::FileDialog::new()
