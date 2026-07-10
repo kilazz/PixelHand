@@ -1,0 +1,32 @@
+export struct ResultsRow {
+    is_header: bool,
+    is_qc: bool,
+    is_ai: bool,
+    group_index: int,
+    hash_or_issue: string,
+    path: string,
+    name: string,
+    score_or_detail: string,
+    format_str: string,
+    dimensions_str: string,
+    mipmaps_str: string,
+    cubemap_str: string,
+    size_str: string,
+    meta_str: string,
+    is_best: bool,
+    is_checked: bool,
+    thumbnail: image,
+}
+
+export struct SelectedFile {
+    name: string,
+    size_str: string,
+    format: string,
+    resolution: string,
+    bit_depth: string,
+    color_space: string,
+    mipmaps: string,
+    alpha: string,
+    similarity: string,
+    path: string,
+}

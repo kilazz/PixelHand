@@ -1,0 +1,61 @@
+// ui/components/grid_card.slint
+
+import { ResultsRow } from "../structs.slint";
+import { InteractiveThumbnail } from "./thumbnail.slint";
+
+export component GridCard inherits Rectangle {
+    in property <ResultsRow> row-data; // Renamed from 'row' to avoid clashing with Slint keywords
+    in property <image> checkerboard;
+
+    callback clicked();
+    callback right_clicked(length, length);
+    callback channel_hovered(string, string);
+
+    background: card_ta.has-hover ? #393c41 : #2b2d31;
+    border-color: #1f2023;
+    border-width: 1px;
+    border-radius: 6px;
+
+    card_ta := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+        pointer-event(evt) => {
+            if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                root.right_clicked(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+        InteractiveThumbnail {
+            source: root.row-data.thumbnail;
+            path: root.row-data.path;
+            show_corners: true;
+            checkerboard: root.checkerboard;
+            width: parent.width - 16px;
+            height: parent.height - 52px;
+            corner_hovered(path, chan) => { root.channel_hovered(path, chan); }
+            clicked => { root.clicked(); }
+        }
+
+        Text {
+            text: "Group #" + (root.row-data.group_index + 1);
+            color: #ffffff;
+            font-size: 11px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.row-data.size_str;
+            color: #949ba4;
+            font-size: 10px;
+            horizontal-alignment: center;
+            overflow: elide;
+        }
+    }
+}

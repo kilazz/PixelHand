@@ -1,0 +1,143 @@
+export component MenuItem {
+    in property <string> text;
+    in property <color> text-color: #dcddde;
+    callback clicked;
+
+    height: 24px;
+    rect := Rectangle {
+        background: transparent;
+        border-radius: 3px;
+        txt := Text {
+            x: 8px;
+            text: root.text;
+            color: root.text-color;
+            vertical-alignment: center;
+            font-size: 12px;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        hover when ta.has-hover: {
+            rect.background: #4752c4;
+            txt.color: #ffffff;
+        }
+    ]
+}
+
+export component TabButton {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked;
+
+    width: 100px;
+    height: 26px;
+
+    rect := Rectangle {
+        background: active ? #2d2d30 : #1e1f22;
+        border-color: active ? #3e3e42 : #1f2023;
+        border-width: 1px;
+        border-radius: 4px;
+
+        animate background { duration: 100ms; }
+        animate border-color { duration: 100ms; }
+
+        txt := Text {
+            text: root.text;
+            color: active ? #ffffff : #858585;
+            font-size: 13px;
+            font-weight: active ? 600 : 400;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            animate color { duration: 100ms; }
+        }
+    }
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        hover when ta.has-hover && !active: {
+            rect.background: #252526;
+            rect.border-color: #3e3e42;
+            txt.color: #cccccc;
+        }
+    ]
+}
+
+export component ChannelButton {
+    in property <string> text;
+    in property <color> active-color;
+    in property <color> text-color: #ffffff;
+    in property <bool> active;
+    callback clicked;
+    width: 26px;
+    height: 26px;
+
+    rect := Rectangle {
+        background: active ? active-color : #1e1f22;
+        border-color: active ? #ffffff : #1f2023;
+        border-width: active ? 1.5px : 1px;
+        border-radius: 4px;
+
+        txt := Text {
+            text: root.text;
+            color: active ? root.text-color : #dcddde;
+            font-size: 12px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { clicked(); }
+    }
+}
+
+export component CustomButton {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <color> primary-color: #5865f2;
+    callback clicked;
+
+    height: 22px;
+    min-width: 75px;
+
+    rect := Rectangle {
+        background: !enabled ? #2f3136 : primary-color;
+        border-radius: 3px;
+        border-width: 1px;
+        border-color: !enabled ? #1f2023 : primary-color;
+        opacity: !enabled ? 0.5 : 1.0;
+
+        animate background { duration: 100ms; }
+
+        txt := Text {
+            text: root.text;
+            color: !enabled ? #7c808a : #ffffff;
+            font-size: 11px;
+            font-weight: 600;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+
+    states [
+        hover when ta.has-hover && enabled: {
+            rect.background: primary-color.brighter(12%);
+        }
+        active when ta.pressed && enabled: {
+            rect.background: primary-color.darker(12%);
+        }
+    ]
+}

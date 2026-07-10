@@ -1,0 +1,134 @@
+export component FormRow {
+    in property <string> title;
+    in property <length> label-width: 90px;
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.title;
+            width: root.label-width;
+            vertical-alignment: center;
+            font-size: 12px;
+            color: #dcddde;
+        }
+
+        @children
+    }
+}
+
+export component SpecsRow {
+    in property <string> name;
+    in property <string> val1;
+    in property <string> val2;
+    height: 24px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: name;
+            width: 120px;
+            color: #949ba4;
+            font-size: 12px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: val1;
+            color: #dcddde;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+
+        Text {
+            text: val2;
+            color: #dcddde;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+export component SectionTitle {
+    in property <string> text;
+    height: 22px;
+    VerticalLayout {
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: 700;
+            color: #949ba4;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: #1f2023;
+        }
+    }
+}
+
+export component PanelSection {
+    in property <string> title;
+    VerticalLayout {
+        spacing: 4px;
+        SectionTitle {
+            text: root.title;
+        }
+
+        @children
+    }
+}
+
+export component WipeViewport {
+    in property <image> original;
+    in property <image> duplicate;
+    in property <float> wipe-val;
+    in property <image> checkerboard;
+
+    viewport-root := Rectangle {
+        background: #111214;
+        clip: true;
+
+        Image {
+            source: checkerboard;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        Image {
+            source: original;
+            width: 100%;
+            height: 100%;
+            image-fit: contain;
+        }
+
+        Rectangle {
+            clip: true;
+            x: 0px;
+            y: 0px;
+            width: parent.width * wipe-val;
+            height: parent.height;
+
+            Image {
+                source: duplicate;
+                x: 0px;
+                y: 0px;
+                width: viewport-root.width;
+                height: viewport-root.height;
+                image-fit: contain;
+            }
+        }
+
+        Rectangle {
+            x: parent.width * wipe-val - 1px;
+            y: 0px;
+            width: 2px;
+            height: parent.height;
+            background: #f0b132;
+        }
+    }
+}

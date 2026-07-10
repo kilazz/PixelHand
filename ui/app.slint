@@ -13,462 +13,26 @@ import {
     Slider,
 } from "std-widgets.slint";
 
-// ---------------------------------------------------------
-// CUSTOM UI COMPONENTS
-// ---------------------------------------------------------
+import { ResultsRow, SelectedFile } from "./structs.slint";
 
-// Custom component for Dropdown/Context Menu items
-component MenuItem {
-    in property <string> text;
-    in property <color> text-color: #dcddde;
-    callback clicked;
+export { ResultsRow, SelectedFile }from "./structs.slint";
 
-    height: 24px;
-    rect := Rectangle {
-        background: transparent;
-        border-radius: 3px;
-        txt := Text {
-            x: 8px;
-            text: root.text;
-            color: root.text-color;
-            vertical-alignment: center;
-            font-size: 12px;
-        }
-    }
+import {
+    MenuItem,
+    TabButton,
+    ChannelButton,
+    CustomButton,
+} from "./components/buttons.slint";
+import { InteractiveThumbnail } from "./components/thumbnail.slint";
+import {
+    FormRow,
+    SpecsRow,
+    SectionTitle,
+    PanelSection,
+    WipeViewport,
+} from "./components/common.slint";
+import { GridCard } from "./components/grid_card.slint";
 
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-    }
-
-    states [
-        hover when ta.has-hover: {
-            rect.background: #4752c4; // Blurple
-            txt.color: #ffffff;
-        }
-    ]
-}
-
-// QFormLayout emulation for perfectly aligned settings
-component FormRow {
-    in property <string> title;
-    in property <length> label-width: 90px;
-
-    HorizontalLayout {
-        spacing: 6px;
-        Text {
-            text: root.title;
-            width: root.label-width;
-            vertical-alignment: center;
-            font-size: 12px;
-            color: #dcddde;
-        }
-
-        @children
-    }
-}
-
-// Custom Interactive Thumbnail with Corner Zones (R / G / B / A)
-component InteractiveThumbnail inherits TouchArea {
-    in property <image> source;
-    in property <string> path;
-    in property <bool> show_corners: true;
-    in property <image> checkerboard; // Checkerboard texture background
-    callback corner_hovered(string, string); // path, channel
-
-    // Active state tracker (non-computed to guarantee changed events trigger on assignment)
-    in-out property <string> active_quadrant: "RGB";
-
-    // Actively dispatch coordinate updates as the mouse moves without clicks
-    pointer-event(event) => {
-        if (event.kind == PointerEventKind.move) {
-            let quad = self.mouse-x < self.width / 2 ? (
-                self.mouse-y < self.height / 2 ? "R" : "B") : (
-                self.mouse-y < self.height / 2 ? "G" : "A");
-            if (self.active_quadrant != quad) {
-                self.active_quadrant = quad;
-                corner_hovered(path, self.active_quadrant);
-            }
-        }
-    }
-
-    // Actively trigger reset to original RGB when pointer leaves the thumbnail bounds
-    changed has-hover => {
-        if (!self.has-hover) {
-            self.active_quadrant = "RGB";
-            corner_hovered(path, self.active_quadrant);
-        }
-    }
-
-    rect := Rectangle {
-        width: 100%;
-        height: 100%;
-        background: #111214;
-        border-radius: 4px;
-        clip: true;
-
-        // Tiled Checkerboard Background
-        Image {
-            source: checkerboard;
-            horizontal-tiling: repeat;
-            vertical-tiling: repeat;
-            width: 100%;
-            height: 100%;
-        }
-
-        Image {
-            source: source;
-            width: 100%;
-            height: 100%;
-            image-fit: contain;
-        }
-
-        // Interactive Channel Hover Indicators (Always rendered with colourful semi-transparent states)
-        if show_corners: Rectangle {
-            x: 2px;
-            y: 2px;
-            width: 12px;
-            height: 12px;
-            background: !root.has-hover ? #f23f43.with-alpha(0.25) : (
-                root.active_quadrant == "R" ? #f23f43 : #f23f43.darker(0.3).with-alpha(0.35));
-            border-radius: 2px;
-            Text {
-                text: "R";
-                font-size: 8px;
-                font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "R" ? #ffffff : #ffffff.with-alpha(0.4));
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
-        if show_corners: Rectangle {
-            x: rect.width - 14px;
-            y: 2px;
-            width: 12px;
-            height: 12px;
-            background: !root.has-hover ? #23a55a.with-alpha(0.25) : (
-                root.active_quadrant == "G" ? #23a55a : #23a55a.darker(0.3).with-alpha(0.35));
-            border-radius: 2px;
-            Text {
-                text: "G";
-                font-size: 8px;
-                font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "G" ? #ffffff : #ffffff.with-alpha(0.4));
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
-        if show_corners: Rectangle {
-            x: 2px;
-            y: rect.height - 14px;
-            width: 12px;
-            height: 12px;
-            background: !root.has-hover ? #5865f2.with-alpha(0.25) : (
-                root.active_quadrant == "B" ? #5865f2 : #5865f2.darker(0.3).with-alpha(0.35));
-            border-radius: 2px;
-            Text {
-                text: "B";
-                font-size: 8px;
-                font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "B" ? #ffffff : #ffffff.with-alpha(0.4));
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
-        if show_corners: Rectangle {
-            x: rect.width - 14px;
-            y: rect.height - 14px;
-            width: 12px;
-            height: 12px;
-            background: !root.has-hover ? #ffffff.with-alpha(0.25) : (
-                root.active_quadrant == "A" ? #ffffff : #ffffff.darker(0.5).with-alpha(0.35));
-            border-radius: 2px;
-            Text {
-                text: "A";
-                font-size: 8px;
-                font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "A" ? #000000 : #ffffff.with-alpha(0.4));
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-    }
-}
-
-// Custom interactive Tab control
-component TabButton {
-    in property <string> text;
-    in property <bool> active;
-    callback clicked;
-
-    width: 100px;
-    height: 26px;
-
-    rect := Rectangle {
-        background: active ? #2d2d30 : #1e1f22;
-        border-color: active ? #3e3e42 : #1f2023;
-        border-width: 1px;
-        border-radius: 4px;
-
-        animate background { duration: 100ms; }
-        animate border-color { duration: 100ms; }
-
-        txt := Text {
-            text: root.text;
-            color: active ? #ffffff : #858585;
-            font-size: 13px;
-            font-weight: active ? 600 : 400;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            animate color { duration: 100ms; }
-        }
-    }
-
-    ta := TouchArea {
-        clicked => { root.clicked(); }
-    }
-
-    states [
-        hover when ta.has-hover && !active: {
-            rect.background: #252526;
-            rect.border-color: #3e3e42;
-            txt.color: #cccccc;
-        }
-    ]
-}
-
-// Custom channel rendering activation buttons
-component ChannelButton {
-    in property <string> text;
-    in property <color> active-color;
-    in property <color> text-color: #ffffff;
-    in property <bool> active;
-    callback clicked;
-    width: 26px;
-    height: 26px;
-
-    rect := Rectangle {
-        background: active ? active-color : #1e1f22;
-        border-color: active ? #ffffff : #1f2023;
-        border-width: active ? 1.5px : 1px;
-        border-radius: 4px;
-
-        txt := Text {
-            text: root.text;
-            color: active ? root.text-color : #dcddde;
-            font-size: 12px;
-            font-weight: 700;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-
-    TouchArea {
-        clicked => { clicked(); }
-    }
-}
-
-// Custom styled flat Button control
-component CustomButton {
-    in property <string> text;
-    in property <bool> enabled: true;
-    in property <color> primary-color: #5865f2; // Default brand blue
-    callback clicked;
-
-    height: 22px; // Compact height
-    min-width: 75px;
-
-    rect := Rectangle {
-        background: !enabled ? #2f3136 : primary-color;
-        border-radius: 3px;
-        border-width: 1px;
-        border-color: !enabled ? #1f2023 : primary-color;
-        opacity: !enabled ? 0.5 : 1.0;
-
-        animate background { duration: 100ms; }
-
-        txt := Text {
-            text: root.text;
-            color: !enabled ? #7c808a : #ffffff;
-            font-size: 11px;
-            font-weight: 600;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-        }
-    }
-
-    ta := TouchArea {
-        enabled: root.enabled;
-        clicked => { root.clicked(); }
-    }
-
-    states [
-        hover when ta.has-hover && enabled: {
-            rect.background: primary-color.brighter(12%);
-        }
-        active when ta.pressed && enabled: {
-            rect.background: primary-color.darker(12%);
-        }
-    ]
-}
-
-// Single row of comparative specs layout
-component SpecsRow {
-    in property <string> name;
-    in property <string> val1;
-    in property <string> val2;
-    height: 24px;
-    HorizontalLayout {
-        spacing: 8px;
-        Text {
-            text: name;
-            width: 120px;
-            color: #949ba4;
-            font-size: 12px;
-            vertical-alignment: center;
-        }
-
-        Text {
-            text: val1;
-            color: #dcddde;
-            font-size: 12px;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-        }
-
-        Text {
-            text: val2;
-            color: #dcddde;
-            font-size: 12px;
-            vertical-alignment: center;
-            overflow: elide;
-            horizontal-stretch: 1;
-        }
-    }
-}
-
-// Section title widget
-component SectionTitle {
-    in property <string> text;
-    height: 22px;
-    VerticalLayout {
-        Text {
-            text: root.text;
-            font-size: 12px;
-            font-weight: 700;
-            color: #949ba4;
-        }
-
-        Rectangle {
-            height: 1px;
-            background: #1f2023;
-        }
-    }
-}
-
-// Panel Section Box Layout container
-component PanelSection {
-    in property <string> title;
-    VerticalLayout {
-        spacing: 4px; // Compacted
-        SectionTitle {
-            text: root.title;
-        }
-
-        @children
-    }
-}
-
-// Custom interactive Wipe comparative viewport (Responsive rendering)
-component WipeViewport {
-    in property <image> original;
-    in property <image> duplicate;
-    in property <float> wipe-val; // 0.0 to 1.0
-    in property <image> checkerboard;
-
-    viewport-root := Rectangle {
-        background: #111214;
-        clip: true;
-
-        Image {
-            source: checkerboard;
-            horizontal-tiling: repeat;
-            vertical-tiling: repeat;
-            width: 100%;
-            height: 100%;
-        }
-
-        Image {
-            source: original;
-            width: 100%;
-            height: 100%;
-            image-fit: contain;
-        }
-
-        Rectangle {
-            clip: true;
-            x: 0px;
-            y: 0px;
-            width: parent.width * wipe-val;
-            height: parent.height;
-
-            Image {
-                source: duplicate;
-                x: 0px;
-                y: 0px;
-                width: viewport-root.width;
-                height: viewport-root.height;
-                image-fit: contain;
-            }
-        }
-
-        Rectangle {
-            x: parent.width * wipe-val - 1px;
-            y: 0px;
-            width: 2px;
-            height: parent.height;
-            background: #f0b132;
-        }
-    }
-}
-
-export struct ResultsRow {
-    is_header: bool,
-    is_qc: bool,
-    is_ai: bool,
-    group_index: int,
-    hash_or_issue: string,
-    path: string,
-    name: string,
-    score_or_detail: string,
-    
-    // --- NEW SEPARATED METADATA COLUMNS ---
-    format_str: string,
-    dimensions_str: string,
-    mipmaps_str: string,
-    cubemap_str: string,
-    size_str: string,
-    meta_str: string,
-    is_best: bool,
-    is_checked: bool,
-    thumbnail: image,
-}
-
-export struct SelectedFile {
-    name: string,
-    size_str: string,
-    format: string,
-    resolution: string,
-    bit_depth: string,
-    color_space: string,
-    mipmaps: string,
-    alpha: string,
-    similarity: string,
-    path: string,
-}
 
 export component AppWindow inherits Window {
     init => {
@@ -499,7 +63,6 @@ export component AppWindow inherits Window {
     in-out property <float> progress: 0.0;
     in-out property <string> status_text: "System Ready. Drop images or write path.";
 
-    // Active file format selections (Binds to CheckBoxes inside File Types pop-up) [3]
     in-out property <bool> ext_png: true;
     in-out property <bool> ext_tga: true;
     in-out property <bool> ext_dds: true;
@@ -514,14 +77,12 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_heic: true;
     in-out property <bool> ext_avif: true;
 
-    // Visual Reports (Contact Sheets) Settings
     in-out property <bool> save_visuals: false;
     in-out property <int> visuals_columns: 6;
     in-out property <int> visuals_max_count: 100;
     in-out property <int> visuals_font_size: 14;
     in-out property <float> visuals_scale: 1.5;
 
-    // Image Pre-processing Options
     in-out property <bool> prep_luminance: false;
     in-out property <bool> prep_channels: false;
     in-out property <bool> prep_r: true;
@@ -531,23 +92,19 @@ export component AppWindow inherits Window {
     in-out property <string> prep_tags: "";
     in-out property <bool> prep_ignore_solid: true;
 
-    // Viewport pan/zoom
     in-out property <float> zoom_factor: 1.0;
     in-out property <length> pan_x: 0px;
     in-out property <length> pan_y: 0px;
 
-    // Excluded Folders List
     in-out property <string> excluded_folders: ".git, .svn, cache, temp";
     in-out property <bool> qc_match_by_stem: true;
     in-out property <bool> qc_hide_same_resolution: false;
 
-    // Relative Quality Control parameters
     in-out property <bool> qc_check_bloat: true;
     in-out property <bool> qc_check_alpha: true;
     in-out property <bool> qc_check_colorspace: true;
     in-out property <bool> qc_check_compression: true;
 
-    // Search precision and active model
     in-out property <int> search_precision: 1;
     in-out property <int> ai_model: 0;
     in-out property <string> custom_model_path: "";
@@ -558,13 +115,11 @@ export component AppWindow inherits Window {
     in-out property <length> skipped_popup_x: 0px;
     in-out property <length> skipped_popup_y: 0px;
 
-    // --- COLUMN & PREVIEW WIDTHS ---
     in-out property <length> col_file_w: 300px;
     in-out property <length> col_score_w: 70px;
     in-out property <length> col_path_w: 350px;
     in-out property <length> list_preview_size: 40px;
 
-    // Draggable Splitters states
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
     in-out property <length> compare_sidebar_width: 440px;
@@ -639,6 +194,7 @@ export component AppWindow inherits Window {
     in-out property <length> menu_y: 0px;
     in-out property <string> context_hovered_path: "";
 
+    // --- CALLBACKS ---
     callback select_folder_a();
     callback select_folder_b();
     callback run_scan();
@@ -652,8 +208,8 @@ export component AppWindow inherits Window {
     callback save_settings();
     callback tonemap_toggled();
     callback export_log(string);
-    callback export_csv(); // <--- NEW CSV EXPORT CALLBACK
-    callback sort_by_column(string); // <--- NEW COLUMN SORTING CALLBACK
+    callback export_csv();
+    callback sort_by_column(string);
     callback expand_all_groups();
     callback collapse_all_groups();
     callback results_filter_changed();
@@ -666,6 +222,7 @@ export component AppWindow inherits Window {
     callback thumbnail_channel_hovered(string, string);
     callback select_reference_image();
 
+    // POPUPS
     ext_popup := PopupWindow {
         x: root.ext_popup_x;
         y: root.ext_popup_y;
@@ -851,7 +408,6 @@ export component AppWindow inherits Window {
         }
     }
 
-    // CONTEXT MENU POPUP (Right Click)
     context_popup := PopupWindow {
         x: root.menu_x;
         y: root.menu_y;
@@ -892,6 +448,7 @@ export component AppWindow inherits Window {
     VerticalLayout {
         padding: 12px;
         spacing: 12px;
+
         HorizontalLayout {
             spacing: 4px;
             height: 32px;
@@ -923,13 +480,13 @@ export component AppWindow inherits Window {
             horizontal-stretch: 1;
             background: #1e1f22;
 
-            // ------------------ TAB 0: FIND (Results List/Grid & Sidebar) ------------------
+            // ------------------ TAB 0: FIND ------------------
             if root.active_tab == 0: HorizontalLayout {
                 spacing: 0px;
                 width: 100%;
                 height: 100%;
 
-                // 1. Sidebar Config Section
+                // SIDEBAR
                 Rectangle {
                     width: root.sidebar_width;
                     background: #2b2d31;
@@ -938,14 +495,12 @@ export component AppWindow inherits Window {
                     border-radius: 4px;
                     ScrollView {
                         VerticalLayout {
-                            padding: 6px; // Compact padding
-                            spacing: 8px; // Compact spacing
-
+                            padding: 6px;
+                            spacing: 8px;
                             PanelSection {
                                 title: "Scan Configuration";
                                 VerticalLayout {
                                     spacing: 4px;
-
                                     FormRow {
                                         title: "Folder A:";
                                         HorizontalLayout {
@@ -987,7 +542,6 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                     }
-
                                     FormRow {
                                         title: "Exclude:";
                                         LineEdit {
@@ -1060,11 +614,7 @@ export component AppWindow inherits Window {
                                         CustomButton {
                                             text: "File Types";
                                             width: 80px;
-                                            clicked => {
-                                                root.ext_popup_x = self.absolute-position.x;
-                                                root.ext_popup_y = self.absolute-position.y + self.height;
-                                                ext_popup.show();
-                                            }
+                                            clicked => { root.ext_popup_x = self.absolute-position.x; root.ext_popup_y = self.absolute-position.y + self.height; ext_popup.show(); }
                                         }
 
                                         CustomButton {
@@ -1181,7 +731,6 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                     }
-
                                     CustomButton {
                                         text: root.is_scanning ? "Stop / Cancel Scan" : "Start Scan";
                                         primary-color: root.is_scanning ? #f23f43 : #23a55a;
@@ -1222,7 +771,6 @@ export component AppWindow inherits Window {
                                         height: 22px;
                                         selected(val) => { root.tonemap_toggled(); }
                                     }
-
                                     if root.prep_channels: VerticalLayout {
                                         spacing: 4px;
                                         padding-left: 12px;
@@ -1354,8 +902,6 @@ export component AppWindow inherits Window {
                                             height: 22px;
                                             edited => { root.save_settings(); }
                                         }
-
-                                        // Relative QC parameters
                                         CheckBox {
                                             text: "Check Size Bloat";
                                             checked <=> root.qc_check_bloat;
@@ -1394,7 +940,7 @@ export component AppWindow inherits Window {
                                         "Exact Match (xxHash)",
                                         "Simple Duplicates (dHash)",
                                         "AI Semantic/Visual Search",
-                                        "Asset Inventory (Detailed Audit)" // <--- NEW 4th MODE ADDED
+                                        "Asset Inventory (Detailed Audit)"
                                     ];
                                     current-index <=> root.search_method;
                                     height: 22px;
@@ -1418,7 +964,6 @@ export component AppWindow inherits Window {
                                     selected(val) => { root.save_settings(); }
                                 }
                             }
-
                             if root.search_method == 2 && root.ai_model == 5: VerticalLayout {
                                 spacing: 4px;
                                 FormRow {
@@ -1467,15 +1012,14 @@ export component AppWindow inherits Window {
                                     }
 
                                     SpinBox {
-                                        value <=> root.custom_model_dim;
+                                        value: root.custom_model_dim;
                                         minimum: 64;
                                         maximum: 4096;
                                         height: 22px;
-                                        edited(val) => { root.save_settings(); }
+                                        edited(val) => { root.custom_model_dim = val; root.save_settings(); }
                                     }
                                 }
                             }
-
                             if root.search_method == 2: PanelSection {
                                 title: "Search Precision (LanceDB)";
                                 ComboBox {
@@ -1485,7 +1029,6 @@ export component AppWindow inherits Window {
                                     selected(val) => { root.save_settings(); }
                                 }
                             }
-
                             PanelSection {
                                 title: "Execution Provider";
                                 ComboBox {
@@ -1503,13 +1046,11 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Tactile Horizontal Draggable Splitter
+                // SPLITTER
                 Rectangle {
                     width: 8px;
-                    horizontal-stretch: 0; // Prevent the splitter itself from stretching
+                    horizontal-stretch: 0;
                     background: sidebar-splitter-ta.has-hover ? #4e5058 : #1e1f22;
-
-                    // Centered handle line without layout nesting
                     Rectangle {
                         width: 2px;
                         height: 20px;
@@ -1521,29 +1062,20 @@ export component AppWindow inherits Window {
 
                     sidebar-splitter-ta := TouchArea {
                         mouse-cursor: MouseCursor.col-resize;
-                        moved => {
-                            if (self.pressed) {
-                                root.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px);
-                                root.save_settings();
-                            }
-                        }
+                        moved => { if (self.pressed) { root.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); root.save_settings(); } }
                     }
                 }
 
-                // 2. Results List Pane & Quick Action Console Section
+                // MAIN RESULTS LIST
                 VerticalLayout {
                     padding-left: 12px;
                     horizontal-stretch: 1;
                     spacing: 8px;
-
                     VerticalLayout {
                         spacing: 8px;
                         vertical-stretch: 1;
-
                         HorizontalLayout {
                             alignment: space-between;
-
-                            // Left-side header with count, Search, and Sort
                             HorizontalLayout {
                                 spacing: 12px;
                                 Text {
@@ -1596,31 +1128,26 @@ export component AppWindow inherits Window {
                                         width: 35px;
                                     }
                                 }
-
                                 if !root.results_grid_mode && root.results.length > 0: HorizontalLayout {
                                     spacing: 6px;
-
                                     if root.search_method == 3: CustomButton {
                                         text: "Export CSV";
                                         height: 24px;
-                                        primary-color: #0e639c; // Blue branding
+                                        primary-color: #0e639c;
                                         clicked => { root.export_csv(); }
                                     }
-
                                     if root.search_method != 3: CustomButton {
                                         text: "Expand All";
                                         height: 24px;
                                         primary-color: #5865f2;
                                         clicked => { root.expand_all_groups(); }
                                     }
-
                                     if root.search_method != 3: CustomButton {
                                         text: "Collapse All";
                                         height: 24px;
                                         primary-color: #5865f2;
                                         clicked => { root.collapse_all_groups(); }
                                     }
-
                                     CustomButton {
                                         text: "Auto Cols";
                                         height: 24px;
@@ -1639,8 +1166,6 @@ export component AppWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
-
-                                // Single dynamic slider to resize previews in both Grid and List Mode
                                 if root.results.length > 0: HorizontalLayout {
                                     spacing: 6px;
                                     Text {
@@ -1656,28 +1181,15 @@ export component AppWindow inherits Window {
                                         maximum: root.results_grid_mode ? 250 : 120;
                                         width: 100px;
                                         height: 24px;
-                                        changed(val) => {
-                                            if (root.results_grid_mode) {
-                                                root.grid_card_size = val * 1px;
-                                            } else {
-                                                root.list_preview_size = val * 1px;
-                                            }
-                                            root.save_settings();
-                                        }
+                                        changed(val) => { if (root.results_grid_mode) { root.grid_card_size = val * 1px; } else { root.list_preview_size = val * 1px; } root.save_settings(); }
                                     }
                                 }
-
                                 if root.skipped_files_list.length > 0: CustomButton {
                                     text: "⚠️ Skipped Files (" + root.skipped_files_list.length + ")";
-                                    primary-color: #f23f43; // warning red
+                                    primary-color: #f23f43;
                                     height: 24px;
-                                    clicked => {
-                                        root.skipped_popup_x = self.absolute-position.x - 120px;
-                                        root.skipped_popup_y = self.absolute-position.y + self.height;
-                                        skipped_popup.show();
-                                    }
+                                    clicked => { root.skipped_popup_x = self.absolute-position.x - 120px; root.skipped_popup_y = self.absolute-position.y + self.height; skipped_popup.show(); }
                                 }
-
                                 CustomButton {
                                     text: root.results_grid_mode ? "List Mode (☰)" : "Grid Mode (⊞)";
                                     height: 24px;
@@ -1693,26 +1205,20 @@ export component AppWindow inherits Window {
                             border-radius: 4px;
                             vertical-stretch: 1;
                             clip: true;
-
                             VerticalLayout {
-                                // ---- COLUMN HEADERS (Table Headers) ----
                                 if !root.results_grid_mode && root.results.length > 0: VerticalLayout {
                                     vertical-stretch: 0;
                                     Rectangle {
                                         height: 24px;
                                         background: #1e1f22;
-
-                                        // DYNAMIC COLUMN HEADER RENDERING WITH TOUCHAREAS FOR COLUMNS SORTING
                                         HorizontalLayout {
                                             padding-left: 28px;
                                             padding-right: 8px;
-                                            spacing: 0px; // Removing spacing for manual width control
-
+                                            spacing: 0px;
                                             Rectangle {
                                                 width: 32px;
-                                            } // Checkbox spacer
+                                            }
 
-                                            // COLUMN 1: FILE Name / Texture Path
                                             HorizontalLayout {
                                                 width: root.col_file_w;
                                                 TouchArea {
@@ -1729,7 +1235,7 @@ export component AppWindow inherits Window {
                                                     }
                                                 }
                                             }
-                                            // Splitter FILE
+
                                             Rectangle {
                                                 width: 8px;
                                                 background: file_split.has-hover ? #4e5058 : transparent;
@@ -1739,11 +1245,8 @@ export component AppWindow inherits Window {
                                                 }
                                             }
 
-                                            // --- CONDITIONAL HEADERS FOR DUPLICATE MODES vs INVENTORY AUDIT ---
                                             if root.search_method != 3: HorizontalLayout {
                                                 spacing: 0px;
-
-                                                // COLUMN 2: SCORE
                                                 HorizontalLayout {
                                                     width: root.col_score_w;
                                                     TouchArea {
@@ -1762,7 +1265,7 @@ export component AppWindow inherits Window {
                                                         }
                                                     }
                                                 }
-                                                // Splitter SCORE
+
                                                 Rectangle {
                                                     width: 8px;
                                                     background: score_split.has-hover ? #4e5058 : transparent;
@@ -1772,7 +1275,6 @@ export component AppWindow inherits Window {
                                                     }
                                                 }
 
-                                                // COLUMN 3: PATH
                                                 HorizontalLayout {
                                                     width: root.col_path_w;
                                                     TouchArea {
@@ -1789,7 +1291,7 @@ export component AppWindow inherits Window {
                                                         }
                                                     }
                                                 }
-                                                // Splitter PATH
+
                                                 Rectangle {
                                                     width: 8px;
                                                     background: path_split.has-hover ? #4e5058 : transparent;
@@ -1799,7 +1301,6 @@ export component AppWindow inherits Window {
                                                     }
                                                 }
 
-                                                // COLUMN 4: METADATA
                                                 HorizontalLayout {
                                                     horizontal-stretch: 1;
                                                     Text {
@@ -1814,8 +1315,6 @@ export component AppWindow inherits Window {
 
                                             if root.search_method == 3: HorizontalLayout {
                                                 spacing: 0px;
-
-                                                // COLUMN 2: FORMAT
                                                 HorizontalLayout {
                                                     width: 110px;
                                                     TouchArea {
@@ -1837,7 +1336,6 @@ export component AppWindow inherits Window {
                                                     width: 8px;
                                                 }
 
-                                                // COLUMN 3: DIMENSIONS
                                                 HorizontalLayout {
                                                     width: 110px;
                                                     TouchArea {
@@ -1859,7 +1357,6 @@ export component AppWindow inherits Window {
                                                     width: 8px;
                                                 }
 
-                                                // COLUMN 4: MIPMAPS
                                                 HorizontalLayout {
                                                     width: 75px;
                                                     TouchArea {
@@ -1883,7 +1380,6 @@ export component AppWindow inherits Window {
                                                     width: 8px;
                                                 }
 
-                                                // COLUMN 5: CUBEMAP
                                                 HorizontalLayout {
                                                     width: 75px;
                                                     TouchArea {
@@ -1907,7 +1403,6 @@ export component AppWindow inherits Window {
                                                     width: 8px;
                                                 }
 
-                                                // COLUMN 6: SIZE
                                                 HorizontalLayout {
                                                     width: 85px;
                                                     TouchArea {
@@ -1929,7 +1424,6 @@ export component AppWindow inherits Window {
                                                     width: 8px;
                                                 }
 
-                                                // COLUMN 7: PATH
                                                 HorizontalLayout {
                                                     horizontal-stretch: 1;
                                                     TouchArea {
@@ -1953,56 +1447,35 @@ export component AppWindow inherits Window {
                                     Rectangle {
                                         height: 1px;
                                         background: #1f2023;
-                                    } // Divider
+                                    }
                                 }
 
-                                // ---- LIST VIEW ----
                                 if !root.results_grid_mode && root.results.length > 0: ListView {
                                     for row[idx] in root.results: Rectangle {
-                                        // Dynamic row height calculated based on row size slider
                                         height: row.is_header ? 28px : (root.list_preview_size + 8px);
                                         background: row.is_header ? #1e1f22 : (row.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
                                         border-color: #1f2023;
                                         border-width: 1px;
 
-                                        // Universal Outer Row Wrapper TouchArea (Positioned to the right of the thumbnail zone)
                                         main_row_ta := TouchArea {
                                             x: 28px + 24px + 8px + root.list_preview_size + 8px;
                                             width: parent.width - self.x;
                                             height: 100%;
-                                            clicked => {
-                                                root.row_clicked(idx, false, row.group_index, row.path);
-                                                root.active_tab = 1;
-                                            }
-                                            pointer-event(evt) => {
-                                                if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
-                                                    if (!row.is_header) {
-                                                        root.context_hovered_path = row.path;
-                                                        root.menu_x = self.absolute-position.x + self.mouse-x;
-                                                        root.menu_y = self.absolute-position.y + self.mouse-y;
-                                                        context_popup.show();
-                                                    }
-                                                }
-                                            }
+                                            clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; }
+                                            pointer-event(evt) => { if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) { if (!row.is_header) { root.context_hovered_path = row.path; root.menu_x = self.absolute-position.x + self.mouse-x; root.menu_y = self.absolute-position.y + self.mouse-y; context_popup.show(); } } }
                                         }
 
-                                        // Header Row Layout
                                         if row.is_header: TouchArea {
                                             width: 100%;
                                             height: 100%;
-                                            clicked => {
-                                                root.row_clicked(idx, true, row.group_index, row.path);
-                                            }
+                                            clicked => { root.row_clicked(idx, true, row.group_index, row.path); }
                                             HorizontalLayout {
                                                 padding-left: 8px;
                                                 padding-right: 8px;
                                                 spacing: 8px;
                                                 alignment: space-between;
-
                                                 Text {
-                                                    text: row.is_qc ?
-                                                        ((row.is_checked ? "▶ " : "▼ ") + "QC Issue: " + row.hash_or_issue) :
-                                                        ((row.is_checked ? "▶ " : "▼ ") + "Group #" + (row.group_index + 1) + " (Hash: " + row.hash_or_issue + ")");
+                                                    text: row.is_qc ? ((row.is_checked ? "▶ " : "▼ ") + "QC Issue: " + row.hash_or_issue) : ((row.is_checked ? "▶ " : "▼ ") + "Group #" + (row.group_index + 1) + " (Hash: " + row.hash_or_issue + ")");
                                                     color: #949ba4;
                                                     font-size: 12px;
                                                     font-weight: 700;
@@ -2019,12 +1492,10 @@ export component AppWindow inherits Window {
                                             }
                                         }
 
-                                        // Child Row Layout
                                         if !row.is_header: HorizontalLayout {
-                                            padding-left: 28px; // Indentation for tree-view style
+                                            padding-left: 28px;
                                             padding-right: 8px;
                                             spacing: 0px;
-
                                             CheckBox {
                                                 checked: row.is_checked;
                                                 toggled => { root.row_checkbox_toggled(idx); }
@@ -2035,34 +1506,27 @@ export component AppWindow inherits Window {
                                                 width: 8px;
                                             }
 
-                                            // 1. FILE (Thumbnail is isolated from row hover blocking)
                                             InteractiveThumbnail {
                                                 source: row.thumbnail;
                                                 path: row.path;
                                                 show_corners: true;
                                                 checkerboard: root.checkerboard_pattern;
-                                                width: root.list_preview_size; // Dynamic width based on row size slider
-                                                height: root.list_preview_size; // Dynamic height based on row size slider
-                                                corner_hovered(path, chan) => {
-                                                    root.thumbnail_channel_hovered(path, chan);
-                                                }
-                                                clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; } // Forward click
+                                                width: root.list_preview_size;
+                                                height: root.list_preview_size;
+                                                corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
+                                                clicked => { root.row_clicked(idx, false, row.group_index, row.path); root.active_tab = 1; }
                                             }
 
                                             Rectangle {
                                                 width: 8px;
-                                            } // Spacer aligned with splitter
+                                            }
 
-                                            // Spacer for the TouchArea alignment
                                             Rectangle {
                                                 horizontal-stretch: 1;
-
                                                 HorizontalLayout {
                                                     spacing: 0px;
                                                     width: 100%;
                                                     height: 100%;
-
-                                                    // FILE NAME
                                                     HorizontalLayout {
                                                         width: root.col_file_w - root.list_preview_size - 16px;
                                                         Text {
@@ -2076,13 +1540,10 @@ export component AppWindow inherits Window {
 
                                                     Rectangle {
                                                         width: 8px;
-                                                    } // Spacer
+                                                    }
 
-                                                    // --- CONDITIONAL COLUMNS BASED ON THE ACTIVE SEARCH MODE ---
                                                     if root.search_method != 3: HorizontalLayout {
                                                         spacing: 0px;
-
-                                                        // SCORE
                                                         HorizontalLayout {
                                                             width: root.col_score_w;
                                                             Text {
@@ -2097,9 +1558,8 @@ export component AppWindow inherits Window {
 
                                                         Rectangle {
                                                             width: 8px;
-                                                        } // Spacer
+                                                        }
 
-                                                        // PATH
                                                         HorizontalLayout {
                                                             width: root.col_path_w;
                                                             Text {
@@ -2113,9 +1573,8 @@ export component AppWindow inherits Window {
 
                                                         Rectangle {
                                                             width: 8px;
-                                                        } // Spacer
+                                                        }
 
-                                                        // METADATA
                                                         HorizontalLayout {
                                                             horizontal-stretch: 1;
                                                             Text {
@@ -2127,11 +1586,8 @@ export component AppWindow inherits Window {
                                                             }
                                                         }
                                                     }
-
                                                     if root.search_method == 3: HorizontalLayout {
                                                         spacing: 0px;
-
-                                                        // FORMAT COLUMN
                                                         HorizontalLayout {
                                                             width: 110px;
                                                             Text {
@@ -2146,7 +1602,6 @@ export component AppWindow inherits Window {
                                                             width: 8px;
                                                         }
 
-                                                        // DIMENSIONS COLUMN
                                                         HorizontalLayout {
                                                             width: 110px;
                                                             Text {
@@ -2161,7 +1616,6 @@ export component AppWindow inherits Window {
                                                             width: 8px;
                                                         }
 
-                                                        // MIPMAPS COLUMN
                                                         HorizontalLayout {
                                                             width: 75px;
                                                             Text {
@@ -2178,7 +1632,6 @@ export component AppWindow inherits Window {
                                                             width: 8px;
                                                         }
 
-                                                        // CUBEMAP COLUMN
                                                         HorizontalLayout {
                                                             width: 75px;
                                                             Text {
@@ -2196,7 +1649,6 @@ export component AppWindow inherits Window {
                                                             width: 8px;
                                                         }
 
-                                                        // SIZE COLUMN
                                                         HorizontalLayout {
                                                             width: 85px;
                                                             Text {
@@ -2211,7 +1663,6 @@ export component AppWindow inherits Window {
                                                             width: 8px;
                                                         }
 
-                                                        // FULL PATH COLUMN
                                                         HorizontalLayout {
                                                             horizontal-stretch: 1;
                                                             Text {
@@ -2229,7 +1680,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // ---- GRID VIEW ----
+                                // ---- GRID VIEW (DRY with GridCard) ----
                                 if root.results_grid_mode && root.grid_results.length > 0: ScrollView {
                                     HorizontalLayout {
                                         spacing: 12px;
@@ -2239,54 +1690,16 @@ export component AppWindow inherits Window {
                                             width: root.grid_results.length > 0 ? root.grid_card_size : 0px;
                                             spacing: 12px;
                                             alignment: start;
-                                            for row[idx] in root.grid_results: Rectangle {
+                                            for row[idx] in root.grid_results: GridCard {
                                                 property <bool> show: idx.mod(4) == 0;
+                                                row-data: row;
+                                                checkerboard: root.checkerboard_pattern;
+                                                visible: show;
                                                 width: show ? root.grid_card_size : 0px;
                                                 height: show ? root.grid_card_size + 45px : 0px;
-                                                visible: show;
-                                                background: show ? (card_ta_0.has-hover ? #393c41 : #2b2d31) : transparent;
-                                                border-color: show ? #1f2023 : transparent;
-                                                border-width: show ? 1px : 0px;
-                                                border-radius: 6px;
-
-                                                card_ta_0 := TouchArea {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    pointer-event(evt) => { if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) { root.context_hovered_path = row.path; root.menu_x = self.absolute-position.x + self.mouse-x; root.menu_y = self.absolute-position.y + self.mouse-y; context_popup.show(); } }
-                                                }
-
-                                                if show: VerticalLayout {
-                                                    padding: 8px;
-                                                    spacing: 6px;
-                                                    InteractiveThumbnail {
-                                                        source: row.thumbnail;
-                                                        path: row.path;
-                                                        show_corners: true;
-                                                        checkerboard: root.checkerboard_pattern;
-                                                        width: parent.width - 16px;
-                                                        height: parent.height - 52px;
-                                                        corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                                        clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    }
-
-                                                    Text {
-                                                        text: "Group #" + (row.group_index + 1);
-                                                        color: #ffffff;
-                                                        font-size: 11px;
-                                                        font-weight: 700;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-
-                                                    Text {
-                                                        text: row.size_str;
-                                                        color: #949ba4;
-                                                        font-size: 10px;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-                                                }
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
+                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                             }
                                         }
 
@@ -2294,54 +1707,16 @@ export component AppWindow inherits Window {
                                             width: root.grid_results.length > 1 ? root.grid_card_size : 0px;
                                             spacing: 12px;
                                             alignment: start;
-                                            for row[idx] in root.grid_results: Rectangle {
+                                            for row[idx] in root.grid_results: GridCard {
                                                 property <bool> show: idx.mod(4) == 1;
+                                                row-data: row;
+                                                checkerboard: root.checkerboard_pattern;
+                                                visible: show;
                                                 width: show ? root.grid_card_size : 0px;
                                                 height: show ? root.grid_card_size + 45px : 0px;
-                                                visible: show;
-                                                background: show ? (card_ta_1.has-hover ? #393c41 : #2b2d31) : transparent;
-                                                border-color: show ? #1f2023 : transparent;
-                                                border-width: show ? 1px : 0px;
-                                                border-radius: 6px;
-
-                                                card_ta_1 := TouchArea {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    pointer-event(evt) => { if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) { root.context_hovered_path = row.path; root.menu_x = self.absolute-position.x + self.mouse-x; root.menu_y = self.absolute-position.y + self.mouse-y; context_popup.show(); } }
-                                                }
-
-                                                if show: VerticalLayout {
-                                                    padding: 8px;
-                                                    spacing: 6px;
-                                                    InteractiveThumbnail {
-                                                        source: row.thumbnail;
-                                                        path: row.path;
-                                                        show_corners: true;
-                                                        checkerboard: root.checkerboard_pattern;
-                                                        width: parent.width - 16px;
-                                                        height: parent.height - 52px;
-                                                        corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                                        clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    }
-
-                                                    Text {
-                                                        text: "Group #" + (row.group_index + 1);
-                                                        color: #ffffff;
-                                                        font-size: 11px;
-                                                        font-weight: 700;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-
-                                                    Text {
-                                                        text: row.size_str;
-                                                        color: #949ba4;
-                                                        font-size: 10px;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-                                                }
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
+                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                             }
                                         }
 
@@ -2349,54 +1724,16 @@ export component AppWindow inherits Window {
                                             width: root.grid_results.length > 2 ? root.grid_card_size : 0px;
                                             spacing: 12px;
                                             alignment: start;
-                                            for row[idx] in root.grid_results: Rectangle {
+                                            for row[idx] in root.grid_results: GridCard {
                                                 property <bool> show: idx.mod(4) == 2;
+                                                row-data: row;
+                                                checkerboard: root.checkerboard_pattern;
+                                                visible: show;
                                                 width: show ? root.grid_card_size : 0px;
                                                 height: show ? root.grid_card_size + 45px : 0px;
-                                                visible: show;
-                                                background: show ? (card_ta_2.has-hover ? #393c41 : #2b2d31) : transparent;
-                                                border-color: show ? #1f2023 : transparent;
-                                                border-width: show ? 1px : 0px;
-                                                border-radius: 6px;
-
-                                                card_ta_2 := TouchArea {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    pointer-event(evt) => { if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) { root.context_hovered_path = row.path; root.menu_x = self.absolute-position.x + self.mouse-x; root.menu_y = self.absolute-position.y + self.mouse-y; context_popup.show(); } }
-                                                }
-
-                                                if show: VerticalLayout {
-                                                    padding: 8px;
-                                                    spacing: 6px;
-                                                    InteractiveThumbnail {
-                                                        source: row.thumbnail;
-                                                        path: row.path;
-                                                        show_corners: true;
-                                                        checkerboard: root.checkerboard_pattern;
-                                                        width: parent.width - 16px;
-                                                        height: parent.height - 52px;
-                                                        corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                                        clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    }
-
-                                                    Text {
-                                                        text: "Group #" + (row.group_index + 1);
-                                                        color: #ffffff;
-                                                        font-size: 11px;
-                                                        font-weight: 700;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-
-                                                    Text {
-                                                        text: row.size_str;
-                                                        color: #949ba4;
-                                                        font-size: 10px;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-                                                }
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
+                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                             }
                                         }
 
@@ -2404,54 +1741,16 @@ export component AppWindow inherits Window {
                                             width: root.grid_results.length > 3 ? root.grid_card_size : 0px;
                                             spacing: 12px;
                                             alignment: start;
-                                            for row[idx] in root.grid_results: Rectangle {
+                                            for row[idx] in root.grid_results: GridCard {
                                                 property <bool> show: idx.mod(4) == 3;
+                                                row-data: row;
+                                                checkerboard: root.checkerboard_pattern;
+                                                visible: show;
                                                 width: show ? root.grid_card_size : 0px;
                                                 height: show ? root.grid_card_size + 45px : 0px;
-                                                visible: show;
-                                                background: show ? (card_ta_3.has-hover ? #393c41 : #2b2d31) : transparent;
-                                                border-color: show ? #1f2023 : transparent;
-                                                border-width: show ? 1px : 0px;
-                                                border-radius: 6px;
-
-                                                card_ta_3 := TouchArea {
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    pointer-event(evt) => { if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) { root.context_hovered_path = row.path; root.menu_x = self.absolute-position.x + self.mouse-x; root.menu_y = self.absolute-position.y + self.mouse-y; context_popup.show(); } }
-                                                }
-
-                                                if show: VerticalLayout {
-                                                    padding: 8px;
-                                                    spacing: 6px;
-                                                    InteractiveThumbnail {
-                                                        source: row.thumbnail;
-                                                        path: row.path;
-                                                        show_corners: true;
-                                                        checkerboard: root.checkerboard_pattern;
-                                                        width: parent.width - 16px;
-                                                        height: parent.height - 52px;
-                                                        corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                                        clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                    }
-
-                                                    Text {
-                                                        text: "Group #" + (row.group_index + 1);
-                                                        color: #ffffff;
-                                                        font-size: 11px;
-                                                        font-weight: 700;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-
-                                                    Text {
-                                                        text: row.size_str;
-                                                        color: #949ba4;
-                                                        font-size: 10px;
-                                                        horizontal-alignment: center;
-                                                        overflow: elide;
-                                                    }
-                                                }
+                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
+                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                             }
                                         }
                                     }
@@ -2472,7 +1771,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Selection tools section box
                     Rectangle {
                         background: #2b2d31;
                         border-color: #1f2023;
@@ -2523,7 +1821,6 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Link actions footer section
                     HorizontalLayout {
                         spacing: 8px;
                         height: 24px;
@@ -2555,12 +1852,11 @@ export component AppWindow inherits Window {
                 }
             } // End of Tab 0
 
-            // ------------------ TAB 1: COMPARE (Large Side-by-Side Canvas) ------------------
+            // ------------------ TAB 1: COMPARE ------------------
             if root.active_tab == 1: HorizontalLayout {
                 spacing: 0px;
                 width: 100%;
                 height: 100%;
-
                 VerticalLayout {
                     horizontal-stretch: 1;
                     padding-right: 12px;
@@ -2806,7 +2102,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Tactile Vertical Splitter for Compare Tab! [7]
+                // SPLITTER
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
@@ -2826,12 +2122,11 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                // Specifications tables & Group Details (Right Panel)
+                // RIGHT PANEL
                 VerticalLayout {
-                    width: root.compare_sidebar_width; // DYNAMIC SIDEBAR WIDTH! [7]
-                    padding-left: 12px; // Restore spacing inside padding
+                    width: root.compare_sidebar_width;
+                    padding-left: 12px;
                     spacing: 12px;
-
                     Text {
                         text: "Group Duplicates (" + root.selected_group_files.length + " items)";
                         font-size: 13px;
@@ -2850,10 +2145,8 @@ export component AppWindow inherits Window {
                                 height: 38px;
                                 background: (row.path == root.duplicate_meta.path) ? #2c3e50 : (right_row_ta.has-hover ? #393c41 : #111214);
                                 border-radius: 4px;
-
-                                // TouchArea positioned to the right of the thumbnail zone
                                 right_row_ta := TouchArea {
-                                    x: 6px + 32px + 8px;
+                                    x: 46px;
                                     width: parent.width - self.x;
                                     height: 100%;
                                     clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
@@ -2864,8 +2157,6 @@ export component AppWindow inherits Window {
                                     padding-right: 6px;
                                     spacing: 8px;
                                     alignment: space-between;
-
-                                    // Isolated Interactive Thumbnail
                                     InteractiveThumbnail {
                                         source: row.thumbnail;
                                         path: row.path;
@@ -2877,7 +2168,6 @@ export component AppWindow inherits Window {
                                         clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
                                     }
 
-                                    // Simple unblocked text metadata elements
                                     Text {
                                         text: row.name;
                                         color: #dcddde;
@@ -2908,14 +2198,11 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Tactile Horizontal Splitter
                     Rectangle {
                         height: 8px;
-                        vertical-stretch: 0; // Prevent vertical layout stretch
+                        vertical-stretch: 0;
                         background: splitter-ta.has-hover ? #4e5058 : #2b2d31;
                         border-radius: 4px;
-
-                        // Mathematically centered handle line
                         Rectangle {
                             width: 20px;
                             height: 2px;
