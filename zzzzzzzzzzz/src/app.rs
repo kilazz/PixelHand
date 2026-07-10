@@ -822,8 +822,11 @@ pub fn run_gui() -> Result<()> {
                     let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
                     for (x, y, pixel) in rgba.enumerate_pixels() {
                         let val = pixel[channel_idx];
-                        // Отрисовываем маску (включая альфа-канал) как непрозрачное черно-белое изображение
-                        out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
+                        if channel_idx == 3 {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, val]));
+                        } else {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
+                        }
                     }
                     out_rgba
                 };

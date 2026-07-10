@@ -84,18 +84,9 @@ component InteractiveThumbnail inherits TouchArea {
     width: 32px;
     height: 32px;
 
-    // Triggers whenever active_quadrant changes natively and has active hover
+    // Triggers whenever active_quadrant changes natively
     changed active-quadrant => {
-        if (self.has-hover) {
-            corner_hovered(path, self.active-quadrant);
-        }
-    }
-
-    // Safely reset to RGB composite when hover is lost to prevent stuck states
-    changed has-hover => {
-        if (!self.has-hover) {
-            corner_hovered(path, "RGB");
-        }
+        corner_hovered(path, self.active-quadrant);
     }
 
     rect := Rectangle {
@@ -123,8 +114,6 @@ component InteractiveThumbnail inherits TouchArea {
 
         // Interactive Channel Hover Indicators (Highlighted dynamically based on active quadrant)
         if show_corners && root.has-hover: Rectangle {
-            width: 100%;
-            height: 100%;
             // Top Left (R - Red Channel)
             Rectangle {
                 x: 2px;
@@ -1494,7 +1483,6 @@ export component AppWindow inherits Window {
                 // Tactile Horizontal Draggable Splitter
                 Rectangle {
                     width: 8px;
-                    horizontal-stretch: 0; // Prevent the splitter itself from stretching
                     background: sidebar-splitter-ta.has-hover ? #4e5058 : #1e1f22;
 
                     // Centered handle line without layout nesting
@@ -1503,8 +1491,6 @@ export component AppWindow inherits Window {
                         height: 20px;
                         background: #6d6f78;
                         border-radius: 1px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
                     }
 
                     sidebar-splitter-ta := TouchArea {
@@ -1782,26 +1768,6 @@ export component AppWindow inherits Window {
                                         border-color: #1f2023;
                                         border-width: 1px;
 
-                                        // Universal Outer Row Wrapper TouchArea (Z-Order FIX: Rendered first!)
-                                        main_row_ta := TouchArea {
-                                            width: 100%;
-                                            height: 100%;
-                                            clicked => {
-                                                root.row_clicked(idx, row.is_header, row.group_index, row.path);
-                                                if (!row.is_header) { root.active_tab = 1; }
-                                            }
-                                            pointer-event(evt) => {
-                                                if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
-                                                    if (!row.is_header) {
-                                                        root.context_hovered_path = row.path;
-                                                        root.menu_x = self.absolute-position.x + self.mouse-x;
-                                                        root.menu_y = self.absolute-position.y + self.mouse-y;
-                                                        context_popup.show();
-                                                    }
-                                                }
-                                            }
-                                        }
-
                                         // Header Row Layout
                                         if row.is_header: HorizontalLayout {
                                             padding-left: 8px;
@@ -1914,6 +1880,26 @@ export component AppWindow inherits Window {
                                                     font-size: 11px;
                                                     vertical-alignment: center;
                                                     overflow: elide;
+                                                }
+                                            }
+                                        }
+
+                                        // Universal Outer Row Wrapper TouchArea
+                                        main_row_ta := TouchArea {
+                                            width: 100%;
+                                            height: 100%;
+                                            clicked => {
+                                                root.row_clicked(idx, row.is_header, row.group_index, row.path);
+                                                if (!row.is_header) { root.active_tab = 1; }
+                                            }
+                                            pointer-event(evt) => {
+                                                if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                                                    if (!row.is_header) {
+                                                        root.context_hovered_path = row.path;
+                                                        root.menu_x = self.absolute-position.x + self.mouse-x;
+                                                        root.menu_y = self.absolute-position.y + self.mouse-y;
+                                                        context_popup.show();
+                                                    }
                                                 }
                                             }
                                         }
@@ -2500,15 +2486,12 @@ export component AppWindow inherits Window {
                 // Tactile Vertical Splitter for Compare Tab! [7]
                 Rectangle {
                     width: 8px;
-                    horizontal-stretch: 0;
                     background: compare-splitter-ta.has-hover ? #4e5058 : #1e1f22;
                     Rectangle {
                         width: 2px;
                         height: 20px;
                         background: #6d6f78;
                         border-radius: 1px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
                     }
 
                     compare-splitter-ta := TouchArea {
@@ -2542,13 +2525,6 @@ export component AppWindow inherits Window {
                                 background: (row.path == root.duplicate_meta.path) ? #2c3e50 : (right_row_ta.has-hover ? #393c41 : #111214);
                                 border-radius: 4px;
 
-                                // Z-Order FIX: TouchArea sits behind components
-                                right_row_ta := TouchArea {
-                                    width: 100%;
-                                    height: 100%;
-                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
-                                }
-
                                 HorizontalLayout {
                                     padding-left: 6px;
                                     padding-right: 6px;
@@ -2581,6 +2557,13 @@ export component AppWindow inherits Window {
                                         vertical-alignment: center;
                                     }
                                 }
+
+                                // Z-Order fix: TouchArea sits behind components
+                                right_row_ta := TouchArea {
+                                    width: 100%;
+                                    height: 100%;
+                                    clicked => { root.row_clicked(idx, false, row.group_index, row.path); }
+                                }
                             }
                         }
                         if root.selected_group_files.length == 0: VerticalLayout {
@@ -2598,18 +2581,16 @@ export component AppWindow inherits Window {
                     // Tactile Horizontal Splitter
                     Rectangle {
                         height: 8px;
-                        vertical-stretch: 0; // Prevent vertical layout stretch
                         background: splitter-ta.has-hover ? #4e5058 : #2b2d31;
                         border-radius: 4px;
-
-                        // Mathematically centered handle line
-                        Rectangle {
-                            width: 20px;
-                            height: 2px;
-                            background: #6d6f78;
-                            border-radius: 1px;
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
+                        HorizontalLayout {
+                            alignment: center;
+                            Rectangle {
+                                width: 20px;
+                                height: 2px;
+                                background: #6d6f78;
+                                border-radius: 1px;
+                            }
                         }
 
                         splitter-ta := TouchArea {
