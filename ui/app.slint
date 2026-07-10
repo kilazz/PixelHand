@@ -13,11 +13,9 @@ import {
     Slider,
 } from "std-widgets.slint";
 
-// 1. ИМПОРТИРУЕМ ДЛЯ ЛОКАЛЬНОГО ИСПОЛЬЗОВАНИЯ ВНУТРИ ЭТОГО ФАЙЛА
+// IMPORT COMPONENTS WITH CORRECT RELATIVE PATHS
 import { ResultsRow, SelectedFile } from "./structs.slint";
-
-// 2. ЭКСПОРТИРУЕМ ДЛЯ ГЕНЕРАЦИИ Rust-КОДА В CRATE::APP
-export { ResultsRow, SelectedFile }
+export { ResultsRow, SelectedFile }from "./structs.slint";
 import {
     MenuItem,
     TabButton,
@@ -79,7 +77,7 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_heic: true;
     in-out property <bool> ext_avif: true;
 
-    // Visual Reports Settings
+    // Visual Reports (Contact Sheets) Settings
     in-out property <bool> save_visuals: false;
     in-out property <int> visuals_columns: 6;
     in-out property <int> visuals_max_count: 100;
@@ -132,7 +130,7 @@ export component AppWindow inherits Window {
     in-out property <length> col_path_w: 350px;
     in-out property <length> list_preview_size: 40px;
 
-    // Widths for Audit Columns
+    // Widths for Audit Columns so we can drag them freely!
     in-out property <length> col_format_w: 110px;
     in-out property <length> col_dimensions_w: 110px;
     in-out property <length> col_mipmaps_w: 75px;
@@ -536,7 +534,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
 
                             VerticalLayout {
-                                alignment: start;
+                                alignment: start; // Forces natural heights on nested child panels!
                                 spacing: 12px;
 
                                 PanelSection {
@@ -608,7 +606,7 @@ export component AppWindow inherits Window {
                                             LineEdit {
                                                 text <=> root.excluded_folders;
                                                 placeholder-text: "e.g. .cache, previews, temp_files";
-                                                height: 32px;
+                                                height: 22px;
                                                 edited => { root.save_settings(); }
                                             }
                                         }
@@ -626,6 +624,8 @@ export component AppWindow inherits Window {
                                 }
 
                                 // MODE DRIVEN DYNAMIC CONFIGURATIONS
+                                
+                                // A. Duplicates Parameters
                                 if root.search_method == 0 || root.search_method == 1: PanelSection {
                                     title: "Duplicates Finder Options";
                                     VerticalLayout {
@@ -817,6 +817,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                // B. AI Parameters
                                 if root.search_method == 2: PanelSection {
                                     title: "AI Semantic Search Options";
                                     VerticalLayout {
@@ -919,6 +920,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                // C. Technical QC Audit Parameters
                                 if root.search_method == 4: PanelSection {
                                     title: "QC Criteria List";
                                     VerticalLayout {
@@ -1003,6 +1005,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                // D. Collapsible Progressive Disclosure advanced parameters
                                 PanelSection {
                                     title: "Advanced System Settings";
                                     VerticalLayout {
@@ -1054,6 +1057,7 @@ export component AppWindow inherits Window {
                                                 }
                                             }
 
+                                            // --- NEW INTEGRATIONS ---
                                             CheckBox {
                                                 text: "Enable Previews Window";
                                                 checked <=> root.enable_previews;
@@ -1103,6 +1107,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        // FIXED BOTTOM SCAN BUTTON
                         Rectangle {
                             height: 40px;
                             background: #1e1f22;
@@ -1127,6 +1132,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // SPLITTER
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
@@ -1146,6 +1152,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // MAIN RESULTS LIST
                 VerticalLayout {
                     padding-left: 12px;
                     horizontal-stretch: 1;
@@ -1277,7 +1284,9 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        if root.results.length > 0: HorizontalLayout {
+                        // --- NEW: SMART FILTERS TOOLBAR ---
+                        // FIX: Toolbar remains visible if any smart filter or search query is active, preventing "locking"
+                        if root.results.length > 0 || root.filter_only_npot || root.filter_only_uncompressed || root.filter_only_missing_mips || root.filter_only_cubemaps || root.results_search_query != "": HorizontalLayout {
                             spacing: 12px;
                             padding-left: 4px;
                             padding-bottom: 4px;
@@ -1647,6 +1656,7 @@ export component AppWindow inherits Window {
                                                 width: 8px;
                                             }
 
+                                            // --- DYNAMICALLY HIDE THUMBNAIL IF PREVIEWS ARE DISABLED ---
                                             if root.enable_previews: InteractiveThumbnail {
                                                 source: row.thumbnail;
                                                 path: row.path;
@@ -1821,6 +1831,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
+                                // ---- GRID VIEW (DRY with GridCard) ----
                                 if root.results_grid_mode && root.grid_results.length > 0: ScrollView {
                                     HorizontalLayout {
                                         spacing: 12px;
@@ -2135,6 +2146,7 @@ export component AppWindow inherits Window {
                                     Image {
                                         source: root.image_duplicate;
                                         image-fit: contain;
+                                        opacity: root.wipe_slider_val;
                                         width: parent.width * root.zoom_factor;
                                         height: parent.height * root.zoom_factor;
                                         x: parent.width / 2 - self.width / 2 + root.pan_x;
@@ -2229,7 +2241,7 @@ export component AppWindow inherits Window {
                             text: "B";
                             active-color: #5865f2;
                             active <=> root.active_b;
-                            clicked => { root.active_b = !root.active_b; if root.active_b { root.active_r = false; root.active_g = false; root.active_a = false; } root.channel_toggled(); }
+                            clicked => { root.active_b = !root.active_b; if root.active_b { root.active_r = false; root.active_g = false; root.active_b = false; } root.channel_toggled(); }
                         }
 
                         ChannelButton {
@@ -2242,6 +2254,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // SPLITTER
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
@@ -2261,6 +2274,7 @@ export component AppWindow inherits Window {
                     }
                 }
 
+                // RIGHT PANEL
                 VerticalLayout {
                     width: root.compare_sidebar_width;
                     padding-left: 12px;
@@ -2478,7 +2492,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // ------------------ TAB 2: LOG ------------------
+            // ------------------ TAB 2: LOG (Console Output) ------------------
             if root.active_tab == 2: VerticalLayout {
                 padding: 15px;
                 spacing: 10px;
@@ -2520,7 +2534,7 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                     }
                 }
-            }
+            } // End of Tab 2
         }
 
         // Progress Overlay Container

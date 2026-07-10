@@ -64,10 +64,8 @@ pub fn register_callbacks(
 
         let app_weak_progress = app_copy.clone();
         params.on_progress = Some(Arc::new(move |prog, current, total| {
-            // <-- UPDATED RECEIVER
             let _ = app_weak_progress.upgrade_in_event_loop(move |ui| {
                 ui.set_progress(prog);
-                // DYNAMICALLY DISPLAY PROGRESS COUNTER ("Processed 145 / 10,000 files")
                 ui.set_status_text(
                     format!("Processing assets ({} / {})...", current, total).into(),
                 );
@@ -772,21 +770,42 @@ pub fn register_callbacks(
                     }
                 }
 
-                utils::ui::update_results_ui(&ui, &lock);
-
+                // COLLAPSED NESTED IF BLOCKS WITH LET-CHAINS
                 use slint::Model;
-                let mut updated_group_files = Vec::new();
-                let current_group_files = ui.get_selected_group_files();
-                for i in 0..current_group_files.row_count() {
-                    let mut r = current_group_files.row_data(i).unwrap();
-                    if scanners::normalize_path_key(r.path.as_str()) == normalized_path {
-                        r.thumbnail = utils::ui::convert_to_slint_image(&channel_img);
+                let slint_img = utils::ui::convert_to_slint_image(&channel_img);
+
+                // Update List Results
+                let results_model = ui.get_results();
+                for i in 0..results_model.row_count() {
+                    if let Some(mut r) = results_model.row_data(i)
+                        && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                    {
+                        r.thumbnail = slint_img.clone();
+                        results_model.set_row_data(i, r);
                     }
-                    updated_group_files.push(r);
                 }
-                ui.set_selected_group_files(slint::ModelRc::from(std::rc::Rc::new(
-                    slint::VecModel::from(updated_group_files),
-                )));
+
+                // Update Grid Results
+                let grid_model = ui.get_grid_results();
+                for i in 0..grid_model.row_count() {
+                    if let Some(mut r) = grid_model.row_data(i)
+                        && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                    {
+                        r.thumbnail = slint_img.clone();
+                        grid_model.set_row_data(i, r);
+                    }
+                }
+
+                // Update Selected Group Files (Compare Panel)
+                let group_model = ui.get_selected_group_files();
+                for i in 0..group_model.row_count() {
+                    if let Some(mut r) = group_model.row_data(i)
+                        && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                    {
+                        r.thumbnail = slint_img.clone();
+                        group_model.set_row_data(i, r);
+                    }
+                }
             }
         }
     });

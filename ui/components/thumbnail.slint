@@ -1,3 +1,5 @@
+// ui/components/thumbnail.slint
+
 export component InteractiveThumbnail inherits TouchArea {
     in property <image> source;
     in property <string> path;
@@ -17,6 +19,8 @@ export component InteractiveThumbnail inherits TouchArea {
                 corner_hovered(path, self.active_quadrant);
             }
         }
+        // Return reject so standard TouchArea logic (hover leave, pressed, clicked) still executes! ---
+        EventResult.reject
     }
 
     changed has-hover => {
