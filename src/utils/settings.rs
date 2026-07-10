@@ -52,7 +52,7 @@ pub fn save_settings(ui: &AppWindow) {
 
         // Target Extensions
         ext_png: ui.get_ext_png(),
-        ext_jpg: ui.get_ext_jpg(), // <-- Saved new JPG option
+        ext_jpg: ui.get_ext_jpg(),
         ext_tga: ui.get_ext_tga(),
         ext_dds: ui.get_ext_dds(),
         ext_bmp: ui.get_ext_bmp(),

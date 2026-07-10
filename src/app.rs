@@ -237,7 +237,7 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_qc_check_compression(settings.qc_check_compression);
 
     app.set_ext_png(settings.ext_png);
-    app.set_ext_jpg(settings.ext_jpg); // <-- Applied new JPG state to UI
+    app.set_ext_jpg(settings.ext_jpg);
     app.set_ext_tga(settings.ext_tga);
     app.set_ext_dds(settings.ext_dds);
     app.set_ext_bmp(settings.ext_bmp);
