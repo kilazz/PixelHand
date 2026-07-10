@@ -13,10 +13,9 @@ import {
     Slider,
 } from "std-widgets.slint";
 
+// IMPORT COMPONENTS WITH CORRECT RELATIVE PATHS
 import { ResultsRow, SelectedFile } from "./structs.slint";
-
 export { ResultsRow, SelectedFile }from "./structs.slint";
-
 import {
     MenuItem,
     TabButton,
@@ -32,7 +31,6 @@ import {
     WipeViewport,
 } from "./components/common.slint";
 import { GridCard } from "./components/grid_card.slint";
-
 
 export component AppWindow inherits Window {
     init => {
@@ -63,7 +61,9 @@ export component AppWindow inherits Window {
     in-out property <float> progress: 0.0;
     in-out property <string> status_text: "System Ready. Drop images or write path.";
 
+    // Active file format selections
     in-out property <bool> ext_png: true;
+    in-out property <bool> ext_jpg: true;
     in-out property <bool> ext_tga: true;
     in-out property <bool> ext_dds: true;
     in-out property <bool> ext_bmp: true;
@@ -77,12 +77,14 @@ export component AppWindow inherits Window {
     in-out property <bool> ext_heic: true;
     in-out property <bool> ext_avif: true;
 
+    // Visual Reports (Contact Sheets) Settings
     in-out property <bool> save_visuals: false;
     in-out property <int> visuals_columns: 6;
     in-out property <int> visuals_max_count: 100;
     in-out property <int> visuals_font_size: 14;
     in-out property <float> visuals_scale: 1.5;
 
+    // Image Pre-processing Options
     in-out property <bool> prep_luminance: false;
     in-out property <bool> prep_channels: false;
     in-out property <bool> prep_r: true;
@@ -92,19 +94,26 @@ export component AppWindow inherits Window {
     in-out property <string> prep_tags: "";
     in-out property <bool> prep_ignore_solid: true;
 
+    // Collapsible advanced options trigger
+    in-out property <bool> show_advanced: false;
+
+    // Viewport pan/zoom
     in-out property <float> zoom_factor: 1.0;
     in-out property <length> pan_x: 0px;
     in-out property <length> pan_y: 0px;
 
+    // Excluded Folders List
     in-out property <string> excluded_folders: ".git, .svn, cache, temp";
     in-out property <bool> qc_match_by_stem: true;
     in-out property <bool> qc_hide_same_resolution: false;
 
+    // Relative Quality Control parameters
     in-out property <bool> qc_check_bloat: true;
     in-out property <bool> qc_check_alpha: true;
     in-out property <bool> qc_check_colorspace: true;
     in-out property <bool> qc_check_compression: true;
 
+    // Search precision and active model
     in-out property <int> search_precision: 1;
     in-out property <int> ai_model: 0;
     in-out property <string> custom_model_path: "";
@@ -120,6 +129,7 @@ export component AppWindow inherits Window {
     in-out property <length> col_path_w: 350px;
     in-out property <length> list_preview_size: 40px;
 
+    // Draggable Splitters states
     in-out property <length> duplicates_panel_height: 180px;
     in-out property <length> sidebar_width: 380px;
     in-out property <length> compare_sidebar_width: 440px;
@@ -248,8 +258,14 @@ export component AppWindow inherits Window {
                     VerticalLayout {
                         spacing: 4px;
                         CheckBox {
-                            text: ".png / .jpg";
+                            text: ".png";
                             checked <=> root.ext_png;
+                            toggled => { root.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: ".jpg / .jpeg";
+                            checked <=> root.ext_jpg;
                             toggled => { root.save_settings(); }
                         }
 
@@ -285,16 +301,16 @@ export component AppWindow inherits Window {
                             checked <=> root.ext_hdr;
                             toggled => { root.save_settings(); }
                         }
-                    }
 
-                    VerticalLayout {
-                        spacing: 4px;
                         CheckBox {
                             text: ".tif / .tiff";
                             checked <=> root.ext_tif;
                             toggled => { root.save_settings(); }
                         }
+                    }
 
+                    VerticalLayout {
+                        spacing: 4px;
                         CheckBox {
                             text: ".webp";
                             checked <=> root.ext_webp;
@@ -306,16 +322,16 @@ export component AppWindow inherits Window {
                             checked <=> root.ext_gif;
                             toggled => { root.save_settings(); }
                         }
-                    }
 
-                    VerticalLayout {
-                        spacing: 4px;
                         CheckBox {
                             text: ".psd";
                             checked <=> root.ext_psd;
                             toggled => { root.save_settings(); }
                         }
+                    }
 
+                    VerticalLayout {
+                        spacing: 4px;
                         CheckBox {
                             text: ".jxl";
                             checked <=> root.ext_jxl;
@@ -486,561 +502,599 @@ export component AppWindow inherits Window {
                 width: 100%;
                 height: 100%;
 
-                // SIDEBAR
+                // ACCORDION SIDEBAR WITH FIXED FOOTER ACTION
                 Rectangle {
                     width: root.sidebar_width;
                     background: #2b2d31;
                     border-color: #1f2023;
                     border-width: 1px;
                     border-radius: 4px;
-                    ScrollView {
-                        VerticalLayout {
-                            padding: 6px;
-                            spacing: 8px;
-                            PanelSection {
-                                title: "Scan Configuration";
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    FormRow {
-                                        title: "Folder A:";
-                                        HorizontalLayout {
-                                            spacing: 4px;
-                                            LineEdit {
-                                                text <=> root.dir_a;
-                                                height: 22px;
-                                                placeholder-text: "Source folder...";
-                                                horizontal-stretch: 1;
-                                                edited => { root.save_settings(); }
-                                            }
 
-                                            CustomButton {
-                                                text: "...";
-                                                width: 26px;
-                                                height: 22px;
-                                                clicked => { root.select_folder_a(); }
-                                            }
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 8px;
+
+                        // Scrollable section for configurations
+                        ScrollView {
+                            vertical-stretch: 1;
+
+                            VerticalLayout {
+                                alignment: start; // Forces natural heights on nested child panels!
+                                spacing: 12px;
+
+                                PanelSection {
+                                    title: "Operation Mode";
+                                    ComboBox {
+                                        model: [
+                                            "Exact Match (xxHash)",
+                                            "Simple Duplicates (dHash)",
+                                            "AI Semantic/Visual Search",
+                                            "Asset Inventory (Detailed Audit)",
+                                            "Technical QC Audit"
+                                        ];
+                                        current-index <=> root.search_method;
+                                        height: 32px; // <--- FIX: Fixed height for the main ComboBox
+                                        selected(val) => {
+                                            root.qc_mode = root.search_method == 4;
+                                            root.save_settings();
                                         }
-                                    }
-
-                                    if root.qc_mode: FormRow {
-                                        title: "Folder B:";
-                                        HorizontalLayout {
-                                            spacing: 4px;
-                                            LineEdit {
-                                                text <=> root.dir_b;
-                                                height: 22px;
-                                                placeholder-text: "Comparison...";
-                                                horizontal-stretch: 1;
-                                                edited => { root.save_settings(); }
-                                            }
-
-                                            CustomButton {
-                                                text: "...";
-                                                width: 26px;
-                                                height: 22px;
-                                                clicked => { root.select_folder_b(); }
-                                            }
-                                        }
-                                    }
-                                    FormRow {
-                                        title: "Exclude:";
-                                        LineEdit {
-                                            text <=> root.excluded_folders;
-                                            placeholder-text: "e.g. .cache, previews, temp_files";
-                                            height: 22px;
-                                            edited => { root.save_settings(); }
-                                        }
-                                    }
-
-                                    FormRow {
-                                        title: "Query AI:";
-                                        HorizontalLayout {
-                                            spacing: 4px;
-                                            LineEdit {
-                                                text <=> root.query_text;
-                                                placeholder-text: root.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
-                                                enabled: root.ai_model != 4;
-                                                height: 22px;
-                                                edited => { root.save_settings(); }
-                                            }
-
-                                            CustomButton {
-                                                text: "🖼️";
-                                                width: 26px;
-                                                height: 22px;
-                                                enabled: root.ai_model != 4;
-                                                clicked => { root.select_reference_image(); }
-                                            }
-                                        }
-                                    }
-
-                                    FormRow {
-                                        title: "Similarity:";
-                                        HorizontalLayout {
-                                            spacing: 6px;
-                                            Slider {
-                                                value <=> root.similarity_threshold;
-                                                minimum: 50;
-                                                maximum: 100;
-                                                height: 22px;
-                                                changed(val) => { root.save_settings(); }
-                                            }
-
-                                            Text {
-                                                text: Math.round(root.similarity_threshold) + "%";
-                                                width: 36px;
-                                                horizontal-alignment: right;
-                                                vertical-alignment: center;
-                                                font-size: 12px;
-                                                color: #ffffff;
-                                            }
-                                        }
-                                    }
-
-                                    FormRow {
-                                        title: "Batch Sz:";
-                                        SpinBox {
-                                            value <=> root.batch_size;
-                                            minimum: 16;
-                                            maximum: 1024;
-                                            height: 22px;
-                                            edited(val) => { root.save_settings(); }
-                                        }
-                                    }
-
-                                    HorizontalLayout {
-                                        spacing: 6px;
-                                        padding-top: 4px;
-                                        CustomButton {
-                                            text: "File Types";
-                                            width: 80px;
-                                            clicked => { root.ext_popup_x = self.absolute-position.x; root.ext_popup_y = self.absolute-position.y + self.height; ext_popup.show(); }
-                                        }
-
-                                        CustomButton {
-                                            text: "Clear Caches";
-                                            width: 85px;
-                                            clicked => { root.clear_cache(); }
-                                        }
-
-                                        CustomButton {
-                                            text: "Clear Models";
-                                            width: 85px;
-                                            clicked => { root.clear_models(); }
-                                        }
-
-                                        Rectangle {
-                                            horizontal-stretch: 1;
-                                        }
-                                    }
-
-                                    CheckBox {
-                                        text: "Save Visual Reports";
-                                        checked <=> root.save_visuals;
-                                        height: 20px;
-                                        toggled => { root.save_settings(); }
-                                    }
-
-                                    if root.save_visuals: VerticalLayout {
-                                        spacing: 4px;
-                                        padding-left: 8px;
-                                        HorizontalLayout {
-                                            spacing: 6px;
-                                            Text {
-                                                text: "Cols:";
-                                                vertical-alignment: center;
-                                                font-size: 11px;
-                                                color: #dcddde;
-                                                width: 35px;
-                                            }
-
-                                            SpinBox {
-                                                value <=> root.visuals_columns;
-                                                minimum: 2;
-                                                maximum: 12;
-                                                height: 22px;
-                                                width: 80px;
-                                                edited(val) => { root.save_settings(); }
-                                            }
-
-                                            Text {
-                                                text: "Max:";
-                                                vertical-alignment: center;
-                                                font-size: 11px;
-                                                color: #dcddde;
-                                                width: 35px;
-                                            }
-
-                                            SpinBox {
-                                                value <=> root.visuals_max_count;
-                                                minimum: 1;
-                                                maximum: 1000;
-                                                height: 22px;
-                                                width: 90px;
-                                                edited(val) => { root.save_settings(); }
-                                            }
-
-                                            Rectangle {
-                                                horizontal-stretch: 1;
-                                            }
-                                        }
-
-                                        HorizontalLayout {
-                                            spacing: 6px;
-                                            Text {
-                                                text: "Font:";
-                                                vertical-alignment: center;
-                                                font-size: 11px;
-                                                color: #dcddde;
-                                                width: 35px;
-                                            }
-
-                                            SpinBox {
-                                                value <=> root.visuals_font_size;
-                                                minimum: 8;
-                                                maximum: 36;
-                                                height: 22px;
-                                                width: 80px;
-                                                edited(val) => { root.save_settings(); }
-                                            }
-
-                                            Text {
-                                                text: "Scale:";
-                                                vertical-alignment: center;
-                                                font-size: 11px;
-                                                color: #dcddde;
-                                                width: 35px;
-                                            }
-
-                                            Slider {
-                                                value <=> root.visuals_scale;
-                                                minimum: 1.0;
-                                                maximum: 3.0;
-                                                height: 22px;
-                                                width: 70px;
-                                                changed(val) => { root.save_settings(); }
-                                            }
-
-                                            Text {
-                                                text: (Math.round(root.visuals_scale * 10) / 10) + "x";
-                                                width: 30px;
-                                                horizontal-alignment: right;
-                                                vertical-alignment: center;
-                                                font-size: 11px;
-                                                color: #ffffff;
-                                            }
-                                        }
-                                    }
-                                    CustomButton {
-                                        text: root.is_scanning ? "Stop / Cancel Scan" : "Start Scan";
-                                        primary-color: root.is_scanning ? #f23f43 : #23a55a;
-                                        height: 26px;
-                                        clicked => { if root.is_scanning { root.cancel_scan(); } else { root.run_scan(); } }
                                     }
                                 }
-                            }
 
-                            PanelSection {
-                                title: "Image Preparation Options";
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    CheckBox {
-                                        text: "Compare by luminance only";
-                                        checked <=> root.prep_luminance;
-                                        height: 20px;
-                                        toggled => { root.save_settings(); }
-                                    }
-
-                                    CheckBox {
-                                        text: "Compare by specific channels";
-                                        checked <=> root.prep_channels;
-                                        height: 20px;
-                                        toggled => { root.save_settings(); }
-                                    }
-
-                                    CheckBox {
-                                        text: "Enable HDR Tonemapping";
-                                        checked <=> root.tonemap_enabled;
-                                        height: 20px;
-                                        toggled => { root.tonemap_toggled(); }
-                                    }
-
-                                    if root.tonemap_enabled: ComboBox {
-                                        model: ["ACES Filmic", "ICtCp Perceptual", "Khronos PBR Neutral"];
-                                        current-index <=> root.tonemap_operator;
-                                        height: 22px;
-                                        selected(val) => { root.tonemap_toggled(); }
-                                    }
-                                    if root.prep_channels: VerticalLayout {
+                                PanelSection {
+                                    title: "Target Directories";
+                                    VerticalLayout {
                                         spacing: 4px;
-                                        padding-left: 12px;
+                                        FormRow {
+                                            title: "Folder A:";
+                                            HorizontalLayout {
+                                                spacing: 4px;
+                                                LineEdit {
+                                                    text <=> root.dir_a;
+                                                    height: 32px;
+                                                    placeholder-text: "Source folder...";
+                                                    horizontal-stretch: 1;
+                                                    edited => { root.save_settings(); }
+                                                }
+
+                                                CustomButton {
+                                                    text: "...";
+                                                    width: 32px;
+                                                    height: 32px;
+                                                    clicked => { root.select_folder_a(); }
+                                                }
+                                            }
+                                        }
+
+                                        if root.search_method == 4: FormRow {
+                                            title: "Folder B:";
+                                            HorizontalLayout {
+                                                spacing: 4px;
+                                                LineEdit {
+                                                    text <=> root.dir_b;
+                                                    height: 32px;
+                                                    placeholder-text: "Comparison folder...";
+                                                    horizontal-stretch: 1;
+                                                    edited => { root.save_settings(); }
+                                                }
+
+                                                CustomButton {
+                                                    text: "...";
+                                                    width: 32px;
+                                                    height: 32px;
+                                                    clicked => { root.select_folder_b(); }
+                                                }
+                                            }
+                                        }
+                                        FormRow {
+                                            title: "Exclude:";
+                                            LineEdit {
+                                                text <=> root.excluded_folders;
+                                                placeholder-text: "e.g. .cache, previews, temp_files";
+                                                height: 32px;
+                                                edited => { root.save_settings(); }
+                                            }
+                                        }
+
                                         HorizontalLayout {
-                                            spacing: 12px;
-                                            CheckBox {
-                                                text: "R";
-                                                checked <=> root.prep_r;
-                                                toggled => { root.save_settings(); }
+                                            spacing: 6px;
+                                            padding-top: 4px;
+                                            CustomButton {
+                                                text: "File Formats";
+                                                height: 32px;
+                                                clicked => { root.ext_popup_x = self.absolute-position.x; root.ext_popup_y = self.absolute-position.y + self.height; ext_popup.show(); }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // MODE DRIVEN DYNAMIC CONFIGURATIONS
+                                
+                                // A. Duplicates Parameters
+                                if root.search_method == 0 || root.search_method == 1: PanelSection {
+                                    title: "Duplicates Finder Options";
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        FormRow {
+                                            title: "Similarity:";
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Slider {
+                                                    value <=> root.similarity_threshold;
+                                                    minimum: 50;
+                                                    maximum: 100;
+                                                    height: 32px;
+                                                    changed(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: Math.round(root.similarity_threshold) + "%";
+                                                    width: 36px;
+                                                    horizontal-alignment: right;
+                                                    vertical-alignment: center;
+                                                    font-size: 12px;
+                                                    color: #ffffff;
+                                                }
+                                            }
+                                        }
+
+                                        CheckBox {
+                                            text: "Save Visual Reports";
+                                            checked <=> root.save_visuals;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+
+                                        if root.save_visuals: VerticalLayout {
+                                            spacing: 4px;
+                                            padding-left: 8px;
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: "Cols:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                SpinBox {
+                                                    value <=> root.visuals_columns;
+                                                    minimum: 2;
+                                                    maximum: 12;
+                                                    height: 32px;
+                                                    width: 80px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: "Max:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                SpinBox {
+                                                    value <=> root.visuals_max_count;
+                                                    minimum: 1;
+                                                    maximum: 1000;
+                                                    height: 32px;
+                                                    width: 90px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: "Font:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                SpinBox {
+                                                    value <=> root.visuals_font_size;
+                                                    minimum: 8;
+                                                    maximum: 36;
+                                                    height: 32px;
+                                                    width: 80px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: "Scale:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                Slider {
+                                                    value <=> root.visuals_scale;
+                                                    minimum: 1.0;
+                                                    maximum: 3.0;
+                                                    height: 32px;
+                                                    width: 70px;
+                                                    changed(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: (Math.round(root.visuals_scale * 10) / 10) + "x";
+                                                    width: 30px;
+                                                    horizontal-alignment: right;
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #ffffff;
+                                                }
+                                            }
+                                        }
+                                        if root.search_method == 1: CheckBox {
+                                            text: "Compare by luminance only";
+                                            checked <=> root.prep_luminance;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+                                        if root.search_method == 1: CheckBox {
+                                            text: "Compare by specific channels";
+                                            checked <=> root.prep_channels;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+                                        if root.search_method == 1 && root.prep_channels: VerticalLayout {
+                                            spacing: 4px;
+                                            padding-left: 12px;
+                                            HorizontalLayout {
+                                                spacing: 12px;
+                                                CheckBox {
+                                                    text: "R";
+                                                    checked <=> root.prep_r;
+                                                    toggled => { root.save_settings(); }
+                                                }
+
+                                                CheckBox {
+                                                    text: "G";
+                                                    checked <=> root.prep_g;
+                                                    toggled => { root.save_settings(); }
+                                                }
+
+                                                CheckBox {
+                                                    text: "B";
+                                                    checked <=> root.prep_b;
+                                                    toggled => { root.save_settings(); }
+                                                }
+
+                                                CheckBox {
+                                                    text: "A";
+                                                    checked <=> root.prep_a;
+                                                    toggled => { root.save_settings(); }
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+
+                                            FormRow {
+                                                title: "Tags:";
+                                                label-width: 40px;
+                                                LineEdit {
+                                                    text <=> root.prep_tags;
+                                                    placeholder-text: "_mask, _ddn";
+                                                    height: 32px;
+                                                    edited => { root.save_settings(); }
+                                                }
                                             }
 
                                             CheckBox {
-                                                text: "G";
-                                                checked <=> root.prep_g;
+                                                text: "Ignore solid channels";
+                                                checked <=> root.prep_ignore_solid;
+                                                height: 20px;
                                                 toggled => { root.save_settings(); }
                                             }
+                                        }
+                                    }
+                                }
 
-                                            CheckBox {
-                                                text: "B";
-                                                checked <=> root.prep_b;
-                                                toggled => { root.save_settings(); }
-                                            }
+                                // B. AI Parameters
+                                if root.search_method == 2: PanelSection {
+                                    title: "AI Semantic Search Options";
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        FormRow {
+                                            title: "Query AI:";
+                                            HorizontalLayout {
+                                                spacing: 4px;
+                                                LineEdit {
+                                                    text <=> root.query_text;
+                                                    height: 32px;
+                                                    placeholder-text: root.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                                    enabled: root.ai_model != 4;
+                                                    edited => { root.save_settings(); }
+                                                }
 
-                                            CheckBox {
-                                                text: "A";
-                                                checked <=> root.prep_a;
-                                                toggled => { root.save_settings(); }
-                                            }
-
-                                            Rectangle {
-                                                horizontal-stretch: 1;
+                                                CustomButton {
+                                                    text: "🖼️";
+                                                    width: 32px;
+                                                    height: 32px;
+                                                    enabled: root.ai_model != 4;
+                                                    clicked => { root.select_reference_image(); }
+                                                }
                                             }
                                         }
 
                                         FormRow {
-                                            title: "Tags:";
-                                            label-width: 40px;
-                                            LineEdit {
-                                                text <=> root.prep_tags;
-                                                placeholder-text: "_mask, _ddn";
-                                                height: 22px;
-                                                edited => { root.save_settings(); }
+                                            title: "Model:";
+                                            ComboBox {
+                                                model: [
+                                                    "Fastest (CLIP-B/32)",
+                                                    "Balanced (CLIP-L/14)",
+                                                    "Compact (SigLIP-B)",
+                                                    "High Quality (SigLIP-L)",
+                                                    "Visual Structure (DINOv2-B)",
+                                                    "Custom (Local ONNX)"
+                                                ];
+                                                current-index <=> root.ai_model;
+                                                height: 32px; // <--- FIX: Fixed height for the Model ComboBox
+                                                selected(val) => { root.save_settings(); }
                                             }
                                         }
 
-                                        CheckBox {
-                                            text: "Ignore solid channels";
-                                            checked <=> root.prep_ignore_solid;
-                                            height: 20px;
-                                            toggled => { root.save_settings(); }
+                                        if root.ai_model == 5: VerticalLayout {
+                                            spacing: 4px;
+                                            FormRow {
+                                                title: "Local Path:";
+                                                HorizontalLayout {
+                                                    spacing: 4px;
+                                                    LineEdit {
+                                                        text <=> root.custom_model_path;
+                                                        height: 32px;
+                                                        horizontal-stretch: 1;
+                                                        edited => { root.save_settings(); }
+                                                    }
+
+                                                    CustomButton {
+                                                        text: "...";
+                                                        width: 32px;
+                                                        height: 32px;
+                                                        clicked => { root.select_custom_model(); }
+                                                    }
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: "Arch:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 30px;
+                                                }
+
+                                                ComboBox {
+                                                    model: ["CLIP", "SigLIP", "DINOv2"];
+                                                    current-index <=> root.custom_model_arch;
+                                                    height: 32px;
+                                                    selected(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: "Dim:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 30px;
+                                                }
+
+                                                SpinBox {
+                                                    value: root.custom_model_dim;
+                                                    minimum: 64;
+                                                    maximum: 4096;
+                                                    height: 32px;
+                                                    edited(val) => { root.custom_model_dim = val; root.save_settings(); }
+                                                }
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            PanelSection {
-                                title: "Quality Control (QC) Options";
-                                VerticalLayout {
-                                    spacing: 4px;
-                                    CheckBox {
-                                        text: "Enable Technical QC Mode";
-                                        checked <=> root.qc_mode;
-                                        height: 20px;
-                                        toggled => { root.save_settings(); }
-                                    }
-
-                                    if root.qc_mode: VerticalLayout {
-                                        spacing: 2px;
-                                        padding-left: 8px;
+                                // C. Technical QC Audit Parameters
+                                if root.search_method == 4: PanelSection {
+                                    title: "QC Criteria List";
+                                    VerticalLayout {
+                                        spacing: 4px;
                                         CheckBox {
                                             text: "Match by stem";
                                             checked <=> root.qc_match_by_stem;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Hide same resolution";
                                             checked <=> root.qc_hide_same_resolution;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check NPOT (Power of 2)";
                                             checked <=> root.qc_npot;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Mip-Maps";
                                             checked <=> root.qc_mipmaps;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check BlockAlignment";
                                             checked <=> root.qc_block_align;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Bit Depth";
                                             checked <=> root.qc_bit_depth;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Solid Colors";
                                             checked <=> root.qc_solid_colors;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Validate Normal Maps";
                                             checked <=> root.qc_normals;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         if root.qc_normals: LineEdit {
                                             text <=> root.qc_normals_tags;
                                             placeholder-text: "Tags: _norm, _ddn";
-                                            height: 22px;
+                                            height: 32px;
                                             edited => { root.save_settings(); }
                                         }
                                         CheckBox {
                                             text: "Check Size Bloat";
                                             checked <=> root.qc_check_bloat;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Alpha Mismatch";
                                             checked <=> root.qc_check_alpha;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Color Space";
                                             checked <=> root.qc_check_colorspace;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
 
                                         CheckBox {
                                             text: "Check Compression Change";
                                             checked <=> root.qc_check_compression;
-                                            height: 20px;
                                             toggled => { root.save_settings(); }
                                         }
                                     }
                                 }
-                            }
 
-                            PanelSection {
-                                title: "Search Methods (Non-QC)";
-                                ComboBox {
-                                    model: [
-                                        "Exact Match (xxHash)",
-                                        "Simple Duplicates (dHash)",
-                                        "AI Semantic/Visual Search",
-                                        "Asset Inventory (Detailed Audit)"
-                                    ];
-                                    current-index <=> root.search_method;
-                                    height: 22px;
-                                    selected(val) => { root.save_settings(); }
-                                }
-                            }
-
-                            if root.search_method == 2: PanelSection {
-                                title: "AI Model";
-                                ComboBox {
-                                    model: [
-                                        "Fastest (CLIP-B/32)",
-                                        "Balanced (CLIP-L/14)",
-                                        "Compact (SigLIP-B)",
-                                        "High Quality (SigLIP-L)",
-                                        "Visual Structure (DINOv2-B)",
-                                        "Custom (Local ONNX)"
-                                    ];
-                                    current-index <=> root.ai_model;
-                                    height: 22px;
-                                    selected(val) => { root.save_settings(); }
-                                }
-                            }
-                            if root.search_method == 2 && root.ai_model == 5: VerticalLayout {
-                                spacing: 4px;
-                                FormRow {
-                                    title: "Local Path:";
-                                    HorizontalLayout {
+                                // D. Collapsible Progressive Disclosure advanced parameters
+                                PanelSection {
+                                    title: "Advanced System Settings";
+                                    VerticalLayout {
                                         spacing: 4px;
-                                        LineEdit {
-                                            text <=> root.custom_model_path;
-                                            height: 22px;
-                                            horizontal-stretch: 1;
-                                            edited => { root.save_settings(); }
+                                        HorizontalLayout {
+                                            alignment: space-between;
+                                            Text {
+                                                text: "Show Advanced Settings";
+                                                font-size: 11px;
+                                                color: #dcddde;
+                                                vertical-alignment: center;
+                                            }
+
+                                            CheckBox {
+                                                checked <=> root.show_advanced;
+                                            }
                                         }
 
-                                        CustomButton {
-                                            text: "...";
-                                            width: 26px;
-                                            height: 22px;
-                                            clicked => { root.select_custom_model(); }
+                                        if root.show_advanced: VerticalLayout {
+                                            spacing: 4px;
+                                            padding-top: 6px;
+                                            FormRow {
+                                                title: "Batch Size:";
+                                                SpinBox {
+                                                    value <=> root.batch_size;
+                                                    minimum: 16;
+                                                    maximum: 1024;
+                                                    height: 32px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+                                            }
+
+                                            if root.search_method == 2: FormRow {
+                                                title: "LanceDB Prec:";
+                                                ComboBox {
+                                                    model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
+                                                    current-index <=> root.search_precision;
+                                                    height: 32px;
+                                                    selected(val) => { root.save_settings(); }
+                                                }
+                                            }
+                                            FormRow {
+                                                title: "Provider:";
+                                                ComboBox {
+                                                    model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
+                                                    current-index <=> root.execution_provider;
+                                                    height: 32px;
+                                                    selected(val) => { root.save_settings(); }
+                                                }
+                                            }
+
+                                            CheckBox {
+                                                text: "Enable HDR Tonemapping";
+                                                checked <=> root.tonemap_enabled;
+                                                toggled => { root.tonemap_toggled(); }
+                                            }
+
+                                            if root.tonemap_enabled: ComboBox {
+                                                model: ["ACES Filmic", "ICtCp Perceptual", "Khronos PBR Neutral"];
+                                                current-index <=> root.tonemap_operator;
+                                                height: 32px;
+                                                selected(val) => { root.tonemap_toggled(); }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                padding-top: 4px;
+                                                CustomButton {
+                                                    text: "Clear Caches";
+                                                    height: 32px;
+                                                    clicked => { root.clear_cache(); }
+                                                }
+
+                                                CustomButton {
+                                                    text: "Clear Models";
+                                                    height: 32px;
+                                                    clicked => { root.clear_models(); }
+                                                }
+                                            }
                                         }
                                     }
                                 }
+                            }
+                        }
 
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    Text {
-                                        text: "Arch:";
-                                        vertical-alignment: center;
-                                        font-size: 11px;
-                                        color: #dcddde;
-                                        width: 30px;
-                                    }
+                        // FIXED BOTTOM SCAN BUTTON
+                        Rectangle {
+                            height: 40px;
+                            background: #1e1f22;
+                            border-radius: 4px;
 
-                                    ComboBox {
-                                        model: ["CLIP", "SigLIP", "DINOv2"];
-                                        current-index <=> root.custom_model_arch;
-                                        height: 22px;
-                                        selected(val) => { root.save_settings(); }
-                                    }
-
-                                    Text {
-                                        text: "Dim:";
-                                        vertical-alignment: center;
-                                        font-size: 11px;
-                                        color: #dcddde;
-                                        width: 30px;
-                                    }
-
-                                    SpinBox {
-                                        value: root.custom_model_dim;
-                                        minimum: 64;
-                                        maximum: 4096;
-                                        height: 22px;
-                                        edited(val) => { root.custom_model_dim = val; root.save_settings(); }
+                            VerticalLayout {
+                                padding: 4px;
+                                CustomButton {
+                                    text: root.is_scanning ? "STOP SCAN" : "RUN SCANNER";
+                                    primary-color: root.is_scanning ? #f23f43 : #23a55a;
+                                    height: 32px;
+                                    clicked => {
+                                        if (root.is_scanning) {
+                                            root.cancel_scan();
+                                        } else {
+                                            root.run_scan();
+                                        }
                                     }
                                 }
-                            }
-                            if root.search_method == 2: PanelSection {
-                                title: "Search Precision (LanceDB)";
-                                ComboBox {
-                                    model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
-                                    current-index <=> root.search_precision;
-                                    height: 22px;
-                                    selected(val) => { root.save_settings(); }
-                                }
-                            }
-                            PanelSection {
-                                title: "Execution Provider";
-                                ComboBox {
-                                    model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
-                                    current-index <=> root.execution_provider;
-                                    height: 22px;
-                                    selected(val) => { root.save_settings(); }
-                                }
-                            }
-
-                            Rectangle {
-                                vertical-stretch: 1;
                             }
                         }
                     }

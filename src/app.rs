@@ -211,10 +211,18 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_query_text(settings.query_text.clone().into());
     app.set_similarity_threshold(settings.similarity_threshold);
     app.set_batch_size(settings.batch_size);
-    app.set_search_method(settings.search_method);
+
+    // Dynamic state restoration for search method and QC mode
+    let search_method = if settings.qc_mode {
+        4
+    } else {
+        settings.search_method
+    };
+    app.set_search_method(search_method);
+    app.set_qc_mode(settings.qc_mode);
+
     app.set_execution_provider(settings.execution_provider);
 
-    app.set_qc_mode(settings.qc_mode);
     app.set_qc_npot(settings.qc_npot);
     app.set_qc_mipmaps(settings.qc_mipmaps);
     app.set_qc_block_align(settings.qc_block_align);
@@ -229,6 +237,7 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_qc_check_compression(settings.qc_check_compression);
 
     app.set_ext_png(settings.ext_png);
+    app.set_ext_jpg(settings.ext_jpg); // <-- Applied new JPG state to UI
     app.set_ext_tga(settings.ext_tga);
     app.set_ext_dds(settings.ext_dds);
     app.set_ext_bmp(settings.ext_bmp);

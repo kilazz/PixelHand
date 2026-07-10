@@ -33,7 +33,7 @@ pub fn save_settings(ui: &AppWindow) {
         execution_provider: ui.get_execution_provider(),
 
         // Quality Control Options
-        qc_mode: ui.get_qc_mode(),
+        qc_mode: ui.get_search_method() == 4, // <-- QC mode is implicitly active when 5th method is chosen
         qc_npot: ui.get_qc_npot(),
         qc_mipmaps: ui.get_qc_mipmaps(),
         qc_block_align: ui.get_qc_block_align(),
@@ -52,6 +52,7 @@ pub fn save_settings(ui: &AppWindow) {
 
         // Target Extensions
         ext_png: ui.get_ext_png(),
+        ext_jpg: ui.get_ext_jpg(), // <-- Saved new JPG option
         ext_tga: ui.get_ext_tga(),
         ext_dds: ui.get_ext_dds(),
         ext_bmp: ui.get_ext_bmp(),

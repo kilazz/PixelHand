@@ -49,7 +49,7 @@ pub struct ScanParams {
     pub query_text: String,
     pub similarity: f32,
     pub batch_size: usize,
-    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI Embeddings, 3: Asset Inventory
+    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI Embeddings, 3: Asset Inventory, 4: QC Audit
     pub execution_provider: String,
     pub qc_mode: bool,
     pub qc_npot: bool,
@@ -99,7 +99,7 @@ pub struct ScanParams {
     // Live Progress Update handler (thread-safe Arc wrapper)
     pub on_progress: Option<Arc<dyn Fn(f32) + Send + Sync>>,
 
-    // Custom Local ONNX configurations
+    // Custom Model Local Options
     pub custom_model_path: String,
     pub custom_model_arch: i32,
     pub custom_model_dim: i32,
@@ -112,11 +112,16 @@ impl ScanParams {
         cancel_token: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let mut extensions = Vec::new();
+
+        // Split PNG and JPG correctly [3]
         if ui.get_ext_png() {
             extensions.push(".png".to_string());
+        }
+        if ui.get_ext_jpg() {
             extensions.push(".jpg".to_string());
             extensions.push(".jpeg".to_string());
         }
+
         if ui.get_ext_tga() {
             extensions.push(".tga".to_string());
         }
@@ -139,7 +144,6 @@ impl ScanParams {
         if ui.get_ext_webp() {
             extensions.push(".webp".to_string());
         }
-        // Parse newly exposed file formats [3]
         if ui.get_ext_gif() {
             extensions.push(".gif".to_string());
         }
@@ -342,7 +346,7 @@ pub async fn execute_scan(
             Ok((Vec::new(), rows))
         }
     } else if params.search_method == 3 {
-        // Asset Inventory (Detailed Audit)
+        // --- NEW MODE: Asset Inventory (Detailed Audit) ---
         let mut rows = qc::run_asset_audit(params).await?;
         // Default sort by filename
         rows.sort_by(|a, b| a.path.cmp(&b.path));

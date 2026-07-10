@@ -33,8 +33,9 @@ pub struct AppSettings {
     pub qc_check_colorspace: bool,
     pub qc_check_compression: bool,
 
-    // File Extensions
+    // File Extensions (Split PNG and JPG)
     pub ext_png: bool,
+    pub ext_jpg: bool, // <--- NEW SEPARATED EXTENSION FIELD
     pub ext_tga: bool,
     pub ext_dds: bool,
     pub ext_bmp: bool,
@@ -114,6 +115,7 @@ impl Default for AppSettings {
             qc_check_compression: true,
 
             ext_png: true,
+            ext_jpg: true, // Default to true
             ext_tga: true,
             ext_dds: true,
             ext_bmp: true,
@@ -177,6 +179,8 @@ pub struct DuplicateFileSummary {
     pub has_alpha: bool,
     pub bit_depth: u32,
     pub mipmap_count: u32,
+
+    // --- NEW FIELD FOR CUBEMAP IDENTIFICATION ---
     pub is_cubemap: bool,
 
     pub similarity: f32,
