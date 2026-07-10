@@ -12,24 +12,25 @@
     Specifically tailored for GameDev & VFX pipelines. Automates routine graphics asset integrity checks:
     *   **Absolute Checks**: NPOT (Non-Power-of-Two) dimensions validation, missing Mip-maps inspection, block compression alignment (4px) verification, and bit depth analysis.
     *   **Surface Inspection**: Constant flat color detection and tangent-space **Normal Map vector integrity validation** (identifies non-normalized vectors and inverted axes).
-    *   **Relative Compare Checks**: Real-time evaluation of resolution downgrades, file size bloat (>1.5x), lost alpha channels, color space discrepancies (sRGB vs Linear), and unexpected compression format transitions.
+    *   **Relative Compare Checks**: Evaluation of resolution downgrades, file size bloat (>1.5x), lost alpha channels, color space discrepancies (sRGB vs Linear), and unexpected compression format transitions.
 *   📂 **Advanced Comparative Modes**
-    *   **Folder A vs Folder B**: Audit build directories or asset releases against source repositories, with option to hide identical resolution files to isolate regressions.
+    *   **Folder A vs Folder B**: Audit build directories or asset releases against source repositories, with optimized single-pass metadata evaluations.
     *   **Channel Toggle Analysis**: Isolate and inspect individual RGBA color channels (**R, G, B, A**) to analyze packed channel masks.
 *   🖼️ **High-Fidelity Interactive Viewer**
     Pixel-perfect comparative canvas tools with synchronized panning and zooming:
     *   **Side-by-Side** layout.
-    *   **Wipe Mode** with adjustable splitter bar.
+    *   **Interactive Wipe Mode**: Drag the orange vertical splitter line directly inside the viewport canvas, bi-directionally bound (`<=>`) to the toolbar slider for instant visual feedback.
     *   **Overlay Blend** with alpha transparency controls.
-    *   **Difference Heatmap** generator to visually isolate tiny color channel variations.
+    *   **Difference Heatmap**: Computes pixel differences in parallel across all CPU cores using `rayon::par_chunks_exact_mut` to eliminate UI stuttering when loading massive 4K/8K textures.
     *   **Professional HDR-to-SDR Tonemapping**: Selectable realtime operators supporting **ACES Filmic**, per-channel **ICtCp Perceptual (BT.2446c)**, and **Khronos PBR Neutral** to display linear float textures accurately without hue shifting.
 *   ⚡ **Fluid UI & Live Feedback**
-    *   A level, start-aligned **4-Column Responsive Grid View** with a realtime card-resizing slider.
+    *   **Virtualized Responsive Grid View**: Grid cards are grouped into rows of 4-column packages (`GridRow`) rendered inside a virtualized Slint `ListView`, maintaining fluid scrolling on directories with tens of thousands of duplicate clusters.
+    *   **Zero-Lag Hover Channel Previews**: Enhanced with an asynchronous, non-blocking 80ms debouncer (throttling) in the Rust background task to prevent Slint event loop spam and maintain 60+ FPS during rapid cursor movement.
     *   **Live progress bar updating** during CPU-bound hashing and GPU-bound ML inference loops.
     *   Instant `Expand All` and `Collapse All` duplicate group triggers.
 
 ## Format Support
-*   **Formats**: `.dds`,`.exr`, `.hdr`
+*   **HDR Formats**: `.dds`,`.exr`, `.hdr`
 *   **Source Formats**: `.psd`,`.jxl`, `.heic`/`.heif`
 *   **Standard Formats**: `.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.tiff`, `.webp`
 
@@ -40,16 +41,16 @@
 
 ## Development
 ```
-# Run GUI
+Run GUI
 cargo run
 
-# Run the command-line (CLI) auditor mode
+Run the command-line (CLI) auditor mode
 cargo run -- -c --scan-exact <directory_path>
 cargo run -- -c --scan-qc <directory_path> --check-npot --validate-normals
 
-# Clean security audit (Zero vulnerabilities / unmaintained warning-free)
+Clean security audit (Zero vulnerabilities / unmaintained warning-free)
 cargo audit
 
-# Compile optimized production release binaries
+Compile optimized production release binaries
 cargo build --release
 ```
