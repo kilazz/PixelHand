@@ -373,6 +373,62 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Custom Context Menu (Right-Click) Handler
+    let app_weak_ctx = app.as_weak();
+    let state_clone_ctx = state.clone();
+    app.on_context_menu_action(move |action, path| {
+        let path_str = path.to_string();
+        if path_str.is_empty() {
+            return;
+        }
+
+        match action.as_str() {
+            "open" => {
+                tracing::info!("Context Menu: Opening file {}", path_str);
+                if let Err(e) = open::that(&path_str) {
+                    tracing::error!("Failed to open file: {}", e);
+                }
+            }
+            "explore" => {
+                tracing::info!("Context Menu: Showing in explorer {}", path_str);
+                // Collapsed Clippy `if let` chain
+                if let Some(parent_dir) = std::path::Path::new(&path_str).parent()
+                    && let Err(e) = open::that(parent_dir)
+                {
+                    tracing::error!("Failed to open directory: {}", e);
+                }
+            }
+            "trash" => {
+                let p = std::path::PathBuf::from(&path_str);
+                if p.exists() {
+                    match trash::delete(&p) {
+                        Ok(_) => {
+                            tracing::info!("Moved to trash via context menu: {}", path_str);
+
+                            // Update UI status and dynamically remove from the list
+                            if let Some(ui) = app_weak_ctx.upgrade() {
+                                ui.set_status_text(
+                                    format!(
+                                        "Moved to trash: {}",
+                                        p.file_name().unwrap_or_default().to_string_lossy()
+                                    )
+                                    .into(),
+                                );
+
+                                // Safely remove from AppState so it vanishes from the UI immediately
+                                let mut lock = state_clone_ctx.lock().unwrap();
+                                lock.results.retain(|r| r.path != path_str);
+                                utils::ui::update_results_ui(&ui, &lock);
+                            }
+                        }
+                        Err(e) => tracing::error!("Failed to move to trash: {}", e),
+                    }
+                }
+            }
+            _ => {}
+        }
+    });
+
     let app_weak = app.as_weak();
     let state_clone = state.clone();
     app.on_row_checkbox_toggled(move |idx| {

@@ -431,6 +431,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
             let thumbnail_data = load_thumbnail_for_path(&file.path);
+
             rows.push(ResultsRowData {
                 is_header: false,
                 is_qc: false,
@@ -449,10 +450,21 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
                     format!("{:.1}%", file.similarity)
                 },
                 size_str: crate::utils::helpers::format_size(file.size),
-                meta_str: format!(
-                    "{}x{} • {}",
-                    file.width, file.height, file.compression_format
-                ),
+                meta_str: {
+                    let size_mb = file.size as f64 / 1024.0 / 1024.0;
+                    let alpha_str = if file.has_alpha { "RGBA" } else { "RGB" };
+                    format!(
+                        "{}x{} • {:.2} MB • {} • {} • {}-bit • {} • Mips: {}",
+                        file.width,
+                        file.height,
+                        size_mb,
+                        file.format_str.to_uppercase(),
+                        file.compression_format,
+                        file.bit_depth,
+                        alpha_str,
+                        file.mipmap_count
+                    )
+                },
                 is_best,
                 is_checked: false,
                 thumbnail_data,

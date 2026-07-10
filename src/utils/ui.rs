@@ -125,11 +125,11 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
         // 4. List Collection & Collapse Logic
         if row.is_header {
             let mut slint_row = convert_to_slint_row(row);
-            slint_row.meta_str = if state.collapsed_groups.contains(&row.group_index) {
-                slint::SharedString::from("▶ [Collapsed] Click Header to Expand")
-            } else {
-                slint::SharedString::from("▼ [Expanded] Click Header to Collapse")
-            };
+
+            // Pass the collapsed state via is_checked so Slint can render the ▶/▼ arrows natively
+            // instead of hardcoding ugly string overwrites into meta_str.
+            slint_row.is_checked = state.collapsed_groups.contains(&row.group_index);
+
             slint_rows.push(slint_row);
         } else if !state.collapsed_groups.contains(&row.group_index) {
             slint_rows.push(convert_to_slint_row(row));
