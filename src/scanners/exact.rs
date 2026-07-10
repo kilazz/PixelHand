@@ -19,14 +19,13 @@ struct FileMetadata {
     hash: String,
 }
 
-/// Executes a byte-exact file scan using high-speed xxHash64 streams.
+/// Executes a byte-exact duplicate scan across files using high-speed xxHash64.
 pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
-    let path = PathBuf::from(params.dir_a.clone());
+    let path = PathBuf::from(&params.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
-    // Split raw excluded folders string into separate tokens
     let ex_folders: Vec<String> = params
         .excluded_folders
         .split(',')
@@ -43,7 +42,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
     let total = paths.len();
     let processed = std::sync::atomic::AtomicUsize::new(0);
 
-    // Parallel file inspection and hashing using Rayon thread-pool
+    // Process files in parallel, filtering out errors and zero-byte allocations
     let metadata_list: Vec<FileMetadata> = paths
         .par_iter()
         .filter_map(|p| {
@@ -56,15 +55,14 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
             if size == 0 {
                 return None;
             }
+
             let (width, height) = match imagesize::size(p) {
                 Ok(dim) => (dim.width, dim.height),
                 Err(_) => (0, 0),
             };
 
-            // Extract the high-speed xxHash64 representation of the file
             let hash = calculate_xxhash(p).ok()?;
 
-            // Progress tracking updates
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
                 cb(current as f32 / total as f32, current, total);
@@ -84,19 +82,24 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
         return Err(anyhow!("Scan cancelled by user."));
     }
 
-    // Group matching files into hashing buckets to identify exact duplicates
+    // Group files with identical hash values into buckets
     let mut groups: HashMap<String, Vec<FileMetadata>> = HashMap::new();
     for meta in metadata_list {
         groups.entry(meta.hash.clone()).or_default().push(meta);
     }
 
+    // Retain only buckets containing actual duplicates (count > 1)
     let mut dups: Vec<(String, Vec<FileMetadata>)> =
         groups.into_iter().filter(|(_, f)| f.len() > 1).collect();
 
-    // Sort groups so that the largest duplicate clusters on disk appear first
-    dups.sort_by(|a, b| b.1[0].size.cmp(&a.1[0].size));
+    // Sort groups by file size descending (largest duplicate clusters first)
+    dups.sort_by(|a, b| {
+        let size_a = a.1.first().map(|f| f.size).unwrap_or(0);
+        let size_b = b.1.first().map(|f| f.size).unwrap_or(0);
+        size_b.cmp(&size_a)
+    });
 
-    let mut results = Vec::new();
+    let mut results = Vec::with_capacity(dups.len());
     for (hash, files) in dups {
         let file_summaries = files
             .into_iter()

@@ -11,9 +11,11 @@ pub struct DecodedCacheItem {
     pub image: image::RgbaImage,
 }
 
-// Public static OnceLock to allow app.rs to clear the cache upon tonemapping adjustments
+/// Global dynamic memory cache to hold decrypted 1:1 original pixel buffers.
 pub static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
 
+/// Decodes and returns the requested color channels (R, G, B, A, or Composite)
+/// of the image at the specified path, utilizing a lightweight LRU memory cache.
 pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::RgbaImage> {
     let p = PathBuf::from(path);
     if !p.is_file() {
@@ -36,19 +38,15 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     }
 
     if !cache.contains_key(path) {
-        // Load 1:1 original full-resolution pixel buffers for split-pane inspects
+        // Fall back to opening and decoding the full 1:1 original graphics payload
         let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p, None).ok()?;
 
-        // Least-Recently-Used (LRU) eviction rule limiting cache to 4 massive images to avoid OOM
+        // Evict Least Recently Used (LRU) asset if cache exceeds memory boundaries
         if cache.len() >= 4 {
-            let mut oldest_key = None;
-            let mut oldest_time = std::time::Instant::now();
-            for (k, item) in cache.iter() {
-                if item.last_accessed < oldest_time {
-                    oldest_time = item.last_accessed;
-                    oldest_key = Some(k.clone());
-                }
-            }
+            let oldest_key = cache
+                .iter()
+                .min_by_key(|(_, item)| item.last_accessed)
+                .map(|(k, _)| k.clone());
             if let Some(k) = oldest_key {
                 cache.remove(&k);
             }
@@ -91,29 +89,28 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
     Some(out_img.into_rgba8())
 }
 
-// --- SMART LANCEDB VECTOR CACHE GARBAGE COLLECTOR ---
-
 /// Recursively calculates the total disk size of a directory in bytes.
 fn get_dir_size(path: &Path) -> u64 {
-    let mut total_size = 0;
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let metadata = entry.metadata();
-            if let Ok(meta) = metadata {
+    fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .map(|e| {
+            if let Ok(meta) = e.metadata() {
                 if meta.is_dir() {
-                    total_size += get_dir_size(&entry.path());
+                    get_dir_size(&e.path())
                 } else {
-                    total_size += meta.len();
+                    meta.len()
                 }
+            } else {
+                0
             }
-        }
-    }
-    total_size
+        })
+        .sum()
 }
 
-/// Automatically runs a background cleaner over LanceDB caches.
-/// Removes DB databases that haven't been accessed for 14 days,
-/// or evicts the oldest caches if total `.lancedb_cache` folder size exceeds 1.0 GB.
+/// Evaluates LanceDB workspace caches on startup. Wipes partitions untouched for
+/// longer than 14 days, and evicts the oldest partitions if total disk size exceeds 1.0 GB.
 pub fn run_vector_cache_garbage_collector() {
     let Ok(app_dir) = crate::utils::settings::get_portable_app_data_dir() else {
         return;
@@ -129,7 +126,7 @@ pub fn run_vector_cache_garbage_collector() {
 
     let mut cache_folders = Vec::new();
     let now = std::time::SystemTime::now();
-    let max_age = std::time::Duration::from_secs(14 * 24 * 60 * 60); // 14 Days
+    let max_age = std::time::Duration::from_secs(14 * 24 * 60 * 60);
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -139,7 +136,6 @@ pub fn run_vector_cache_garbage_collector() {
             };
             let accessed_time = meta.accessed().unwrap_or(now);
 
-            // COLLAPSED NESTED IF STATEMENTS WITH LET-CHAINS
             if let Ok(age) = now.duration_since(accessed_time)
                 && age > max_age
             {
@@ -155,19 +151,16 @@ pub fn run_vector_cache_garbage_collector() {
     // Sort folders by accessed time (oldest first)
     cache_folders.sort_by_key(|f| f.1);
 
-    // IDENTITY OP MULTIPLICATION REMOVED
-    let max_cache_bytes: u64 = 1024_u64 * 1024 * 1024; // 1 GiB limit
+    let max_cache_bytes: u64 = 1024 * 1024 * 1024; // 1 GiB capacity limit
     let mut current_total_size: u64 = cache_folders.iter().map(|f| f.2).sum();
 
-    // Evict oldest caches until we are strictly under the 1.0 GB threshold
+    // Evict oldest caches until total size fits inside the limit
     for (path, _, size) in cache_folders {
         if current_total_size <= max_cache_bytes {
             break;
         }
         if fs::remove_dir_all(&path).is_ok() {
             current_total_size = current_total_size.saturating_sub(size);
-            #[cfg(debug_assertions)]
-            eprintln!("[GC] Evicted old LanceDB cache: {:?}", path);
         }
     }
 }

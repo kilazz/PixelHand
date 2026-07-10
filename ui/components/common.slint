@@ -1,3 +1,5 @@
+// ui/components/common.slint
+
 export component FormRow {
     in property <string> title;
     in property <length> label-width: 90px;
@@ -84,7 +86,7 @@ export component PanelSection {
 export component WipeViewport {
     in property <image> original;
     in property <image> duplicate;
-    in property <float> wipe-val;
+    in-out property <float> wipe-val; // Changed to in-out to support direct viewport dragging
     in property <image> checkerboard;
 
     viewport-root := Rectangle {
@@ -123,12 +125,35 @@ export component WipeViewport {
             }
         }
 
+        // Interactive orange separator line with an extended TouchArea bounding box
         Rectangle {
-            x: parent.width * wipe-val - 1px;
+            x: parent.width * wipe-val - 6px;
             y: 0px;
-            width: 2px;
+            width: 12px;
             height: parent.height;
-            background: #f0b132;
+            background: transparent;
+
+            Rectangle {
+                x: 5px;
+                y: 0px;
+                width: 2px;
+                height: parent.height;
+                background: #f0b132;
+            }
+
+            TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: MouseCursor.col-resize;
+
+                // Calculates the new localized wipe ratio relative to current mouse x positions
+                moved => {
+                    if (self.pressed) {
+                        let new_val = (self.mouse-x + parent.x) / viewport-root.width;
+                        root.wipe-val = new_val.clamp(0.0, 1.0);
+                    }
+                }
+            }
         }
     }
 }

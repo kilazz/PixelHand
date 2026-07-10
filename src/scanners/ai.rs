@@ -14,17 +14,19 @@ use crate::scanners::AnalysisItem;
 use crate::state::{AiSearchResultSummary, DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::discover_files;
 
-// Synchronous thread-safe Semaphore to cap concurrent heavy image decoding pipelines
-struct SyncSemaphore {
+/// A thread-safe blocking semaphore implemented via Mutex and Condvar to limit
+/// concurrent decoding of high-resolution textures. Throttling concurrent image
+/// parsing protects against memory exhaustion (OOM) under heavy parallel workloads.
+struct DecoupledSemaphore {
     count: Mutex<usize>,
     condvar: Condvar,
 }
 
-pub struct SyncSemaphoreGuard<'a> {
-    sem: &'a SyncSemaphore,
+pub struct DecoupledSemaphoreGuard<'a> {
+    sem: &'a DecoupledSemaphore,
 }
 
-impl SyncSemaphore {
+impl DecoupledSemaphore {
     pub fn new(limit: usize) -> Self {
         Self {
             count: Mutex::new(limit),
@@ -32,17 +34,17 @@ impl SyncSemaphore {
         }
     }
 
-    pub fn acquire(&self) -> SyncSemaphoreGuard<'_> {
+    pub fn acquire(&self) -> DecoupledSemaphoreGuard<'_> {
         let mut lock = self.count.lock().unwrap();
         while *lock == 0 {
             lock = self.condvar.wait(lock).unwrap();
         }
         *lock -= 1;
-        SyncSemaphoreGuard { sem: self }
+        DecoupledSemaphoreGuard { sem: self }
     }
 }
 
-impl<'a> Drop for SyncSemaphoreGuard<'a> {
+impl<'a> Drop for DecoupledSemaphoreGuard<'a> {
     fn drop(&mut self) {
         let mut lock = self.sem.count.lock().unwrap();
         *lock += 1;
@@ -50,14 +52,14 @@ impl<'a> Drop for SyncSemaphoreGuard<'a> {
     }
 }
 
-static DECODE_SEMAPHORE: OnceLock<SyncSemaphore> = OnceLock::new();
+static DECODE_SEMAPHORE: OnceLock<DecoupledSemaphore> = OnceLock::new();
 
-/// Limit concurrent decoding threads for heavy assets to prevent peak RAM spikes (MAX_CONCURRENT_IMAGE_LOADS = 2)
-fn get_decode_semaphore() -> &'static SyncSemaphore {
-    DECODE_SEMAPHORE.get_or_init(|| SyncSemaphore::new(2))
+/// Restricts heavy image decoding workers to avoid parallel memory spikes.
+fn get_decode_semaphore() -> &'static DecoupledSemaphore {
+    DECODE_SEMAPHORE.get_or_init(|| DecoupledSemaphore::new(2))
 }
 
-/// Maps Slint Search Precision ComboBox indices to IVF-PQ probes limits and refinement multipliers.
+/// Translates UI precision indexes into LanceDB IVF-PQ lookup parameters.
 fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
     match precision_idx {
         0 => (8, 1),
@@ -68,13 +70,12 @@ fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
     }
 }
 
-/// Helper function to perform the shared pipeline of directory discovery,
-/// heavy image pre-processing, ONNX embedding generation, and LanceDB indexing.
-/// IMPLEMENTS HIGH-PERFORMANCE DISK AND MEMORY CACHE LOOKUPS.
+/// Discovers folder assets, handles DB synchronization, resolves cached embeddings,
+/// and executes model pipeline runs to populate database records.
 async fn scan_and_index_directory(
     params: &super::ScanParams,
 ) -> Result<(DatabaseService, InferenceEngine, Vec<DbRecord>)> {
-    let path = PathBuf::from(params.dir_a.clone());
+    let path = PathBuf::from(&params.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
@@ -91,7 +92,6 @@ async fn scan_and_index_directory(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Dynamic AI Model and Database Dimension mapping
     let (folder_name, dim) = match params.ai_model {
         1 => ("clip_vit_l14".to_string(), 768),
         2 => ("siglip_base".to_string(), 768),
@@ -105,15 +105,13 @@ async fn scan_and_index_directory(
     };
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
-
-    // Hash the directory path to partition the database workspace per scan target
     let folder_hash = {
         let mut hasher = Xxh64::new(0);
         hasher.update(params.dir_a.as_bytes());
         hasher.digest()
     };
 
-    // Isolating caches strictly by model name and workspace path hash prevents schema dimension collisions
+    // Keep unique schema workspaces divided per target folder to avoid vector dimension clashes.
     let db_dir = app_dir
         .join(".lancedb_cache")
         .join(format!("{}_{:016x}", folder_name, folder_hash));
@@ -126,22 +124,19 @@ async fn scan_and_index_directory(
 
     let mut db = DatabaseService::new();
 
-    // --- SAFE CORRUPTED DATABASE CATCH-AND-WIPE LOGIC ---
+    // Rebuild the cached database partition automatically if initialization fails.
     if let Err(e) = db.initialize(&db_dir, "images", dim).await {
         crate::app::append_to_console_log(&format!(
-            "[Error] LanceDB initialization failed: {}. Database might be corrupted. Attempting automatic rebuild...",
+            "[Error] LanceDB partition initialization failed: {}. Rebuilding clean state...",
             e
         ));
-        let _ = std::fs::remove_dir_all(&db_dir); // Physically wipe the corrupted subfolder
+        let _ = std::fs::remove_dir_all(&db_dir);
         db.initialize(&db_dir, "images", dim)
             .await
-            .context("Failed to initialize database after wiping corrupted files")?;
-        crate::app::append_to_console_log(
-            "[Cache] Cache database was corrupted and has been rebuilt successfully.",
-        );
+            .context("Re-initialization after cache wipe failed")?;
+        crate::app::append_to_console_log("[Cache] Local database rebuilt successfully.");
     }
 
-    // --- STEP 1: LOAD KNOWN VECTOR CACHE FROM DATABASE ---
     let mut cache_map = std::collections::HashMap::new();
     if let Ok(db_entries) = db.load_cache_metadata().await {
         for (path, channel, size, mtime, vec) in db_entries {
@@ -150,14 +145,11 @@ async fn scan_and_index_directory(
     }
 
     let engine = InferenceEngine::new(&model_dir, dim, 4, &params.execution_provider)?;
-
-    // Explode input files into logical channel splitting/luminance comparison tasks
     let items = super::generate_analysis_items(&paths, params);
 
-    // --- STEP 2: SPLIT ITEMS INTO CACHED AND THOSE THAT NEED ENCODING ---
     let mut final_records = Vec::with_capacity(items.len());
     let mut items_to_encode = Vec::new();
-    let mut paths_to_prune_from_db = std::collections::HashSet::new();
+    let mut paths_to_prune = std::collections::HashSet::new();
 
     for item in &items {
         let p_str = item.path.to_string_lossy().to_string();
@@ -193,20 +185,18 @@ async fn scan_and_index_directory(
                 });
                 continue;
             } else {
-                paths_to_prune_from_db.insert(p_str.clone());
+                paths_to_prune.insert(p_str.clone());
             }
         }
 
         items_to_encode.push(item.clone());
     }
 
-    // --- STEP 3: RUN ONNX INFERENCE ONLY ON COLD/CHANGED FILES ---
     if !items_to_encode.is_empty() {
         crate::app::append_to_console_log(&format!(
-            "[Cache] Encoding {} new/modified files using {}... (Cached: {})",
+            "[Cache] Encoding {} new/modified files via {}...",
             items_to_encode.len(),
-            folder_name,
-            final_records.len()
+            folder_name
         ));
 
         let chunks: Vec<&[AnalysisItem]> = items_to_encode.chunks(params.batch_size).collect();
@@ -309,10 +299,9 @@ async fn scan_and_index_directory(
             newly_encoded_records.extend(chunk_records);
         }
 
-        // --- STEP 4: DELETE OUTDATED PATHS & APPEND NEW ONES ---
-        if !paths_to_prune_from_db.is_empty() {
+        if !paths_to_prune.is_empty() {
             let mut prune_filter = String::new();
-            for (idx, old_p) in paths_to_prune_from_db.iter().enumerate() {
+            for (idx, old_p) in paths_to_prune.iter().enumerate() {
                 if idx > 0 {
                     prune_filter.push_str(" OR ");
                 }
@@ -324,7 +313,9 @@ async fn scan_and_index_directory(
         db.add_batch(&newly_encoded_records).await?;
         final_records.extend(newly_encoded_records);
     } else {
-        crate::app::append_to_console_log("[Cache] 100% Cache Hit! Database is fully up to date.");
+        crate::app::append_to_console_log(
+            "[Cache] 100% Cache Hit! Local database is fully synchronized.",
+        );
     }
 
     db.create_vector_index().await?;
@@ -332,6 +323,7 @@ async fn scan_and_index_directory(
     Ok((db, engine, final_records))
 }
 
+/// Launches AI duplicate search utilizing vector proximity groups in LanceDB workspace.
 pub async fn run_ai_duplicate_scan(
     params: super::ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
@@ -485,9 +477,9 @@ pub async fn run_ai_duplicate_scan(
     Ok(results)
 }
 
+/// Executes a text semantic search inside the generated directory vector database.
 pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResultSummary>> {
     let (db, engine, _records) = scan_and_index_directory(&params).await?;
-
     let (nprobes, refine_factor) = map_precision_presets(params.search_precision);
 
     let query_vector = engine.encode_text(&params.query_text)?;

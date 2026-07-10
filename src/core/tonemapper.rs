@@ -1,4 +1,5 @@
 // src/core/tonemapper.rs
+
 use anyhow::{Context, Result};
 use exr::prelude::*;
 use image::RgbaImage;
@@ -18,7 +19,7 @@ pub enum TonemapOperator {
     PbrNeutral,
 }
 
-// PQ Constants (ST.2084)
+// PQ constants defined by SMPTE ST 2084 / ITU-R BT.2100
 const PQ_N: f32 = 2610.0 / 4096.0 / 4.0;
 const PQ_M: f32 = 2523.0 / 4096.0 * 128.0;
 const PQ_C1: f32 = 3424.0 / 4096.0;
@@ -63,13 +64,16 @@ fn st2084_to_linear(pq: [f32; 3]) -> [f32; 3] {
     [pq_to_nit(pq[0]), pq_to_nit(pq[1]), pq_to_nit(pq[2])]
 }
 
+/// Converts linear Rec.2020 RGB values to ICtCp color space (using SMPTE ST 2084 transfer function internally).
 fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
+    // LMS transformation matrix (Rec. 2020 to LMS)
     let l = col[0] * 0.412109 + col[1] * 0.523926 + col[2] * 0.063965;
     let m = col[0] * 0.166748 + col[1] * 0.720459 + col[2] * 0.112793;
     let s = col[0] * 0.024170 + col[1] * 0.075439 + col[2] * 0.900391;
 
     let pq_lms = linear_to_st2084([l.max(0.0), m.max(0.0), s.max(0.0)]);
 
+    // LMS to ICtCp matrix conversion
     let i = pq_lms[0] * 0.5000 + pq_lms[1] * 0.5000 + pq_lms[2] * 0.0000;
     let ct = pq_lms[0] * 1.6137 - pq_lms[1] * 3.3234 + pq_lms[2] * 1.7097;
     let cp = pq_lms[0] * 4.3780 - pq_lms[1] * 4.2455 - pq_lms[2] * 0.1325;
@@ -77,13 +81,16 @@ fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
     [i, ct, cp]
 }
 
+/// Converts ICtCp color space values back to linear Rec.2020 RGB.
 fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
+    // ICtCp to LMS matrix conversion
     let l = col[0] * 1.0 + col[1] * 0.008605 + col[2] * 0.111036;
     let m = col[0] * 1.0 - col[1] * 0.008605 - col[2] * 0.111036;
     let s = col[0] * 1.0 + col[1] * 0.560049 - col[2] * 0.320637;
 
     let lms = st2084_to_linear([l, m, s]);
 
+    // LMS to Rec.2020 RGB conversion matrix
     let r = lms[0] * 3.43661 - lms[1] * 2.50645 + lms[2] * 0.069845;
     let g = -lms[0] * 0.79133 + lms[1] * 1.9836 - lms[2] * 0.192271;
     let b = -lms[0] * 0.02595 - lms[1] * 0.098914 + lms[2] * 1.12486;
@@ -91,12 +98,10 @@ fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
     [r, g, b]
 }
 
-/// Khronos PBR Neutral Tonemapper
-/// Developed specifically to perfectly preserve Base Color in 3D/PBR pipelines
-/// without causing hue shifts at high intensities.
+/// Khronos PBR Neutral Tonemapper.
+/// Formulated to preserve base texture color values and prevent hue shifts at high intensities.
 #[inline]
 fn pbr_neutral_tonemapping(color_in: [f32; 3]) -> [f32; 3] {
-    // Input colors must be strictly non-negative
     let mut color = [
         color_in[0].max(0.0),
         color_in[1].max(0.0),
@@ -138,25 +143,19 @@ fn pbr_neutral_tonemapping(color_in: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// Hermite spline from the ITU-R BT.2390 (EETF) standard.
-/// Smoothly compresses the luminance range (in PQ space) to prevent clipping.
+/// Hermite spline function defined in ITU-R BT.2390 for dynamic range compression.
 #[inline]
 fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
-    // Knee Start point.
-    // According to the standard, this is calculated as the intersection of display limits.
     let ks = (1.5 * max_out_pq - 0.5 * max_in_pq).max(0.0);
     let b = max_in_pq - ks;
 
-    // If the range doesn't require compression
     if b <= 1e-5 {
         return i.min(max_out_pq);
     }
 
     if i < ks {
-        // Linear section (shadows and midtones remain 1:1)
         i
     } else {
-        // Smooth roll-off (Shoulder) using a Hermite polynomial
         let t = (i - ks) / b;
         let t2 = t * t;
         let t3 = t2 * t;
@@ -164,7 +163,7 @@ fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
         let p0 = ks;
         let p1 = max_out_pq;
         let m0 = 1.0;
-        let m1 = 0.0; // Flat top at the peak
+        let m1 = 0.0;
 
         (2.0 * t3 - 3.0 * t2 + 1.0) * p0
             + (t3 - 2.0 * t2 + t) * m0 * b
@@ -173,53 +172,39 @@ fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
     }
 }
 
-/// Hybrid operator: ICtCp + BT.2390 Spline + BT.2446 Method C Chroma Scaling.
-/// This guarantees zero hue-shift while maintaining cinematic highlight roll-off.
+/// Perceptual tonemapping based on ITU-R BT.2446 Method C chroma scaling and ST 2084 PQ mapping.
 fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
-    // 1. Scale incoming Linear RGB (0.0-1.0+) to absolute nits.
-    // Assuming 1.0 in SDR graphics = 100 nits.
     let nits = [
         (color[0] * exposure * 100.0).max(0.0),
         (color[1] * exposure * 100.0).max(0.0),
         (color[2] * exposure * 100.0).max(0.0),
     ];
 
-    // 2. Convert Linear RGB to ICtCp (values are PQ encoded inside rgb_to_ictcp)
     let mut ictcp = rgb_to_ictcp(nits);
     let i_in = ictcp[0];
 
-    // 3. Calculate limits in PQ space (ST.2084)
     let max_in_pq = nit_to_pq(scene_peak_nits);
-    let max_out_pq = nit_to_pq(100.0); // Target SDR display is mapped to 100 nits
+    let max_out_pq = nit_to_pq(100.0); // Standard SDR display peak luminance mapped to 100 nits
 
-    // 4. Compress Intensity (Luminance) using the BT.2390 EETF curve
     let i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
     ictcp[0] = i_out;
 
-    // 5. BT.2446 Method C: Chroma scaling
-    // Preserve hue by scaling chroma channels proportionally to luminance compression
     let compression_ratio = if i_in > 1e-5 { i_out / i_in } else { 1.0 };
 
-    // Hunt Effect compensation:
-    // When brightness is compressed, human eyes perceive colors as less saturated.
-    // Slightly boost saturation so the SDR image doesn't look washed out.
+    // Saturating compensation mimicking Hunt Effect adjustments
     let saturation_boost = 1.15;
 
-    // Path to White (Cinematic effect):
-    // Physically bright light overexposes camera sensors to white.
-    // Smoothly desaturate the most extremely bright pixels (top 10% of display luminance).
+    // Smooth path-to-white translation for highlights above 90% target scale
     let normalized_i = (i_out / max_out_pq).clamp(0.0, 1.0);
     let path_to_white = 1.0 - smoothstep(0.90, 1.0, normalized_i);
 
     let final_chroma_scale = compression_ratio * saturation_boost * path_to_white;
 
-    ictcp[1] *= final_chroma_scale; // Ct
-    ictcp[2] *= final_chroma_scale; // Cp
+    ictcp[1] *= final_chroma_scale;
+    ictcp[2] *= final_chroma_scale;
 
-    // 6. Convert ICtCp back to Linear RGB (Nits)
     let rgb_sdr_nits = ictcp_to_rgb(ictcp);
 
-    // 7. Normalize back to the graphics engine range (0.0 - 1.0)
     [
         (rgb_sdr_nits[0] / 100.0),
         (rgb_sdr_nits[1] / 100.0),
@@ -233,6 +218,7 @@ fn aces_tonemap_raw(x: f32) -> f32 {
     ((x * (a * x + b)) / (x * (c * x + d) + e)).clamp(0.0, 1.0)
 }
 
+/// Decodes the first RGBA floating-point layer of an EXR file.
 pub fn load_exr_rgba(path: &Path) -> Result<(Vec<f32>, u32, u32)> {
     let image = read_first_rgba_layer_from_file(
         path,
@@ -255,6 +241,7 @@ pub fn load_exr_rgba(path: &Path) -> Result<(Vec<f32>, u32, u32)> {
     ))
 }
 
+/// Maps high-dynamic-range (HDR) float pixels into low-dynamic-range (LDR) u8 buffers using selected curve operators.
 pub fn tonemap_hdr_to_ldr_rgba(
     hdr_pixels: &[f32],
     width: u32,
@@ -297,8 +284,6 @@ pub fn tonemap_hdr_to_ldr_rgba(
                     aces_tonemap_raw(b_in),
                 ),
                 TonemapOperator::ICtCpLumina => {
-                    // Hybrid Perceptual Tonemapper mapping
-                    // 4000 nits provides enough headroom for extreme VFX brightness
                     let mapped = tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, 4000.0);
                     (
                         mapped[0].clamp(0.0, 1.0),
@@ -307,7 +292,6 @@ pub fn tonemap_hdr_to_ldr_rgba(
                     )
                 }
                 TonemapOperator::PbrNeutral => {
-                    // Khronos Group Standard
                     let mapped = pbr_neutral_tonemapping([r_in, g_in, b_in]);
                     (
                         mapped[0].clamp(0.0, 1.0),
@@ -331,6 +315,7 @@ pub fn tonemap_hdr_to_ldr_rgba(
     RgbaImage::from_raw(width, height, ldr_pixels).context("Failed to build RgbaImage")
 }
 
+/// Computes pixel differences between two buffers in parallel using multicore CPU chunk mapping.
 pub fn calculate_difference_map(
     img1: &RgbaImage,
     img2: &RgbaImage,
@@ -348,34 +333,39 @@ pub fn calculate_difference_map(
     };
 
     let mut diff_img = RgbaImage::new(w1, h1);
+    let raw_diff = diff_img.as_mut();
 
-    for (x, y, pixel) in diff_img.enumerate_pixels_mut() {
-        let p1 = img1.get_pixel(x, y);
-        let p2 = ref_img2.get_pixel(x, y);
+    // Map pixel computations across all available CPU threads in parallel
+    raw_diff
+        .par_chunks_exact_mut(4)
+        .enumerate()
+        .for_each(|(idx, pixel_out)| {
+            let x = (idx as u32) % w1;
+            let y = (idx as u32) / w1;
 
-        if heatmap {
-            let diff_r = p1[0].abs_diff(p2[0]) as u16;
-            let diff_g = p1[1].abs_diff(p2[1]) as u16;
-            let diff_b = p1[2].abs_diff(p2[2]) as u16;
-            let diff_a = p1[3].abs_diff(p2[3]) as u16;
+            let p1 = img1.get_pixel(x, y);
+            let p2 = ref_img2.get_pixel(x, y);
 
-            let intensity = ((diff_r + diff_g + diff_b + diff_a) / 4) as u8;
+            if heatmap {
+                let diff_r = p1[0].abs_diff(p2[0]) as u16;
+                let diff_g = p1[1].abs_diff(p2[1]) as u16;
+                let diff_b = p1[2].abs_diff(p2[2]) as u16;
+                let diff_a = p1[3].abs_diff(p2[3]) as u16;
 
-            // Simple blue-to-red heatmap mapping based on diff intensity
-            let r = intensity;
-            let g = 0;
-            let b = 255 - intensity;
+                let intensity = ((diff_r + diff_g + diff_b + diff_a) / 4) as u8;
 
-            *pixel = image::Rgba([r, g, b, 255]);
-        } else {
-            *pixel = image::Rgba([
-                p1[0].abs_diff(p2[0]),
-                p1[1].abs_diff(p2[1]),
-                p1[2].abs_diff(p2[2]),
-                255, // Always keep alpha fully opaque to clearly see RGB diffs
-            ]);
-        }
-    }
+                // Map differences into blue-to-red diagnostic heatmap
+                pixel_out[0] = intensity;
+                pixel_out[1] = 0;
+                pixel_out[2] = 255 - intensity;
+                pixel_out[3] = 255;
+            } else {
+                pixel_out[0] = p1[0].abs_diff(p2[0]);
+                pixel_out[1] = p1[1].abs_diff(p2[1]);
+                pixel_out[2] = p1[2].abs_diff(p2[2]);
+                pixel_out[3] = 255;
+            }
+        });
 
     Ok(diff_img)
 }

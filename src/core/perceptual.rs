@@ -2,7 +2,6 @@
 
 use image::{DynamicImage, RgbaImage};
 use image_hasher::{HashAlg, HasherConfig};
-use rayon::prelude::*;
 use std::path::Path;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -22,19 +21,19 @@ pub struct PerceptualHashes {
 }
 
 /// Detects if an image has a fully transparent alpha channel but contains
-/// valid RGB visual data in parallel (common in game engines/packed textures).
+/// valid RGB visual data (common in game engines/packed textures).
+/// Processes sequentially to leverage CPU SIMD auto-vectorization on small sized blocks.
 pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
     let pixels = rgba.as_raw();
 
-    // Check in parallel if any pixel has a non-zero alpha value
-    let has_opaque_alpha = pixels.par_chunks_exact(4).any(|pixel| pixel[3] > 0);
+    // Scan sequentially to avoid Rayon thread scheduling overhead on downscaled assets
+    let has_opaque_alpha = pixels.chunks_exact(4).any(|pixel| pixel[3] > 0);
     if has_opaque_alpha {
         return false;
     }
 
-    // Since alpha is fully transparent, verify in parallel if there is non-zero color data
     pixels
-        .par_chunks_exact(4)
+        .chunks_exact(4)
         .any(|pixel| pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0)
 }
 
@@ -56,20 +55,27 @@ pub fn preprocess_image_channels(
                 AnalysisType::B => 2,
                 _ => 3,
             };
-            let mut ch_buf = image::GrayImage::new(rgba_img.width(), rgba_img.height());
+
+            let width = rgba_img.width();
+            let height = rgba_img.height();
+            let mut raw_data = Vec::with_capacity((width * height) as usize);
 
             let mut min_val = 255u8;
             let mut max_val = 0u8;
 
-            for (x, y, pixel) in rgba_img.enumerate_pixels() {
+            // Stream pixels linearly into flat memory avoiding coordinates multiplication overhead
+            for pixel in rgba_img.pixels() {
                 let v = pixel[idx];
                 min_val = min_val.min(v);
                 max_val = max_val.max(v);
-                ch_buf.put_pixel(x, y, image::Luma([v]));
+                raw_data.push(v);
             }
+
             if ignore_solid_channels && (max_val - min_val < 5) {
                 return None;
             }
+
+            let ch_buf = image::GrayImage::from_raw(width, height, raw_data)?;
             DynamicImage::ImageLuma8(ch_buf)
         }
         AnalysisType::Composite => {
@@ -91,12 +97,13 @@ pub fn preprocess_image_channels(
     Some(processed)
 }
 
+/// Computes both dHash and phash visual signatures for the target asset.
 pub fn calculate_perceptual_hashes(
     path: &Path,
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
 ) -> Option<PerceptualHashes> {
-    // Request downscaled 128px mipmap directly during DDS parse step to conserve memory
+    // Request a downscaled 128px mipmap during parsing to conserve CPU cycles and RAM
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
     let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
@@ -121,6 +128,7 @@ pub fn calculate_perceptual_hashes(
     })
 }
 
+/// Computes the bitwise Hamming distance between two base64-encoded visual hashes.
 pub fn calculate_hamming_distance(hash1_base64: &str, hash2_base64: &str) -> Option<u32> {
     let h1 = image_hasher::ImageHash::<Vec<u8>>::from_base64(hash1_base64).ok()?;
     let h2 = image_hasher::ImageHash::<Vec<u8>>::from_base64(hash2_base64).ok()?;

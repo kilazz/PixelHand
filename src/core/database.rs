@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::Arc;
 
-// Imports are referenced directly from LanceDB's re-exported Arrow modules
 use lancedb::arrow::arrow_array::{
     ArrayRef, FixedSizeListArray, Float32Array, Int64Array, RecordBatch, StringArray, UInt64Array,
 };
@@ -16,6 +15,25 @@ use lancedb::index::Index;
 use lancedb::query::ExecutableQuery;
 use lancedb::query::QueryBase;
 use lancedb::table::Table;
+
+/// Helper function to construct the unified Apache Arrow schema for LanceDB image metadata caching.
+fn get_schema(dim: usize) -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("id", DataType::Utf8, false),
+        Field::new(
+            "vector",
+            DataType::FixedSizeList(
+                Arc::new(Field::new("item", DataType::Float32, true)),
+                dim as i32,
+            ),
+            false,
+        ),
+        Field::new("path", DataType::Utf8, false),
+        Field::new("channel", DataType::Utf8, false),
+        Field::new("file_size", DataType::UInt64, false),
+        Field::new("mtime", DataType::Int64, false),
+    ]))
+}
 
 /// Represents a single vector record structured for LanceDB storage.
 #[derive(Debug, Clone)]
@@ -29,7 +47,6 @@ pub struct DbRecord {
 }
 
 /// Represents the normalized result of a vector similarity query.
-/// Includes channel information to accurately distinguish split-channel queries.
 #[derive(Debug, Clone)]
 pub struct SearchResult {
     pub path: String,
@@ -54,7 +71,7 @@ impl DatabaseService {
         }
     }
 
-    /// Connects to (or creates) the local LanceDB database and ensures the target table exists.
+    /// Connects to (or creates) the local LanceDB workspace and ensures the target table exists.
     pub async fn initialize(
         &mut self,
         db_directory: &Path,
@@ -67,25 +84,10 @@ impl DatabaseService {
             .await
             .context("Failed to connect to LanceDB")?;
 
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Utf8, false),
-            Field::new(
-                "vector",
-                DataType::FixedSizeList(
-                    Arc::new(Field::new("item", DataType::Float32, true)),
-                    dim as i32,
-                ),
-                false,
-            ),
-            Field::new("path", DataType::Utf8, false),
-            Field::new("channel", DataType::Utf8, false),
-            Field::new("file_size", DataType::UInt64, false),
-            Field::new("mtime", DataType::Int64, false),
-        ]));
-
+        let schema = get_schema(dim);
         let table_names = db.table_names().execute().await?;
 
-        // Open existing table instead of drop-recreation to preserve cache
+        // Open existing table instead of dropping to preserve previous vector cache
         let table = if table_names.contains(&table_name.to_string()) {
             db.open_table(table_name).execute().await?
         } else {
@@ -102,7 +104,7 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Converts records into Apache Arrow RecordBatches and appends them to the LanceDB table.
+    /// Converts database cache entries into Apache Arrow RecordBatches and appends them to the table.
     pub async fn add_batch(&self, records: &[DbRecord]) -> Result<()> {
         let table = self
             .table
@@ -112,21 +114,7 @@ impl DatabaseService {
             return Ok(());
         }
 
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Utf8, false),
-            Field::new(
-                "vector",
-                DataType::FixedSizeList(
-                    Arc::new(Field::new("item", DataType::Float32, true)),
-                    self.dim as i32,
-                ),
-                false,
-            ),
-            Field::new("path", DataType::Utf8, false),
-            Field::new("channel", DataType::Utf8, false),
-            Field::new("file_size", DataType::UInt64, false),
-            Field::new("mtime", DataType::Int64, false),
-        ]));
+        let schema = get_schema(self.dim);
 
         let ids: Vec<&str> = records.iter().map(|r| r.id.as_str()).collect();
         let id_array = Arc::new(StringArray::from(ids)) as ArrayRef;
@@ -171,13 +159,12 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Fetches all cached metadata from the DB so we can build a fast in-memory delta map.
+    /// Fetches all cached metadata from the database dynamically mapping columns to prevent schema drift errors.
     pub async fn load_cache_metadata(&self) -> Result<Vec<(String, String, u64, i64, Vec<f32>)>> {
         let table = self.table.as_ref().context("Table not initialized")?;
         let query_result = table
             .query()
             .select(lancedb::query::Select::Columns(vec![
-                // <-- Fixed: Select type is now correct
                 "path".to_string(),
                 "channel".to_string(),
                 "file_size".to_string(),
@@ -195,31 +182,43 @@ impl DatabaseService {
                 continue;
             }
 
+            // Resolve column indices dynamically to guarantee stability against future schema refactoring
+            let schema = batch.schema();
+            let path_idx = schema.index_of("path").context("Missing path column")?;
+            let channel_idx = schema
+                .index_of("channel")
+                .context("Missing channel column")?;
+            let size_idx = schema
+                .index_of("file_size")
+                .context("Missing file_size column")?;
+            let mtime_idx = schema.index_of("mtime").context("Missing mtime column")?;
+            let vector_idx = schema.index_of("vector").context("Missing vector column")?;
+
             let paths_array = batch
-                .column(0)
+                .column(path_idx)
                 .as_any()
                 .downcast_ref::<StringArray>()
-                .context("paths")?;
+                .context("Failed to downcast path column")?;
             let channels_array = batch
-                .column(1)
+                .column(channel_idx)
                 .as_any()
                 .downcast_ref::<StringArray>()
-                .context("channels")?;
+                .context("Failed to downcast channel column")?;
             let sizes_array = batch
-                .column(2)
+                .column(size_idx)
                 .as_any()
                 .downcast_ref::<UInt64Array>()
-                .context("sizes")?;
+                .context("Failed to downcast file_size column")?;
             let mtimes_array = batch
-                .column(3)
+                .column(mtime_idx)
                 .as_any()
                 .downcast_ref::<Int64Array>()
-                .context("mtimes")?;
+                .context("Failed to downcast mtime column")?;
             let vectors_array = batch
-                .column(4)
+                .column(vector_idx)
                 .as_any()
                 .downcast_ref::<FixedSizeListArray>()
-                .context("vectors")?;
+                .context("Failed to downcast vector column")?;
 
             for i in 0..batch.num_rows() {
                 let path = paths_array.value(i).to_string();
@@ -231,7 +230,7 @@ impl DatabaseService {
                 let float_arr = list_val
                     .as_any()
                     .downcast_ref::<Float32Array>()
-                    .context("floats")?;
+                    .context("Failed to extract floats from list cell")?;
                 let vec: Vec<f32> = (0..float_arr.len())
                     .map(|idx| float_arr.value(idx))
                     .collect();
@@ -257,6 +256,7 @@ impl DatabaseService {
             .context("Database table is not initialized")?;
         let row_count = table.count_rows(None).await?;
 
+        // Avoid building indices on tiny datasets since exhaustive scan is faster under 5000 records
         if row_count < 5000 {
             return Ok(());
         }
@@ -299,14 +299,22 @@ impl DatabaseService {
                 continue;
             }
 
+            let schema = batch.schema();
+            let path_idx = schema
+                .index_of("path")
+                .context("Missing path column in search results")?;
+            let channel_idx = schema
+                .index_of("channel")
+                .context("Missing channel column in search results")?;
+
             let paths_array = batch
-                .column(2)
+                .column(path_idx)
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .context("Failed to downcast path column")?;
 
             let channels_array = batch
-                .column(3)
+                .column(channel_idx)
                 .as_any()
                 .downcast_ref::<StringArray>()
                 .context("Failed to downcast channel column")?;
@@ -314,7 +322,7 @@ impl DatabaseService {
             let distance_col_idx = batch
                 .schema()
                 .index_of("_distance")
-                .unwrap_or(batch.num_columns() - 1);
+                .unwrap_or_else(|_| batch.num_columns() - 1);
             let distances_array = batch
                 .column(distance_col_idx)
                 .as_any()

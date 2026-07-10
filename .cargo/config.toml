@@ -1,2 +1,4 @@
 [net]
+# Instructs Cargo to use the native git CLI executable rather than built-in libgit2.
+# This resolves SSH key resolution and custom credential helper issues during dependency resolution.
 git-fetch-with-cli = true

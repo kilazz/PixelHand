@@ -15,9 +15,9 @@ use crate::utils::helpers::discover_files;
 
 pub use crate::core::qc::calculate_diff_map;
 
-/// Executes an absolute local directory Quality Control audit
+/// Executes an absolute local directory Quality Control audit.
 pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
-    let path = PathBuf::from(params.dir_a.clone());
+    let path = PathBuf::from(&params.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
@@ -120,10 +120,9 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 }
             }
 
-            // Increment atomic processed items and dispatch to the main progress callback
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
-                cb(current as f32 / total as f32, current, total); // <-- Fixed
+                cb(current as f32 / total as f32, current, total);
             }
 
             file_issues
@@ -137,8 +136,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
     Ok(issues)
 }
 
-/// Compares contents of two folders.
-/// Suppress too_many_arguments warning as multiple flags are critical to direct parameter parsing pipelines.
+/// Compares contents and specifications of Folder A against Folder B.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_folder_compare(
     directory_a: String,
@@ -237,22 +235,6 @@ pub async fn run_folder_compare(
                     is_cubemap: false,
                 });
 
-            if hide_same_resolution
-                && (meta_a.width == meta_b.width && meta_a.height == meta_b.height)
-            {
-                let rel_issues = check_relative(
-                    &meta_a,
-                    &meta_b,
-                    check_bloat,
-                    check_alpha,
-                    check_colorspace,
-                    check_compression,
-                );
-                if rel_issues.is_empty() {
-                    continue;
-                }
-            }
-
             let rel_issues = check_relative(
                 &meta_a,
                 &meta_b,
@@ -261,6 +243,16 @@ pub async fn run_folder_compare(
                 check_colorspace,
                 check_compression,
             );
+
+            // Bypass if resolutions match and no metadata issues exist when hide_same_resolution is true
+            if hide_same_resolution
+                && meta_a.width == meta_b.width
+                && meta_a.height == meta_b.height
+                && rel_issues.is_empty()
+            {
+                continue;
+            }
+
             for issue in rel_issues {
                 issues.push(QcIssueSummary {
                     path: p_b.to_string_lossy().to_string(),
@@ -276,11 +268,11 @@ pub async fn run_folder_compare(
     Ok(issues)
 }
 
-/// Executes a flat-list technical Asset Inventory scan across all target directories
+/// Executes a flat-list technical Asset Inventory scan across all targeted directories.
 pub async fn run_asset_audit(
     params: super::ScanParams,
 ) -> Result<Vec<crate::state::ResultsRowData>> {
-    let path = PathBuf::from(params.dir_a.clone());
+    let path = PathBuf::from(&params.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
@@ -301,7 +293,6 @@ pub async fn run_asset_audit(
     let total = paths.len();
     let processed = std::sync::atomic::AtomicUsize::new(0);
 
-    // Predicate helper to check if dimension is power of two
     let is_pow2 = |n: u32| n != 0 && (n & (n - 1)) == 0;
 
     let rows: Vec<crate::state::ResultsRowData> = paths
@@ -335,13 +326,11 @@ pub async fn run_asset_audit(
                     is_cubemap: false,
                 });
 
-            // Generates / loads high-res downscaled previews safely on threads
             let thumbnail_data = super::load_thumbnail_for_path(&p.to_string_lossy());
 
-            // Increment atomic processed items and dispatch to the main progress callback
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
             if let Some(ref cb) = params.on_progress {
-                cb(current as f32 / total as f32, current, total); // <-- Fixed
+                cb(current as f32 / total as f32, current, total);
             }
 
             Some(crate::state::ResultsRowData {
@@ -377,7 +366,6 @@ pub async fn run_asset_audit(
                 size_bytes: qc_meta.file_size,
                 pixels_count: (qc_meta.width * qc_meta.height) as u64,
 
-                // Setup smart filter variables for live-filtering in UI
                 is_npot: !is_pow2(qc_meta.width) || !is_pow2(qc_meta.height),
                 is_uncompressed: qc_meta
                     .compression_format

@@ -14,8 +14,8 @@ import {
 } from "std-widgets.slint";
 
 // IMPORT COMPONENTS WITH CORRECT RELATIVE PATHS
-import { ResultsRow, SelectedFile } from "./structs.slint";
-export { ResultsRow, SelectedFile }from "./structs.slint";
+import { ResultsRow, SelectedFile, GridRow } from "./structs.slint";
+export { ResultsRow, SelectedFile, GridRow }from "./structs.slint";
 import {
     MenuItem,
     TabButton,
@@ -130,7 +130,7 @@ export component AppWindow inherits Window {
     in-out property <length> col_path_w: 350px;
     in-out property <length> list_preview_size: 40px;
 
-    // Widths for Audit Columns so we can drag them freely!
+    // Widths for Audit Columns
     in-out property <length> col_format_w: 110px;
     in-out property <length> col_dimensions_w: 110px;
     in-out property <length> col_mipmaps_w: 75px;
@@ -197,7 +197,7 @@ export component AppWindow inherits Window {
     in-out property <bool> results_grid_mode: false;
     in-out property <[ResultsRow]> selected_group_files: [];
     in-out property <[ResultsRow]> results: [];
-    in-out property <[ResultsRow]> grid_results: [];
+    in-out property <[GridRow]> grid_row_results: []; // Holds rows of 4 columns for dynamic virtualized ListViews
 
     in-out property <string> results_search_query: "";
     in-out property <float> results_min_similarity: 0.0;
@@ -534,7 +534,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
 
                             VerticalLayout {
-                                alignment: start; // Forces natural heights on nested child panels!
+                                alignment: start;
                                 spacing: 12px;
 
                                 PanelSection {
@@ -1005,7 +1005,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // D. Collapsible Progressive Disclosure advanced parameters
+                                // D. Advanced Options
                                 PanelSection {
                                     title: "Advanced System Settings";
                                     VerticalLayout {
@@ -1057,7 +1057,6 @@ export component AppWindow inherits Window {
                                                 }
                                             }
 
-                                            // --- NEW INTEGRATIONS ---
                                             CheckBox {
                                                 text: "Enable Previews Window";
                                                 checked <=> root.enable_previews;
@@ -1284,8 +1283,6 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // --- NEW: SMART FILTERS TOOLBAR ---
-                        // FIX: Toolbar remains visible if any smart filter or search query is active, preventing "locking"
                         if root.results.length > 0 || root.filter_only_npot || root.filter_only_uncompressed || root.filter_only_missing_mips || root.filter_only_cubemaps || root.results_search_query != "": HorizontalLayout {
                             spacing: 12px;
                             padding-left: 4px;
@@ -1656,7 +1653,6 @@ export component AppWindow inherits Window {
                                                 width: 8px;
                                             }
 
-                                            // --- DYNAMICALLY HIDE THUMBNAIL IF PREVIEWS ARE DISABLED ---
                                             if root.enable_previews: InteractiveThumbnail {
                                                 source: row.thumbnail;
                                                 path: row.path;
@@ -1774,8 +1770,6 @@ export component AppWindow inherits Window {
                                                                 color: #dcddde;
                                                                 font-size: 11px;
                                                                 vertical-alignment: center;
-                                                                horizontal-alignment: center;
-                                                                width: 100%;
                                                             }
                                                         }
 
@@ -1791,8 +1785,6 @@ export component AppWindow inherits Window {
                                                                 font-weight: row.cubemap_str == "YES" ? 700 : 400;
                                                                 font-size: 11px;
                                                                 vertical-alignment: center;
-                                                                horizontal-alignment: center;
-                                                                width: 100%;
                                                             }
                                                         }
 
@@ -1831,78 +1823,47 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // ---- GRID VIEW (DRY with GridCard) ----
-                                if root.results_grid_mode && root.grid_results.length > 0: ScrollView {
-                                    HorizontalLayout {
+                                // ---- GRID VIEW (Virtualized via GridRow and standard ListView) ----
+                                if root.results_grid_mode && root.grid_row_results.length > 0: ListView {
+                                    for row in root.grid_row_results: HorizontalLayout {
                                         spacing: 12px;
                                         padding: 10px;
                                         alignment: start;
-                                        VerticalLayout {
-                                            width: root.grid_results.length > 0 ? root.grid_card_size : 0px;
-                                            spacing: 12px;
-                                            alignment: start;
-                                            for row[idx] in root.grid_results: GridCard {
-                                                property <bool> show: idx.mod(4) == 0;
-                                                row-data: row;
-                                                checkerboard: root.checkerboard_pattern;
-                                                visible: show;
-                                                width: show ? root.grid_card_size : 0px;
-                                                height: show ? root.grid_card_size + 45px : 0px;
-                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
-                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                            }
+                                        if row.has-col1: GridCard {
+                                            row-data: row.col1;
+                                            checkerboard: root.checkerboard_pattern;
+                                            width: root.grid_card_size;
+                                            height: root.grid_card_size + 45px;
+                                            clicked => { root.row_clicked(-1, false, row.col1.group_index, row.col1.path); root.active_tab = 1; }
+                                            right_clicked(mx, my) => { root.context_hovered_path = row.col1.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                            channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                         }
-
-                                        VerticalLayout {
-                                            width: root.grid_results.length > 1 ? root.grid_card_size : 0px;
-                                            spacing: 12px;
-                                            alignment: start;
-                                            for row[idx] in root.grid_results: GridCard {
-                                                property <bool> show: idx.mod(4) == 1;
-                                                row-data: row;
-                                                checkerboard: root.checkerboard_pattern;
-                                                visible: show;
-                                                width: show ? root.grid_card_size : 0px;
-                                                height: show ? root.grid_card_size + 45px : 0px;
-                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
-                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                            }
+                                        if row.has-col2: GridCard {
+                                            row-data: row.col2;
+                                            checkerboard: root.checkerboard_pattern;
+                                            width: root.grid_card_size;
+                                            height: root.grid_card_size + 45px;
+                                            clicked => { root.row_clicked(-1, false, row.col2.group_index, row.col2.path); root.active_tab = 1; }
+                                            right_clicked(mx, my) => { root.context_hovered_path = row.col2.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                            channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                         }
-
-                                        VerticalLayout {
-                                            width: root.grid_results.length > 2 ? root.grid_card_size : 0px;
-                                            spacing: 12px;
-                                            alignment: start;
-                                            for row[idx] in root.grid_results: GridCard {
-                                                property <bool> show: idx.mod(4) == 2;
-                                                row-data: row;
-                                                checkerboard: root.checkerboard_pattern;
-                                                visible: show;
-                                                width: show ? root.grid_card_size : 0px;
-                                                height: show ? root.grid_card_size + 45px : 0px;
-                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
-                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                            }
+                                        if row.has-col3: GridCard {
+                                            row-data: row.col3;
+                                            checkerboard: root.checkerboard_pattern;
+                                            width: root.grid_card_size;
+                                            height: root.grid_card_size + 45px;
+                                            clicked => { root.row_clicked(-1, false, row.col3.group_index, row.col3.path); root.active_tab = 1; }
+                                            right_clicked(mx, my) => { root.context_hovered_path = row.col3.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                            channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                         }
-
-                                        VerticalLayout {
-                                            width: root.grid_results.length > 3 ? root.grid_card_size : 0px;
-                                            spacing: 12px;
-                                            alignment: start;
-                                            for row[idx] in root.grid_results: GridCard {
-                                                property <bool> show: idx.mod(4) == 3;
-                                                row-data: row;
-                                                checkerboard: root.checkerboard_pattern;
-                                                visible: show;
-                                                width: show ? root.grid_card_size : 0px;
-                                                height: show ? root.grid_card_size + 45px : 0px;
-                                                clicked => { root.row_clicked(-1, false, row.group_index, row.path); root.active_tab = 1; }
-                                                right_clicked(mx, my) => { root.context_hovered_path = row.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
-                                                channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
-                                            }
+                                        if row.has-col4: GridCard {
+                                            row-data: row.col4;
+                                            checkerboard: root.checkerboard_pattern;
+                                            width: root.grid_card_size;
+                                            height: root.grid_card_size + 45px;
+                                            clicked => { root.row_clicked(-1, false, row.col4.group_index, row.col4.path); root.active_tab = 1; }
+                                            right_clicked(mx, my) => { root.context_hovered_path = row.col4.path; root.menu_x = mx; root.menu_y = my; context_popup.show(); }
+                                            channel_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                         }
                                     }
                                 }
@@ -2159,7 +2120,7 @@ export component AppWindow inherits Window {
                             original: root.image_original;
                             duplicate: root.image_duplicate;
                             checkerboard: root.checkerboard_pattern;
-                            wipe-val: root.wipe_slider_val;
+                            wipe-val <=> root.wipe_slider_val;
                             width: parent.width * root.zoom_factor;
                             height: parent.height * root.zoom_factor;
                             x: parent.width / 2 - self.width / 2 + root.pan_x;
@@ -2269,7 +2230,7 @@ export component AppWindow inherits Window {
                     }
 
                     compare-splitter-ta := TouchArea {
-                        mouse-cursor: col-resize;
+                        mouse-cursor: MouseCursor.col-resize;
                         moved => { if (self.pressed) { root.compare_sidebar_width = (root.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); root.save_settings(); } }
                     }
                 }
@@ -2534,10 +2495,9 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                     }
                 }
-            } // End of Tab 2
+            }
         }
 
-        // Progress Overlay Container
         if root.is_scanning: Rectangle {
             background: #2b2d31;
             border-radius: 4px;

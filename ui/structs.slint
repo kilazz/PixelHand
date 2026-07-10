@@ -1,3 +1,5 @@
+// ui/structs.slint
+
 export struct ResultsRow {
     is_header: bool,
     is_qc: bool,
@@ -29,4 +31,16 @@ export struct SelectedFile {
     alpha: string,
     similarity: string,
     path: string,
+}
+
+// Added to group results in batches of 4 on the Rust side to support native Slint ListView virtualization
+export struct GridRow {
+    col1: ResultsRow,
+    col2: ResultsRow,
+    col3: ResultsRow,
+    col4: ResultsRow,
+    has_col1: bool,
+    has_col2: bool,
+    has_col3: bool,
+    has_col4: bool,
 }

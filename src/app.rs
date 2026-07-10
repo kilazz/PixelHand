@@ -6,7 +6,6 @@ use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
-// Import state store settings
 use crate::state::{AppSettings, AppState};
 use crate::utils;
 
@@ -57,6 +56,7 @@ impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for UiLogWriter {
     }
 }
 
+/// Strips ANSI terminal escape color sequences from tracing logs before pushing them to the UI.
 fn clean_sample_log(raw: String) -> String {
     raw.replace("\u{001b}[2m", "")
         .replace("\u{001b}[0m", "")
@@ -65,40 +65,32 @@ fn clean_sample_log(raw: String) -> String {
         .replace("\u{001b}[31m", "")
 }
 
-fn weak_upgrade_and_queue(weak: slint::Weak<AppWindow>, log_line: String) {
-    let _ = weak.upgrade_in_event_loop(move |ui| {
-        let current = ui.get_console_log().to_string();
-        let next = if current.is_empty() {
-            log_line
-        } else {
-            format!("{}\n{}", current, log_line)
-        };
-        ui.set_console_log(next.into());
-    });
-}
-
+/// Dispatches log updates to the batched global queues to protect the UI thread from bottlenecks.
 pub fn append_to_console_log(msg: &str) {
     let clean_msg = msg.trim_end().to_string();
     if clean_msg.is_empty() {
         return;
     }
 
-    if let Some(weak_handle) = APP_HANDLE.get()
-        && let Some(_ui) = weak_handle.upgrade()
-    {
-        weak_upgrade_and_queue(weak_handle.clone(), clean_sample_log(clean_msg));
-        return;
-    }
+    let cleaned = clean_sample_log(clean_msg);
 
-    let queue_mutex = LOG_MESSAGES.get_or_init(|| Mutex::new(Vec::new()));
-    if let Ok(mut q) = queue_mutex.lock() {
-        q.push(clean_msg);
+    // If the GUI window is loaded, stream logs through the throttled aggregator (200ms chunks)
+    if APP_HANDLE.get().is_some() {
+        let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
+        if let Ok(mut lock) = queue.lock() {
+            lock.push(cleaned);
+        }
+    } else {
+        // Fallback to intermediate startup queue if UI event loop has not loaded yet
+        let queue_mutex = LOG_MESSAGES.get_or_init(|| Mutex::new(Vec::new()));
+        if let Ok(mut q) = queue_mutex.lock() {
+            q.push(cleaned);
+        }
     }
 }
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    // --- RUN EMBEDDED CACHE GARBAGE COLLECTOR ONCE ON STARTUP ---
     utils::cache::run_vector_cache_garbage_collector();
 
     if let Ok(dir) = utils::settings::get_portable_app_data_dir() {
@@ -135,6 +127,7 @@ pub fn run_gui() -> Result<()> {
     crate::core::tonemapper::TONEMAP_OPERATOR
         .store(loaded_settings.tonemap_operator as usize, Ordering::Relaxed);
 
+    // Flush initial startup logs queued before UI loop initialization
     if let Some(queue_mutex) = LOG_MESSAGES.get()
         && let Ok(mut q) = queue_mutex.lock()
     {
@@ -156,6 +149,7 @@ pub fn run_gui() -> Result<()> {
         }
     }
 
+    // Spawn async background tick to drain buffered log sequences every 200ms
     let app_weak_log = app.as_weak();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(200));
@@ -163,12 +157,15 @@ pub fn run_gui() -> Result<()> {
             interval.tick().await;
 
             let pending: Vec<String> = {
-                let queue = PENDING_LOGS.get_or_init(|| Mutex::new(Vec::new()));
-                if let Ok(mut lock) = queue.lock() {
-                    if lock.is_empty() {
-                        continue;
+                if let Some(queue) = PENDING_LOGS.get() {
+                    if let Ok(mut lock) = queue.lock() {
+                        if lock.is_empty() {
+                            continue;
+                        }
+                        std::mem::take(&mut *lock)
+                    } else {
+                        Vec::new()
                     }
-                    std::mem::take(&mut *lock)
                 } else {
                     Vec::new()
                 }
@@ -187,20 +184,20 @@ pub fn run_gui() -> Result<()> {
                     lines.push(p);
                 }
 
+                // Cap the viewport to maximum 200 rows of active console logs to avoid layout lag
                 if lines.len() > 200 {
                     let start = lines.len() - 200;
                     lines = lines[start..].to_vec();
                 }
 
-                let new_log = lines.join("\n");
-                ui.set_console_log(new_log.into());
+                ui.set_console_log(lines.join("\n").into());
             });
         }
     });
 
     trigger_startup_model_download(app.as_weak());
 
-    // --- DELEGATING ALL EVENT REGISTRATION TO SUB-MODULE ---
+    // Delegate callback hooks registration to app_bindings module
     crate::app_bindings::register_callbacks(&app, state, cancel_token);
 
     app.run()
@@ -208,6 +205,7 @@ pub fn run_gui() -> Result<()> {
     Ok(())
 }
 
+/// Maps serializable application settings structs into Slint component properties.
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_dir_a(settings.dir_a.clone().into());
     app.set_dir_b(settings.dir_b.clone().into());
@@ -215,7 +213,6 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_similarity_threshold(settings.similarity_threshold);
     app.set_batch_size(settings.batch_size);
 
-    // Dynamic state restoration for search method and QC mode
     let search_method = if settings.qc_mode {
         4
     } else {
@@ -223,7 +220,6 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     };
     app.set_search_method(search_method);
     app.set_qc_mode(settings.qc_mode);
-
     app.set_execution_provider(settings.execution_provider);
 
     app.set_qc_npot(settings.qc_npot);
@@ -287,7 +283,6 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_tonemap_enabled(settings.tonemap_enabled);
     app.set_tonemap_operator(settings.tonemap_operator);
 
-    // --- APPLY NEW PREVIEW & SMART FILTER PROPERTIES ---
     app.set_enable_previews(settings.enable_previews);
     app.set_preview_quality(settings.preview_quality);
     app.set_filter_only_npot(settings.filter_only_npot);
@@ -295,11 +290,11 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_filter_only_missing_mips(settings.filter_only_missing_mips);
     app.set_filter_only_cubemaps(settings.filter_only_cubemaps);
 
-    // Sync global atomics dynamically on startup/config load
     crate::scanners::ENABLE_PREVIEWS.store(settings.enable_previews, Ordering::Relaxed);
     crate::scanners::PREVIEW_QUALITY.store(settings.preview_quality, Ordering::Relaxed);
 }
 
+/// Triggers background download tasks for default ONNX model weights on startup if missing.
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     let app = app_weak.unwrap();
     let active_model = app.get_ai_model();
@@ -348,12 +343,14 @@ pub fn trigger_viewport_update(
     tokio::spawn(async move {
         if let Some(raw_orig) = utils::cache::get_channel_preview_image(&orig_path, &channel).await
         {
-            let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
+            let app_weak_orig = app_weak_clone.clone();
+            let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
                 ui.set_image_original(utils::ui::convert_to_slint_image(&raw_orig));
             });
         }
         if let Some(raw_dup) = utils::cache::get_channel_preview_image(&dup_path, &channel).await {
-            let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
+            let app_weak_dup = app_weak_clone.clone();
+            let _ = app_weak_dup.upgrade_in_event_loop(move |ui| {
                 ui.set_image_duplicate(utils::ui::convert_to_slint_image(&raw_dup));
             });
         }
@@ -364,7 +361,8 @@ pub fn trigger_viewport_update(
             && let Ok(diff_img) = image::open(&diff_path)
         {
             let raw_diff = diff_img.to_rgba8();
-            let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
+            let app_weak_diff = app_weak_clone.clone();
+            let _ = app_weak_diff.upgrade_in_event_loop(move |ui| {
                 ui.set_image_heatmap(utils::ui::convert_to_slint_image(&raw_diff));
             });
         }

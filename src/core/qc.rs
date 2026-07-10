@@ -18,6 +18,16 @@ pub struct QcImageMetadata {
     pub is_cubemap: bool,
 }
 
+/// Safely reads a little-endian u32 integer from a byte slice at the given offset with bounds checking.
+fn safe_read_u32_le(bytes: &[u8], offset: usize) -> u32 {
+    bytes
+        .get(offset..offset + 4)
+        .and_then(|sub| sub.try_into().ok())
+        .map(u32::from_le_bytes)
+        .unwrap_or(0)
+}
+
+/// Extracts technical image specifications, format metrics, and metadata layout from target path.
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
     let ext = path
         .extension()
@@ -36,42 +46,42 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
     let mut has_alpha = false;
     let mut bit_depth = 8;
     let mut mipmap_count = 1;
-    let mut is_cubemap = false; // Initialize to false by default
+    let mut is_cubemap = false;
 
     if ext == "dds" {
         let bytes = fs::read(path).context("Failed to read DDS bytes")?;
         if bytes.len() >= 128 {
-            h = u32::from_le_bytes(bytes[12..16].try_into().unwrap_or_default());
-            w = u32::from_le_bytes(bytes[16..20].try_into().unwrap_or_default());
+            h = safe_read_u32_le(&bytes, 12);
+            w = safe_read_u32_le(&bytes, 16);
 
-            let dw_flags = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or_default());
-            let mips = u32::from_le_bytes(bytes[28..32].try_into().unwrap_or_default());
+            let dw_flags = safe_read_u32_le(&bytes, 8);
+            let mips = safe_read_u32_le(&bytes, 28);
             mipmap_count = if (dw_flags & 0x20000) != 0 && mips > 0 {
                 mips
             } else {
                 1
             };
 
-            // --- CUBEMAP DETECTION ---
             // dwCaps2 is located at offset 112. The flag 0x0000FE00 indicates a Cubemap.
-            let dw_caps2 = u32::from_le_bytes(bytes[112..116].try_into().unwrap_or_default());
+            let dw_caps2 = safe_read_u32_le(&bytes, 112);
             is_cubemap = (dw_caps2 & 0x0000FE00) != 0;
 
-            let pf_flags = u32::from_le_bytes(bytes[80..84].try_into().unwrap_or_default());
+            let pf_flags = safe_read_u32_le(&bytes, 80);
             if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
                 has_alpha = true;
             }
 
-            let pf_fourcc = u32::from_le_bytes(bytes[84..88].try_into().unwrap_or_default());
+            let pf_fourcc = safe_read_u32_le(&bytes, 84);
             if pf_fourcc != 0 {
-                compression_format = String::from_utf8_lossy(&bytes[84..88]).trim().to_string();
+                if let Some(fourcc_slice) = bytes.get(84..88) {
+                    compression_format = String::from_utf8_lossy(fourcc_slice).trim().to_string();
+                }
                 if compression_format == "DXT3" || compression_format == "DXT5" {
                     has_alpha = true;
                 }
 
                 if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
-                    let dxgi_format =
-                        u32::from_le_bytes(bytes[128..132].try_into().unwrap_or_default());
+                    let dxgi_format = safe_read_u32_le(&bytes, 128);
                     compression_format = format!("DX10 (DXGI {})", dxgi_format);
                     if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
                         has_alpha = true;
@@ -82,8 +92,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
                 }
             } else {
                 compression_format = "Uncompressed".to_string();
-                let rgb_bit_count =
-                    u32::from_le_bytes(bytes[88..92].try_into().unwrap_or_default());
+                let rgb_bit_count = safe_read_u32_le(&bytes, 88);
                 bit_depth = if rgb_bit_count / 4 == 0 {
                     8
                 } else {
@@ -128,10 +137,11 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
         has_alpha,
         bit_depth,
         mipmap_count,
-        is_cubemap, // Set the flag in the returned struct
+        is_cubemap,
     })
 }
 
+/// Evaluates absolute single-asset constraints including NPOT dimensions, block align bounds, and bit depth limits.
 pub fn check_absolute(
     meta: &QcImageMetadata,
     check_npot: bool,
@@ -158,6 +168,7 @@ pub fn check_absolute(
     issues
 }
 
+/// Evaluates relative constraints on file parameter changes between source (original) and destination (duplicate) assets.
 pub fn check_relative(
     source: &QcImageMetadata,
     target: &QcImageMetadata,
@@ -194,8 +205,8 @@ pub fn check_relative(
     issues
 }
 
+/// Evaluates if the texture is a flat single-color block within a threshold tolerance.
 pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
-    // --- OPTIMIZED: Request low-res 128px mipmap during solid color check ---
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
     let processed_img = if img.width() > 128 || img.height() > 128 {
@@ -226,8 +237,8 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
     ))
 }
 
+/// Computes normal map vector bounds, verifies normalize properties, and screens for invalid normal length directions.
 pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String, String)> {
-    // --- OPTIMIZED: Request low-res 512px mipmap directly during normal map check ---
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(512)).ok()?;
     let processed_img = if img.width() > 512 || img.height() > 512 {
@@ -251,6 +262,7 @@ pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String
     let mut bad_pixels = 0;
 
     if mean_z > 0.98 {
+        // Flat normal maps (clipping check on XY unit boundary circle)
         for pixel in rgb_img.pixels() {
             let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
             let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
@@ -271,6 +283,7 @@ pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String
             ));
         }
     } else {
+        // Standard normal maps (unit vector scale validations)
         for pixel in rgb_img.pixels() {
             let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
             let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
@@ -301,9 +314,8 @@ pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String
     None
 }
 
-/// Helper to run visual difference mapping at 100% original resolution and save output to disk
+/// Generates visual difference maps between two original resolution image buffers and saves the diagnostic output.
 pub async fn calculate_diff_map(file1: &str, file2: &str) -> Result<String> {
-    // --- OPTIMIZED: Diff map requires pixel-perfect 1:1 original resolution details (passed None) ---
     let img1 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file1, None)?;
     let img2 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file2, None)?;
 

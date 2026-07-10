@@ -17,19 +17,19 @@ use xxhash_rust::xxh64::Xxh64;
 use crate::core::perceptual::AnalysisType;
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
-// Super-fast in-memory cache for thumbnail pixels (used for real-time hover channel previews)
+/// Fast in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
 pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, image::RgbaImage>>> =
     OnceLock::new();
 
-// Global thread-safe configs for fast background thread access
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
 pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
 
-// Normalize Windows path keys to guarantee 100% cache hit accuracy [3]
+/// Normalizes path representations on Windows to guarantee absolute cache hit consistency.
 pub fn normalize_path_key(path_str: &str) -> String {
-    path_str.replace("/", "\\").to_lowercase()
+    path_str.replace('/', "\\").to_lowercase()
 }
 
+/// Stores an image buffer in the memory cache, evicting the oldest key if size exceeds 200 entries.
 fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut lock) = cache.lock() {
@@ -43,7 +43,7 @@ fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     }
 }
 
-/// All configuration parameters gathered from the UI panel to orchestrate a scan.
+/// Data structure mapping all options gathered from the UI panel to orchestrate a scan.
 #[derive(Clone)]
 pub struct ScanParams {
     pub dir_a: String,
@@ -51,7 +51,7 @@ pub struct ScanParams {
     pub query_text: String,
     pub similarity: f32,
     pub batch_size: usize,
-    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI Embeddings, 3: Asset Inventory, 4: QC Audit
+    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI, 3: Inventory, 4: QC
     pub execution_provider: String,
     pub qc_mode: bool,
     pub qc_npot: bool,
@@ -64,14 +64,14 @@ pub struct ScanParams {
     pub extensions: Vec<String>,
     pub cancel_token: Arc<std::sync::atomic::AtomicBool>,
 
-    // Properties for Asynchronous Visual Reports (Contact Sheets)
+    // Contact Sheet configurations
     pub save_visuals: bool,
     pub visuals_columns: usize,
     pub visuals_max_count: usize,
     pub visuals_font_size: usize,
     pub visuals_scale: f32,
 
-    // Image Pre-processing Options
+    // Preprocessing configurations
     pub prep_luminance: bool,
     pub prep_channels: bool,
     pub prep_r: bool,
@@ -81,7 +81,7 @@ pub struct ScanParams {
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
 
-    // Exclude Filter and QC Matching controls
+    // Exclude filters
     pub excluded_folders: String,
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
@@ -92,31 +92,25 @@ pub struct ScanParams {
     pub qc_check_colorspace: bool,
     pub qc_check_compression: bool,
 
-    // IVF-PQ Index Tuning Parameters (Search Precision)
     pub search_precision: i32,
-
-    // Active AI Model selection property
     pub ai_model: i32,
 
-    // Live Progress Update handler (thread-safe Arc wrapper, transfers percentage, current, total)
-    #[allow(clippy::type_complexity)] // <-- Fixed: Allowed complex type warning locally
+    #[allow(clippy::type_complexity)]
     pub on_progress: Option<Arc<dyn Fn(f32, usize, usize) + Send + Sync>>,
 
-    // Custom Model Local Options
     pub custom_model_path: String,
     pub custom_model_arch: i32,
     pub custom_model_dim: i32,
 }
 
 impl ScanParams {
-    /// Compiles the current state of Slint UI properties into a safe, thread-safe ScanParams struct.
+    /// Compiles Slint UI properties into thread-safe ScanParams.
     pub fn from_ui(
         ui: &crate::app::AppWindow,
         cancel_token: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let mut extensions = Vec::new();
 
-        // Split PNG and JPG correctly [3]
         if ui.get_ext_png() {
             extensions.push(".png".to_string());
         }
@@ -124,7 +118,6 @@ impl ScanParams {
             extensions.push(".jpg".to_string());
             extensions.push(".jpeg".to_string());
         }
-
         if ui.get_ext_tga() {
             extensions.push(".tga".to_string());
         }
@@ -164,7 +157,6 @@ impl ScanParams {
             extensions.push(".avif".to_string());
         }
 
-        // Decipher selected Execution Provider index
         let execution_provider = match ui.get_execution_provider() {
             1 => "DirectML".to_string(),
             2 => "CUDA".to_string(),
@@ -194,14 +186,12 @@ impl ScanParams {
             extensions,
             cancel_token,
 
-            // Pull visuals settings from Slint UI properties
             save_visuals: ui.get_save_visuals(),
             visuals_columns: ui.get_visuals_columns() as usize,
             visuals_max_count: ui.get_visuals_max_count() as usize,
             visuals_font_size: ui.get_visuals_font_size() as usize,
             visuals_scale: ui.get_visuals_scale(),
 
-            // Pull image pre-processing logic parameters
             prep_luminance: ui.get_prep_luminance(),
             prep_channels: ui.get_prep_channels(),
             prep_r: ui.get_prep_r(),
@@ -211,24 +201,18 @@ impl ScanParams {
             prep_tags: ui.get_prep_tags().to_string(),
             prep_ignore_solid: ui.get_prep_ignore_solid(),
 
-            // Exclude Filter and QC Matching controls
             excluded_folders: ui.get_excluded_folders().to_string(),
             qc_match_by_stem: ui.get_qc_match_by_stem(),
             qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
 
-            // Relative Quality Control parameters
             qc_check_bloat: ui.get_qc_check_bloat(),
             qc_check_alpha: ui.get_qc_check_alpha(),
             qc_check_colorspace: ui.get_qc_check_colorspace(),
             qc_check_compression: ui.get_qc_check_compression(),
 
-            // Precision parameters
             search_precision: ui.get_search_precision(),
-
-            // AI Model selection index
             ai_model: ui.get_ai_model(),
 
-            // Custom Model Local Options
             custom_model_path: ui.get_custom_model_path().to_string(),
             custom_model_arch: ui.get_custom_model_arch(),
             custom_model_dim: ui.get_custom_model_dim(),
@@ -238,20 +222,17 @@ impl ScanParams {
     }
 }
 
-/// Represents a discrete analysis task generated by the pre-processing module.
-/// Can point to the same physical file multiple times if channel splitting is enabled.
+/// Represents a discrete analysis item mapped by the image channels splitter.
 #[derive(Debug, Clone)]
 pub struct AnalysisItem {
     pub path: PathBuf,
     pub analysis_type: AnalysisType,
 }
 
-/// Expands a list of raw physical paths into a comprehensive list of logical `AnalysisItem`s
-/// based on the configured pre-processing rules (Channels, Luminance, Tags).
+/// Expands a flat list of file paths into distinct AnalysisItems based on pre-processing rules.
 pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<AnalysisItem> {
     let mut items = Vec::new();
 
-    // Parse tag filter into lowercase tokens for substring matching
     let tags: Vec<String> = params
         .prep_tags
         .split(',')
@@ -263,13 +244,12 @@ pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<An
         let path_str = path.to_string_lossy().to_lowercase();
 
         let matches_tags = if tags.is_empty() {
-            true // No tags specified means filter applies to all files
+            true
         } else {
             tags.iter().any(|tag| path_str.contains(tag))
         };
 
         if params.prep_channels && matches_tags {
-            // Explode single file into up to 4 separate items based on channel checks
             if params.prep_r {
                 items.push(AnalysisItem {
                     path: path.clone(),
@@ -295,13 +275,11 @@ pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<An
                 });
             }
         } else if params.prep_luminance {
-            // Process as a unified grayscale layout
             items.push(AnalysisItem {
                 path: path.clone(),
                 analysis_type: AnalysisType::Luminance,
             });
         } else {
-            // Default fully-composited RGB/RGBA pass
             items.push(AnalysisItem {
                 path: path.clone(),
                 analysis_type: AnalysisType::Composite,
@@ -312,13 +290,12 @@ pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<An
     items
 }
 
-/// Core routing mechanism designed to dispatch to the correct scanning strategy.
+/// Central routing mechanism directing search configurations to proper execution engines.
 pub async fn execute_scan(
     params: ScanParams,
 ) -> Result<(Vec<DuplicateGroupSummary>, Vec<ResultsRowData>)> {
     if params.qc_mode {
         if !params.dir_b.trim().is_empty() {
-            // Relative Folder A vs Folder B asset comparison
             let ex_folders: Vec<String> = params
                 .excluded_folders
                 .split(',')
@@ -342,37 +319,29 @@ pub async fn execute_scan(
             let rows = map_qc_to_rows(&issues);
             Ok((Vec::new(), rows))
         } else {
-            // Absolute local folder technical quality control audit
             let issues = qc::run_qc_scan_internal(params).await?;
             let rows = map_qc_to_rows(&issues);
             Ok((Vec::new(), rows))
         }
     } else if params.search_method == 3 {
-        // Asset Inventory (Detailed Audit)
         let mut rows = qc::run_asset_audit(params).await?;
-        // Default sort by filename
         rows.sort_by(|a, b| a.path.cmp(&b.path));
         Ok((Vec::new(), rows))
     } else if params.search_method == 2 {
-        // AI Vector Space Similarity Searches
         if !params.query_text.trim().is_empty() {
-            // Semantic Text Search
             let matches = ai::run_ai_search(params).await?;
             let rows = map_ai_search_to_rows(&matches);
             Ok((Vec::new(), rows))
         } else {
-            // AI Visual Duplicate Cluster Scan
             let groups = ai::run_ai_duplicate_scan(params).await?;
             let rows = map_groups_to_rows(&groups);
             Ok((groups, rows))
         }
     } else if params.search_method == 1 {
-        // Linear Perceptual Similarity Engine (dHash + Hamming Distance)
         let groups = perceptual::run_perceptual_scan_internal(params).await?;
         let rows = map_groups_to_rows(&groups);
         Ok((groups, rows))
     } else {
-        // Binary Byte-Exact Scanning (xxHash64)
         let groups = exact::run_exact_scan(params).await?;
         let rows = map_groups_to_rows(&groups);
         Ok((groups, rows))
@@ -385,9 +354,8 @@ pub async fn execute_scan(
 
 static CACHE_DIR_INITIALIZED: OnceLock<()> = OnceLock::new();
 
-/// Instantiates a downscaled thumbnail from disk or retrieves it from the dynamic disk-backed thumbnail cache.
+/// Loads thumbnail textures from disk cache, generating compressed fallback files during misses.
 pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
-    // --- FAST BYPASS IF PREVIEWS ARE GLOBALLY DISABLED ---
     if !ENABLE_PREVIEWS.load(Ordering::Relaxed) {
         return None;
     }
@@ -397,15 +365,15 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         return None;
     }
 
-    // Locate the local portable cache directory: PixelHand_Data/.cache/thumbnails/
     let cache_dir = crate::utils::settings::get_portable_app_data_dir()
         .ok()
         .map(|p| p.join(".cache").join("thumbnails"));
 
     let cache_path = if let Some(ref dir) = cache_dir {
-        // Guarantee cache folder directory is initialized exactly once per run to reduce disk syscall overhead
         CACHE_DIR_INITIALIZED.get_or_init(|| {
-            let _ = std::fs::create_dir_all(dir);
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                tracing::error!("Failed to initialize thumbnail cache directory: {}", e);
+            }
         });
 
         if let Ok(metadata) = std::fs::metadata(&path) {
@@ -430,8 +398,7 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         None
     };
 
-    // 1. Try reading the tiny pre-rendered PNG from the disk cache (takes <1ms)
-    // Collapse the conditional statements cleanly according to Clippy recommendations
+    // 1. Try reading the tiny pre-rendered PNG from the disk cache safely
     if let Some(ref cp) = cache_path
         && cp.is_file()
         && let Ok(img) = image::open(cp)
@@ -441,12 +408,11 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         return Some(rgba);
     }
 
-    // --- DYNAMIC PREVIEW QUALITY & ALGORITHM TUNING ---
     let quality = PREVIEW_QUALITY.load(Ordering::Relaxed);
     let target_size = match quality {
-        0 => 64,  // Fast
-        1 => 128, // Balanced
-        _ => 256, // High
+        0 => 64,
+        1 => 128,
+        _ => 256,
     };
     let filter = match quality {
         0 => image::imageops::FilterType::Nearest,
@@ -454,7 +420,7 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         _ => image::imageops::FilterType::Lanczos3,
     };
 
-    // 2. Fallback: Parse the actual texture and downscale to tuned bounds for quality and speed
+    // 2. Fallback: Parse the actual texture and downscale
     if let Ok(mut img) =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(target_size))
     {
@@ -463,10 +429,8 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         }
         let rgba = img.to_rgba8();
 
-        // Store inside the ultra-fast in-memory cache for realtime channel hovering [2]
         store_in_thumbnail_memory_cache(path_str, rgba.clone());
 
-        // Save compressed PNG to local disk cache for instant subsequent loading
         if let Some(ref cp) = cache_path {
             let _ = rgba.save(cp);
         }
@@ -513,7 +477,6 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             size_bytes: 0,
             pixels_count: 0,
 
-            // Filter flags
             is_npot: false,
             is_uncompressed: false,
             is_missing_mips: false,
@@ -576,7 +539,6 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
                 size_bytes: file.size,
                 pixels_count: (file.width * file.height) as u64,
 
-                // Setup smart filter variables
                 is_npot: !is_pow2(file.width) || !is_pow2(file.height),
                 is_uncompressed: file
                     .compression_format

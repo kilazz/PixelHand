@@ -18,46 +18,96 @@ pub fn register_callbacks(
     state: Arc<Mutex<AppState>>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
 ) {
-    let app_weak = app.as_weak();
+    bind_directory_selection(app);
+    bind_scan_execution(app, state.clone(), cancel_token);
+    bind_file_actions(app, state.clone());
+    bind_ui_state_and_settings(app, state);
+    bind_drag_and_drop(app);
+}
 
-    let app_weak_folder_a = app_weak.clone();
+/// Binds UI handlers responsible for folder, reference image, and custom model selection.
+fn bind_directory_selection(app: &AppWindow) {
+    let app_weak_a = app.as_weak();
     app.on_select_folder_a(move || {
         if let Some(folder) = rfd::FileDialog::new()
             .set_title("Select Folder A")
             .pick_folder()
         {
             let path_str = folder.to_string_lossy().to_string();
-            if let Some(ui) = app_weak_folder_a.upgrade() {
+            if let Some(ui) = app_weak_a.upgrade() {
                 ui.set_dir_a(path_str.into());
                 utils::settings::save_settings(&ui);
             }
         }
     });
 
-    let app_weak_folder_b = app_weak.clone();
+    let app_weak_b = app.as_weak();
     app.on_select_folder_b(move || {
         if let Some(folder) = rfd::FileDialog::new()
             .set_title("Select Folder B")
             .pick_folder()
         {
             let path_str = folder.to_string_lossy().to_string();
-            if let Some(ui) = app_weak_folder_b.upgrade() {
+            if let Some(ui) = app_weak_b.upgrade() {
                 ui.set_dir_b(path_str.into());
                 utils::settings::save_settings(&ui);
             }
         }
     });
 
-    let app_weak_scan = app_weak.clone();
+    let app_weak_ref = app.as_weak();
+    app.on_select_reference_image(move || {
+        if let Some(file) = rfd::FileDialog::new()
+            .set_title("Select Reference Image")
+            .add_filter(
+                "Images",
+                &[
+                    "png", "jpg", "jpeg", "tga", "dds", "exr", "hdr", "tif", "tiff", "webp", "gif",
+                    "psd", "jxl", "heic", "heif", "avif",
+                ],
+            )
+            .pick_file()
+        {
+            let path_str = file.to_string_lossy().to_string();
+            if let Some(ui) = app_weak_ref.upgrade() {
+                ui.set_query_text(path_str.into());
+                ui.set_search_method(2);
+                utils::settings::save_settings(&ui);
+            }
+        }
+    });
+
+    let app_weak_custom = app.as_weak();
+    app.on_select_custom_model(move || {
+        if let Some(folder) = rfd::FileDialog::new()
+            .set_title("Select Custom ONNX Model Directory")
+            .pick_folder()
+        {
+            let path_str = folder.to_string_lossy().to_string();
+            if let Some(ui) = app_weak_custom.upgrade() {
+                ui.set_custom_model_path(path_str.into());
+                utils::settings::save_settings(&ui);
+            }
+        }
+    });
+}
+
+/// Binds scan execution pipeline, setup callbacks, and handles download step verification.
+fn bind_scan_execution(
+    app: &AppWindow,
+    state: Arc<Mutex<AppState>>,
+    cancel_token: Arc<std::sync::atomic::AtomicBool>,
+) {
+    let app_weak_scan = app.as_weak();
     let state_clone = state.clone();
     let cancel_token_clone = cancel_token.clone();
+
     app.on_run_scan(move || {
         let app_copy = app_weak_scan.clone();
         let state_copy = state_clone.clone();
         let ui = app_copy.unwrap();
 
         utils::settings::save_settings(&ui);
-
         cancel_token_clone.store(false, Ordering::Relaxed);
 
         let mut params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
@@ -78,7 +128,7 @@ pub fn register_callbacks(
         tracing::info!("Starting scan on directory: {}", params.dir_a);
 
         let params_for_task = params.clone();
-        let app_weak_download = app_weak_scan.clone();
+        let app_weak_download = app_copy.clone();
 
         tokio::spawn(async move {
             if params_for_task.search_method == 2
@@ -95,13 +145,11 @@ pub fn register_callbacks(
                 return;
             }
 
-            {
-                if let Some(ref_ui) = app_weak_download.upgrade() {
-                    crate::core::tonemapper::TONEMAP_ENABLED
-                        .store(ref_ui.get_tonemap_enabled(), Ordering::Relaxed);
-                    crate::core::tonemapper::TONEMAP_OPERATOR
-                        .store(ref_ui.get_tonemap_operator() as usize, Ordering::Relaxed);
-                }
+            if let Some(ref_ui) = app_weak_download.upgrade() {
+                crate::core::tonemapper::TONEMAP_ENABLED
+                    .store(ref_ui.get_tonemap_enabled(), Ordering::Relaxed);
+                crate::core::tonemapper::TONEMAP_OPERATOR
+                    .store(ref_ui.get_tonemap_operator() as usize, Ordering::Relaxed);
             }
 
             let scan_result = scanners::execute_scan(params_for_task.clone()).await;
@@ -164,18 +212,11 @@ pub fn register_callbacks(
         cancel_token_cancel.store(true, Ordering::Relaxed);
         tracing::warn!("User requested scan cancellation. Waiting for threads to stop...");
     });
+}
 
-    app.on_open_file_in_viewer(move |path| {
-        let path_str = path.to_string();
-        if !path_str.is_empty() {
-            tracing::info!("Opening file in default viewer: {}", path_str);
-            if let Err(e) = open::that(&path_str) {
-                tracing::error!("Failed to open file: {}", e);
-            }
-        }
-    });
-
-    let app_weak_ctx = app_weak.clone();
+/// Binds UI handlers for files interactions, double clicks, checklist updates, and viewport previews.
+fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
+    let app_weak_ctx = app.as_weak();
     let state_clone_ctx = state.clone();
     app.on_context_menu_action(move |action, path| {
         let path_str = path.to_string();
@@ -225,7 +266,17 @@ pub fn register_callbacks(
         }
     });
 
-    let app_weak_checkbox = app_weak.clone();
+    app.on_open_file_in_viewer(move |path| {
+        let path_str = path.to_string();
+        if !path_str.is_empty() {
+            tracing::info!("Opening file in default viewer: {}", path_str);
+            if let Err(e) = open::that(&path_str) {
+                tracing::error!("Failed to open file: {}", e);
+            }
+        }
+    });
+
+    let app_weak_checkbox = app.as_weak();
     let state_clone_cb = state.clone();
     app.on_row_checkbox_toggled(move |idx| {
         let mut lock = state_clone_cb.safe_lock();
@@ -239,7 +290,7 @@ pub fn register_callbacks(
         }
     });
 
-    let app_weak_clicked = app_weak.clone();
+    let app_weak_clicked = app.as_weak();
     let state_clone_click = state.clone();
     app.on_row_clicked(move |_idx, is_header, group_idx, path| {
         let app_copy = app_weak_clicked.clone();
@@ -338,7 +389,7 @@ pub fn register_callbacks(
         );
     });
 
-    let app_weak_action = app_weak.clone();
+    let app_weak_action = app.as_weak();
     let state_copy_act = state.clone();
     app.on_trigger_action(move |action_type| {
         let app_copy = app_weak_action.clone();
@@ -381,69 +432,142 @@ pub fn register_callbacks(
         });
     });
 
-    let app_weak_rule = app_weak.clone();
-    let state_clone_rule = state.clone();
-    app.on_trigger_selection_rule(move |rule| {
-        let mut lock = state_clone_rule.safe_lock();
-        utils::ui::apply_selection_rule(&mut lock, rule.as_str());
-        if let Some(ui) = app_weak_rule.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
-        }
-    });
+    let app_weak_hover = app.as_weak();
+    let state_hover = state;
 
-    let app_weak_expand = app_weak.clone();
-    let state_clone_exp = state.clone();
-    app.on_expand_all_groups(move || {
-        let mut lock = state_clone_exp.safe_lock();
-        lock.collapsed_groups.clear();
-        if let Some(ui) = app_weak_expand.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
-        }
-    });
+    // Thread-safe async debouncing handle to capture rapid mouse hovering and eliminate event loop flooding
+    let last_hover_task = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<()>>));
 
-    let app_weak_collapse = app_weak.clone();
-    let state_clone_col = state.clone();
-    app.on_collapse_all_groups(move || {
-        let mut lock = state_clone_col.safe_lock();
-        lock.collapsed_groups.clear();
+    app.on_thumbnail_channel_hovered(move |path_str, channel| {
+        let path_std = path_str.to_string();
+        let channel_std = channel.to_string();
+        let app_weak_clone = app_weak_hover.clone();
+        let state_clone = state_hover.clone();
 
-        let header_indices: Vec<i32> = lock
-            .results
-            .iter()
-            .filter(|row| row.is_header)
-            .map(|row| row.group_index)
-            .collect();
-
-        for group_index in header_indices {
-            lock.collapsed_groups.insert(group_index);
+        let mut lock = last_hover_task.lock().unwrap();
+        if let Some(handle) = lock.take() {
+            handle.abort(); // Cancel any rapid intermediate hover tasks to protect the Slint event loop
         }
 
-        if let Some(ui) = app_weak_collapse.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
-        }
-    });
+        // Spawn debounced hover processing task with an 80ms delay
+        let handle = tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
-    let app_weak_channel = app_weak.clone();
-    app.on_channel_toggled(move || {
-        let app_copy = app_weak_channel.clone();
-        if let Some(ui) = app_copy.upgrade() {
-            let orig_path = ui.get_original_meta().path.to_string();
-            let dup_path = ui.get_duplicate_meta().path.to_string();
+            let normalized_path = scanners::normalize_path_key(&path_std);
 
-            if !orig_path.is_empty() && !dup_path.is_empty() {
-                crate::app::trigger_viewport_update(app_weak_channel.clone(), orig_path, dup_path);
+            let cached_img = {
+                let cache = scanners::THUMBNAIL_MEMORY_CACHE
+                    .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+                cache.lock().unwrap().get(&normalized_path).cloned()
+            };
+
+            if let Some(rgba) = cached_img {
+                let channel_img = if channel_std == "RGB" || channel_std == "Composite" {
+                    rgba
+                } else {
+                    let channel_idx = match channel_std.as_str() {
+                        "R" => 0,
+                        "G" => 1,
+                        "B" => 2,
+                        _ => 3,
+                    };
+                    let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
+                    for (x, y, pixel) in rgba.enumerate_pixels() {
+                        let val = pixel[channel_idx];
+                        if channel_idx == 3 {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, val]));
+                        } else {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
+                        }
+                    }
+                    out_rgba
+                };
+
+                // Sync the shared state representation under isolated scope
+                {
+                    let mut lock = state_clone.safe_lock();
+                    for row in &mut lock.results {
+                        if scanners::normalize_path_key(&row.path) == normalized_path {
+                            row.thumbnail_data = Some(channel_img.clone());
+                        }
+                    }
+                }
+
+                // Update UI components dynamically inside the event loop
+                let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
+                    use slint::Model;
+                    let slint_img = utils::ui::convert_to_slint_image(&channel_img);
+
+                    // Update List Results
+                    let results_model = ui.get_results();
+                    for i in 0..results_model.row_count() {
+                        if let Some(mut r) = results_model.row_data(i)
+                            && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                        {
+                            r.thumbnail = slint_img.clone();
+                            results_model.set_row_data(i, r);
+                        }
+                    }
+
+                    // Update Grid Results (mapping dynamically into virtualized GridRow columns)
+                    let grid_model = ui.get_grid_row_results();
+                    for i in 0..grid_model.row_count() {
+                        if let Some(mut r) = grid_model.row_data(i) {
+                            if r.has_col1
+                                && scanners::normalize_path_key(r.col1.path.as_str())
+                                    == normalized_path
+                            {
+                                r.col1.thumbnail = slint_img.clone();
+                                grid_model.set_row_data(i, r);
+                            } else if r.has_col2
+                                && scanners::normalize_path_key(r.col2.path.as_str())
+                                    == normalized_path
+                            {
+                                r.col2.thumbnail = slint_img.clone();
+                                grid_model.set_row_data(i, r);
+                            } else if r.has_col3
+                                && scanners::normalize_path_key(r.col3.path.as_str())
+                                    == normalized_path
+                            {
+                                r.col3.thumbnail = slint_img.clone();
+                                grid_model.set_row_data(i, r);
+                            } else if r.has_col4
+                                && scanners::normalize_path_key(r.col4.path.as_str())
+                                    == normalized_path
+                            {
+                                r.col4.thumbnail = slint_img.clone();
+                                grid_model.set_row_data(i, r);
+                            }
+                        }
+                    }
+
+                    // Update Selected Group Files (Compare Panel)
+                    let group_model = ui.get_selected_group_files();
+                    for i in 0..group_model.row_count() {
+                        if let Some(mut r) = group_model.row_data(i)
+                            && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                        {
+                            r.thumbnail = slint_img.clone();
+                            group_model.set_row_data(i, r);
+                        }
+                    }
+                });
             }
-        }
+        });
+        *lock = Some(handle);
     });
+}
 
-    let app_weak_save = app_weak.clone();
+/// Binds UI utility parameters, tonemapping options, sorting/filtering engines, and column resizers.
+fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
+    let app_weak_save = app.as_weak();
     app.on_save_settings(move || {
         if let Some(ui) = app_weak_save.upgrade() {
             utils::settings::save_settings(&ui);
         }
     });
 
-    let app_weak_tonemap = app_weak.clone();
+    let app_weak_tonemap = app.as_weak();
     app.on_tonemap_toggled(move || {
         let app_copy = app_weak_tonemap.clone();
         let ui = app_copy.unwrap();
@@ -468,6 +592,61 @@ pub fn register_callbacks(
         }
     });
 
+    let app_weak_channel = app.as_weak();
+    app.on_channel_toggled(move || {
+        let app_copy = app_weak_channel.clone();
+        if let Some(ui) = app_copy.upgrade() {
+            let orig_path = ui.get_original_meta().path.to_string();
+            let dup_path = ui.get_duplicate_meta().path.to_string();
+
+            if !orig_path.is_empty() && !dup_path.is_empty() {
+                crate::app::trigger_viewport_update(app_weak_channel.clone(), orig_path, dup_path);
+            }
+        }
+    });
+
+    let app_weak_rule = app.as_weak();
+    let state_clone_rule = state.clone();
+    app.on_trigger_selection_rule(move |rule| {
+        let mut lock = state_clone_rule.safe_lock();
+        utils::ui::apply_selection_rule(&mut lock, rule.as_str());
+        if let Some(ui) = app_weak_rule.upgrade() {
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
+    let app_weak_expand = app.as_weak();
+    let state_clone_exp = state.clone();
+    app.on_expand_all_groups(move || {
+        let mut lock = state_clone_exp.safe_lock();
+        lock.collapsed_groups.clear();
+        if let Some(ui) = app_weak_expand.upgrade() {
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
+    let app_weak_collapse = app.as_weak();
+    let state_clone_col = state.clone();
+    app.on_collapse_all_groups(move || {
+        let mut lock = state_clone_col.safe_lock();
+        lock.collapsed_groups.clear();
+
+        let header_indices: Vec<i32> = lock
+            .results
+            .iter()
+            .filter(|row| row.is_header)
+            .map(|row| row.group_index)
+            .collect();
+
+        for group_index in header_indices {
+            lock.collapsed_groups.insert(group_index);
+        }
+
+        if let Some(ui) = app_weak_collapse.upgrade() {
+            utils::ui::update_results_ui(&ui, &lock);
+        }
+    });
+
     app.on_export_log(move |log_text| {
         utils::export::export_diagnostics_log(log_text.as_str());
     });
@@ -477,7 +656,7 @@ pub fn register_callbacks(
         utils::export::export_results_to_csv(state_clone_csv.clone());
     });
 
-    let app_weak_col_sort = app_weak.clone();
+    let app_weak_col_sort = app.as_weak();
     let state_clone_col_sort = state.clone();
     app.on_sort_by_column(move |col| {
         let mut lock = state_clone_col_sort.safe_lock();
@@ -598,7 +777,17 @@ pub fn register_callbacks(
         }
     });
 
-    let app_weak_filter = app_weak.clone();
+    app.on_clear_cache(move || {
+        if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
+            let _ = std::fs::remove_dir_all(app_dir.join(".lancedb_cache"));
+            let _ = std::fs::remove_dir_all(app_dir.join(".cache"));
+            crate::app::append_to_console_log(
+                "Scan database and thumbnail caches cleared successfully.",
+            );
+        }
+    });
+
+    let app_weak_filter = app.as_weak();
     let state_clone_filt = state.clone();
     app.on_results_filter_changed(move || {
         if let Some(ui) = app_weak_filter.upgrade() {
@@ -607,7 +796,7 @@ pub fn register_callbacks(
         }
     });
 
-    let app_weak_sort = app_weak.clone();
+    let app_weak_sort = app.as_weak();
     let state_clone_sort = state.clone();
     app.on_results_sort_changed(move |sort_idx| {
         let mut lock = state_clone_sort.safe_lock();
@@ -642,55 +831,8 @@ pub fn register_callbacks(
         }
     });
 
-    app.on_clear_cache(move || {
-        if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
-            let _ = std::fs::remove_dir_all(app_dir.join(".lancedb_cache"));
-            let _ = std::fs::remove_dir_all(app_dir.join(".cache"));
-            crate::app::append_to_console_log(
-                "Scan database and thumbnail caches cleared successfully.",
-            );
-        }
-    });
-
-    let app_weak_custom = app_weak.clone();
-    app.on_select_custom_model(move || {
-        if let Some(folder) = rfd::FileDialog::new()
-            .set_title("Select Custom ONNX Model Directory")
-            .pick_folder()
-        {
-            let path_str = folder.to_string_lossy().to_string();
-            if let Some(ui) = app_weak_custom.upgrade() {
-                ui.set_custom_model_path(path_str.into());
-                utils::settings::save_settings(&ui);
-            }
-        }
-    });
-
-    let app_weak_dnd = app_weak.clone();
-    app.window().on_winit_window_event(move |_window, event| {
-        if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
-            let path_str = path_buf.to_string_lossy().to_string();
-            let is_dir = path_buf.is_dir();
-            let is_file = path_buf.is_file();
-            let app_copy = app_weak_dnd.clone();
-
-            let _ = app_copy.upgrade_in_event_loop(move |ui| {
-                if is_dir {
-                    ui.set_dir_a(path_str.clone().into());
-                    ui.set_status_text(format!("Scan folder updated: {}", path_str).into());
-                } else if is_file {
-                    ui.set_query_text(path_str.clone().into());
-                    ui.set_search_method(2);
-                    ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
-                }
-                utils::settings::save_settings(&ui);
-            });
-        }
-        slint::winit_030::EventResult::Propagate
-    });
-
-    let app_weak_auto = app_weak.clone();
-    let state_auto = state.clone();
+    let app_weak_auto = app.as_weak();
+    let state_auto = state;
     app.on_auto_size_columns(move || {
         if let Some(ui) = app_weak_auto.upgrade() {
             let lock = state_auto.safe_lock();
@@ -726,109 +868,30 @@ pub fn register_callbacks(
             );
         }
     });
+}
 
-    let app_weak_hover = app_weak.clone();
-    let state_hover = state.clone();
-    app.on_thumbnail_channel_hovered(move |path_str, channel| {
-        if let Some(ui) = app_weak_hover.upgrade() {
-            let mut lock = state_hover.safe_lock();
-            let path_std = path_str.to_string();
-            let channel_std = channel.to_string();
-            let normalized_path = scanners::normalize_path_key(&path_std);
+/// Binds standard window OS events, such as native drag and drop files/directories drop targets.
+fn bind_drag_and_drop(app: &AppWindow) {
+    let app_weak_dnd = app.as_weak();
+    app.window().on_winit_window_event(move |_window, event| {
+        if let slint::winit_030::winit::event::WindowEvent::DroppedFile(path_buf) = event {
+            let path_str = path_buf.to_string_lossy().to_string();
+            let is_dir = path_buf.is_dir();
+            let is_file = path_buf.is_file();
+            let app_copy = app_weak_dnd.clone();
 
-            let cached_img = {
-                let cache = scanners::THUMBNAIL_MEMORY_CACHE
-                    .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-                cache.lock().unwrap().get(&normalized_path).cloned()
-            };
-
-            if let Some(rgba) = cached_img {
-                let channel_img = if channel_std == "RGB" || channel_std == "Composite" {
-                    rgba
-                } else {
-                    let channel_idx = match channel_std.as_str() {
-                        "R" => 0,
-                        "G" => 1,
-                        "B" => 2,
-                        _ => 3,
-                    };
-                    let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
-                    for (x, y, pixel) in rgba.enumerate_pixels() {
-                        let val = pixel[channel_idx];
-                        if channel_idx == 3 {
-                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, val]));
-                        } else {
-                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
-                        }
-                    }
-                    out_rgba
-                };
-
-                for row in &mut lock.results {
-                    if scanners::normalize_path_key(&row.path) == normalized_path {
-                        row.thumbnail_data = Some(channel_img.clone());
-                    }
+            let _ = app_copy.upgrade_in_event_loop(move |ui| {
+                if is_dir {
+                    ui.set_dir_a(path_str.clone().into());
+                    ui.set_status_text(format!("Scan folder updated: {}", path_str).into());
+                } else if is_file {
+                    ui.set_query_text(path_str.clone().into());
+                    ui.set_search_method(2);
+                    ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
                 }
-
-                // COLLAPSED NESTED IF BLOCKS WITH LET-CHAINS
-                use slint::Model;
-                let slint_img = utils::ui::convert_to_slint_image(&channel_img);
-
-                // Update List Results
-                let results_model = ui.get_results();
-                for i in 0..results_model.row_count() {
-                    if let Some(mut r) = results_model.row_data(i)
-                        && scanners::normalize_path_key(r.path.as_str()) == normalized_path
-                    {
-                        r.thumbnail = slint_img.clone();
-                        results_model.set_row_data(i, r);
-                    }
-                }
-
-                // Update Grid Results
-                let grid_model = ui.get_grid_results();
-                for i in 0..grid_model.row_count() {
-                    if let Some(mut r) = grid_model.row_data(i)
-                        && scanners::normalize_path_key(r.path.as_str()) == normalized_path
-                    {
-                        r.thumbnail = slint_img.clone();
-                        grid_model.set_row_data(i, r);
-                    }
-                }
-
-                // Update Selected Group Files (Compare Panel)
-                let group_model = ui.get_selected_group_files();
-                for i in 0..group_model.row_count() {
-                    if let Some(mut r) = group_model.row_data(i)
-                        && scanners::normalize_path_key(r.path.as_str()) == normalized_path
-                    {
-                        r.thumbnail = slint_img.clone();
-                        group_model.set_row_data(i, r);
-                    }
-                }
-            }
-        }
-    });
-
-    let app_weak_ref = app_weak.clone();
-    app.on_select_reference_image(move || {
-        if let Some(file) = rfd::FileDialog::new()
-            .set_title("Select Reference Image")
-            .add_filter(
-                "Images",
-                &[
-                    "png", "jpg", "jpeg", "tga", "dds", "exr", "hdr", "tif", "tiff", "webp", "gif",
-                    "psd", "jxl", "heic", "heif", "avif",
-                ],
-            )
-            .pick_file()
-        {
-            let path_str = file.to_string_lossy().to_string();
-            if let Some(ui) = app_weak_ref.upgrade() {
-                ui.set_query_text(path_str.into());
-                ui.set_search_method(2);
                 utils::settings::save_settings(&ui);
-            }
+            });
         }
+        slint::winit_030::EventResult::Propagate
     });
 }

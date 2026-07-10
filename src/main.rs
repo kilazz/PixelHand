@@ -12,8 +12,8 @@ mod utils;
 use anyhow::Result;
 use std::env;
 
-/// Global interceptor to capture and dump diagnostic crash logs
-/// into the application folder structure prior to system termination.
+/// Registers a custom panic hook to catch and dump diagnostic crash reports
+/// before standard thread termination and termination routines.
 fn setup_panic_hook() {
     std::panic::set_hook(Box::new(|panic_info| {
         let message = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
@@ -21,7 +21,7 @@ fn setup_panic_hook() {
         } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
             s.as_str()
         } else {
-            "Unknown panic message"
+            "Unknown panic payload message"
         };
 
         let location = if let Some(loc) = panic_info.location() {
@@ -43,13 +43,15 @@ fn setup_panic_hook() {
             message, location, backtrace
         );
 
+        // Print report to standard error console
         eprintln!("{}", report);
 
-        // Resolve portable application data path and save crash log file
+        // Attempt to write the report to a physical log file in our portable data dir
         if let Ok(exe_path) = std::env::current_exe() {
-            let exe_dir = exe_path.parent().unwrap_or(std::path::Path::new(""));
-            let portable_data_dir = exe_dir.join("PixelHand_Data");
-            let crash_dir = portable_data_dir.join("CrashLogs");
+            let exe_dir = exe_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new(""));
+            let crash_dir = exe_dir.join("PixelHand_Data").join("CrashLogs");
 
             if std::fs::create_dir_all(&crash_dir).is_ok() {
                 let now = std::time::SystemTime::now()
@@ -66,34 +68,29 @@ fn setup_panic_hook() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Instantiate panic crash hook first to catch any early startup errors
     setup_panic_hook();
 
-    // Prevent ONNX Runtime from printing massive C++ execution provider logs (CPU fallbacks).
-    // We set this globally before initializing any inference engines.
+    // Mute loud ONNX Runtime logging warnings (CPU fallbacks, DirectML diagnostic hints)
+    // std::env::set_var is unsafe starting from Rust 1.81.0 due to multi-threading safety guarantees.
+    // We safely execute this on the main thread at early startup before spawning any pools.
     unsafe {
         env::set_var("ORT_LOGGING_LEVEL", "WARNING");
         env::set_var("ORT_LOG_LEVEL", "WARNING");
     }
 
-    // Collect command line arguments
     let args: Vec<String> = env::args().collect();
 
-    // Route the application: CLI mode vs GUI mode
+    // Route between Terminal (CLI) Auditor and GUI Application
     let is_cli_mode = args
         .iter()
         .any(|arg| arg == "--cli" || arg == "-c" || arg == "--help" || arg == "-h");
 
     if is_cli_mode {
-        // Start logging subscriber ONLY for CLI mode diagnostics
+        // CLI logs stream natively to stdout via the standard tracing subscriber
         tracing_subscriber::fmt::init();
-
-        // Delegate completely to the CLI module
         cli::run(args).await?;
     } else {
-        // Removed standard tracing subscriber initialization here!
-        // We delegate completely to app::run_gui(), which registers its own custom
-        // UiLogWriter subscriber to pipe log statements into the GUI's Log Tab.
+        // GUI logs are captured and directed into the dedicated Console logging tab
         app::run_gui()?;
     }
 

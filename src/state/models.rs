@@ -3,19 +3,39 @@
 use serde::{Deserialize, Serialize};
 
 /// Persistent settings structure serialized and loaded from `Settings.json`.
-/// This holds the core state of checkboxes, configuration parameters, and slider thresholds.
+/// Struct fields are ordered descending by memory size to minimize struct alignment padding.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AppSettings {
-    // Directories and Search Context
+    // 24-byte String Allocations
     pub dir_a: String,
     pub dir_b: String,
     pub query_text: String,
+    pub qc_normals_tags: String,
+    pub prep_tags: String,
+    pub excluded_folders: String,
+    pub custom_model_path: String,
+
+    // 4-byte Integers & Floats
     pub similarity_threshold: f32,
     pub batch_size: i32,
     pub search_method: i32,
     pub execution_provider: i32,
+    pub duplicates_panel_height: f32,
+    pub sidebar_width: f32,
+    pub compare_sidebar_width: f32,
+    pub list_preview_size: f32,
+    pub visuals_columns: i32,
+    pub visuals_max_count: i32,
+    pub visuals_font_size: i32,
+    pub visuals_scale: f32,
+    pub search_precision: i32,
+    pub ai_model: i32,
+    pub custom_model_arch: i32,
+    pub custom_model_dim: i32,
+    pub tonemap_operator: i32,
+    pub preview_quality: i32,
 
-    // Quality Control (QC) Options
+    // 1-byte Logical Flags
     pub qc_mode: bool,
     pub qc_npot: bool,
     pub qc_mipmaps: bool,
@@ -23,17 +43,12 @@ pub struct AppSettings {
     pub qc_bit_depth: bool,
     pub qc_solid_colors: bool,
     pub qc_normals: bool,
-    pub qc_normals_tags: String,
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
-
-    // Relative Quality Control Toggles
     pub qc_check_bloat: bool,
     pub qc_check_alpha: bool,
     pub qc_check_colorspace: bool,
     pub qc_check_compression: bool,
-
-    // File Extensions (Split PNG and JPG)
     pub ext_png: bool,
     pub ext_jpg: bool,
     pub ext_tga: bool,
@@ -48,47 +63,16 @@ pub struct AppSettings {
     pub ext_jxl: bool,
     pub ext_heic: bool,
     pub ext_avif: bool,
-
-    // UI Layout States
-    pub duplicates_panel_height: f32,
-    pub sidebar_width: f32,
-    pub compare_sidebar_width: f32, // Resizable Specifications table width on Compare Tab [4]
-    pub list_preview_size: f32,     // Row Size slider state for List View row heights
-
-    // Visual Reports (Contact Sheets)
     pub save_visuals: bool,
-    pub visuals_columns: i32,
-    pub visuals_max_count: i32,
-    pub visuals_font_size: i32,
-    pub visuals_scale: f32,
-
-    // Image Pre-processing Options
     pub prep_luminance: bool,
     pub prep_channels: bool,
     pub prep_r: bool,
     pub prep_g: bool,
     pub prep_b: bool,
     pub prep_a: bool,
-    pub prep_tags: String,
     pub prep_ignore_solid: bool,
-
-    // Exclude Folders, LanceDB Precision, and AI Model Configuration
-    pub excluded_folders: String,
-    pub search_precision: i32,
-    pub ai_model: i32, // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: Custom
-
-    // Local Custom ONNX Model configurations
-    pub custom_model_path: String,
-    pub custom_model_arch: i32, // 0: CLIP, 1: SigLIP, 2: DINOv2
-    pub custom_model_dim: i32,
-
-    // HDR Tonemapping Options
     pub tonemap_enabled: bool,
-    pub tonemap_operator: i32, // 0: ACES Filmic, 1: ICtCp, 2: Khronos PBR Neutral
-
-    // --- NEW PREVIEW & SMART FILTER SETTINGS ---
     pub enable_previews: bool,
-    pub preview_quality: i32, // 0: Fast, 1: Balanced, 2: High
     pub filter_only_npot: bool,
     pub filter_only_uncompressed: bool,
     pub filter_only_missing_mips: bool,
@@ -101,10 +85,29 @@ impl Default for AppSettings {
             dir_a: String::new(),
             dir_b: String::new(),
             query_text: String::new(),
+            qc_normals_tags: String::new(),
+            prep_tags: String::new(),
+            excluded_folders: ".git, .svn, cache, temp".to_string(),
+            custom_model_path: String::new(),
+
             similarity_threshold: 90.0,
             batch_size: 128,
             search_method: 0,
             execution_provider: 0,
+            duplicates_panel_height: 180.0,
+            sidebar_width: 380.0,
+            compare_sidebar_width: 440.0,
+            list_preview_size: 40.0,
+            visuals_columns: 6,
+            visuals_max_count: 100,
+            visuals_font_size: 14,
+            visuals_scale: 1.5,
+            search_precision: 1,
+            ai_model: 0,
+            custom_model_arch: 0,
+            custom_model_dim: 512,
+            tonemap_operator: 0,
+            preview_quality: 1,
 
             qc_mode: false,
             qc_npot: true,
@@ -113,15 +116,12 @@ impl Default for AppSettings {
             qc_bit_depth: true,
             qc_solid_colors: true,
             qc_normals: true,
-            qc_normals_tags: String::new(),
             qc_match_by_stem: true,
             qc_hide_same_resolution: false,
-
             qc_check_bloat: true,
             qc_check_alpha: true,
             qc_check_colorspace: true,
             qc_check_compression: true,
-
             ext_png: true,
             ext_jpg: true,
             ext_tga: true,
@@ -136,44 +136,16 @@ impl Default for AppSettings {
             ext_jxl: true,
             ext_heic: true,
             ext_avif: true,
-
-            duplicates_panel_height: 180.0,
-            sidebar_width: 380.0,
-            compare_sidebar_width: 440.0,
-            list_preview_size: 40.0, // Default row size for list results
-
             save_visuals: false,
-            visuals_columns: 6,
-            visuals_max_count: 100,
-            visuals_font_size: 14,
-            visuals_scale: 1.5,
-
             prep_luminance: false,
             prep_channels: false,
             prep_r: true,
             prep_g: true,
             prep_b: true,
             prep_a: true,
-            prep_tags: String::new(),
             prep_ignore_solid: true,
-
-            excluded_folders: ".git, .svn, cache, temp".to_string(),
-            search_precision: 1, // Balanced (Default)
-
-            // Default model index CLIP-B/32
-            ai_model: 0,
-
-            custom_model_path: String::new(),
-            custom_model_arch: 0,
-            custom_model_dim: 512,
-
-            // Default Tonemapping Options
             tonemap_enabled: true,
-            tonemap_operator: 0, // Default to ACES Filmic
-
-            // --- NEW PREVIEW & SMART FILTER DEFAULTS ---
             enable_previews: true,
-            preview_quality: 1, // Balanced
             filter_only_npot: false,
             filter_only_uncompressed: false,
             filter_only_missing_mips: false,

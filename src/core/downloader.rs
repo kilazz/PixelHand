@@ -3,12 +3,12 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use reqwest::Client;
-use std::fs::{self, File};
-use std::io::Write;
 use std::path::Path;
+use tokio::fs::{self, File};
+use tokio::io::AsyncWriteExt;
 
-/// Progress-aware HTTP download utility.
-/// Streams bytes directly to disk and feeds back percentage indicators to UI callbacks.
+/// Progress-aware asynchronous HTTP download utility.
+/// Streams bytes directly to disk asynchronously and updates UI percentage indicators safely.
 pub async fn download_file_with_progress<F>(
     progress_callback: F,
     url: &str,
@@ -22,7 +22,7 @@ where
         .get(url)
         .send()
         .await
-        .context("Failed to send HTTP request")?;
+        .context("Failed to send HTTP download request")?;
 
     if !response.status().is_success() {
         return Err(anyhow::anyhow!(
@@ -32,13 +32,20 @@ where
     }
 
     let total_bytes = response.content_length().unwrap_or(0);
-    let mut file = File::create(dest_path)?;
+
+    // Use tokio's asynchronous file handler to prevent blocking the async reactor
+    let mut file = File::create(dest_path)
+        .await
+        .context("Failed to create destination model file on disk")?;
+
     let mut stream = response.bytes_stream();
     let mut bytes_downloaded = 0u64;
 
     while let Some(chunk_result) = stream.next().await {
         let chunk = chunk_result?;
-        file.write_all(&chunk)?;
+        file.write_all(&chunk)
+            .await
+            .context("Failed to write model chunk to disk asynchronously")?;
 
         bytes_downloaded += chunk.len() as u64;
         let percentage = if total_bytes > 0 {
@@ -48,6 +55,11 @@ where
         };
         progress_callback(percentage);
     }
+
+    file.flush()
+        .await
+        .context("Failed to flush compiled file buffers to disk")?;
+
     Ok(())
 }
 
@@ -57,14 +69,14 @@ pub async fn verify_and_download_models(
     app_weak: slint::Weak<crate::app::AppWindow>,
     model_idx: i32,
 ) -> Result<()> {
-    // If the index corresponds to a Custom Local Model, skip the remote downloading pipeline entirely
+    // If the index corresponds to a Custom Local Model, skip downloading entirely
     if model_idx == 5 {
         return Ok(());
     }
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
 
-    // Map selected model index to HuggingFace Xenova ONNX repositories
+    // Map selected model indexes to HuggingFace Xenova ONNX repositories
     let (folder_name, files) = match model_idx {
         1 => (
             "clip_vit_l14",
@@ -144,7 +156,9 @@ pub async fn verify_and_download_models(
     };
 
     let model_dir = app_dir.join("models").join(folder_name);
-    fs::create_dir_all(&model_dir)?;
+    fs::create_dir_all(&model_dir)
+        .await
+        .context("Failed to build directory path for target models")?;
 
     for (name, url) in files {
         let dest = model_dir.join(name);

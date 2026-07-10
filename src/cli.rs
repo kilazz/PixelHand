@@ -58,23 +58,9 @@ fn print_help() {
     println!("  --validate-normals    Validate typical normal maps format");
 }
 
-/// Executes a byte-exact xxHash scan and prints results.
-async fn run_exact_cli_scan(dir: String) -> Result<()> {
-    println!("[CLI] Running Byte-Exact Scan (xxHash64) on: {}\n", dir);
-
-    let default_exts = vec![
-        ".png".to_string(),
-        ".jpg".to_string(),
-        ".jpeg".to_string(),
-        ".tga".to_string(),
-        ".dds".to_string(),
-        ".exr".to_string(),
-        ".hdr".to_string(),
-        ".tif".to_string(),
-        ".tiff".to_string(),
-    ];
-
-    let params = ScanParams {
+/// Helper constructor to centralize default scan options configuration and prevent boilerplate replication.
+fn create_default_cli_params(dir: String) -> ScanParams {
+    ScanParams {
         dir_a: dir,
         dir_b: String::new(),
         query_text: String::new(),
@@ -90,7 +76,17 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
         qc_solid_colors: false,
         qc_normals: false,
         qc_normals_tags: String::new(),
-        extensions: default_exts,
+        extensions: vec![
+            ".png".to_string(),
+            ".jpg".to_string(),
+            ".jpeg".to_string(),
+            ".tga".to_string(),
+            ".dds".to_string(),
+            ".exr".to_string(),
+            ".hdr".to_string(),
+            ".tif".to_string(),
+            ".tiff".to_string(),
+        ],
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
         save_visuals: false,
@@ -115,18 +111,23 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
 
         ai_model: 0,
 
-        // Initialize relative QC check toggles to run exhaustive audits
+        // Run thorough deep validation criteria assessments by default on matching targets
         qc_check_bloat: true,
         qc_check_alpha: true,
         qc_check_colorspace: true,
         qc_check_compression: true,
 
-        // Initialize custom local model parameters and progress handlers
         custom_model_path: String::new(),
         custom_model_arch: 0,
         custom_model_dim: 512,
         on_progress: None,
-    };
+    }
+}
+
+/// Executes a byte-exact xxHash scan and prints results.
+async fn run_exact_cli_scan(dir: String) -> Result<()> {
+    println!("[CLI] Running Byte-Exact Scan (xxHash64) on: {}\n", dir);
+    let params = create_default_cli_params(dir);
 
     match exact::run_exact_scan(params).await {
         Ok(results) => {
@@ -165,70 +166,14 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
         check_npot, check_mipmaps, check_block, check_bit, validate_normals
     );
 
-    let default_exts = vec![
-        ".png".to_string(),
-        ".jpg".to_string(),
-        ".jpeg".to_string(),
-        ".tga".to_string(),
-        ".dds".to_string(),
-        ".exr".to_string(),
-        ".hdr".to_string(),
-        ".tif".to_string(),
-        ".tiff".to_string(),
-    ];
-
-    let params = ScanParams {
-        dir_a: dir,
-        dir_b: String::new(),
-        query_text: String::new(),
-        similarity: 90.0,
-        batch_size: 128,
-        search_method: 0,
-        qc_mode: true,
-        qc_npot: check_npot,
-        qc_mipmaps: check_mipmaps,
-        qc_block_align: check_block,
-        qc_bit_depth: check_bit,
-        qc_solid_colors: false,
-        qc_normals: validate_normals,
-        qc_normals_tags: String::new(),
-        extensions: default_exts,
-        cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        save_visuals: false,
-        visuals_columns: 6,
-        visuals_max_count: 100,
-        visuals_font_size: 14,
-        visuals_scale: 1.0,
-
-        prep_luminance: false,
-        prep_channels: false,
-        prep_r: true,
-        prep_g: true,
-        prep_b: true,
-        prep_a: true,
-        prep_tags: String::new(),
-        prep_ignore_solid: true,
-        execution_provider: "CPU".to_string(),
-
-        excluded_folders: ".git, .svn, cache, temp".to_string(),
-        qc_match_by_stem: true,
-        qc_hide_same_resolution: false,
-        search_precision: 1,
-
-        ai_model: 0,
-
-        // Initialize relative QC check toggles to run exhaustive audits
-        qc_check_bloat: true,
-        qc_check_alpha: true,
-        qc_check_colorspace: true,
-        qc_check_compression: true,
-
-        // Initialize custom local model parameters and progress handlers
-        custom_model_path: String::new(),
-        custom_model_arch: 0,
-        custom_model_dim: 512,
-        on_progress: None,
-    };
+    let mut params = create_default_cli_params(dir);
+    params.similarity = 90.0;
+    params.qc_mode = true;
+    params.qc_npot = check_npot;
+    params.qc_mipmaps = check_mipmaps;
+    params.qc_block_align = check_block;
+    params.qc_bit_depth = check_bit;
+    params.qc_normals = validate_normals;
 
     match qc::run_qc_scan_internal(params).await {
         Ok(results) => {

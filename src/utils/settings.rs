@@ -2,25 +2,30 @@
 
 use crate::app::AppWindow;
 use crate::state::AppSettings;
+use anyhow::Context;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Locates or creates the persistent data storage directory next to the executable.
-/// This maintains portable execution characteristics for the application.
+/// Resolves the absolute directory path of the portable data directory next to the executable.
+/// Creates the directory if it does not already exist.
 pub fn get_portable_app_data_dir() -> anyhow::Result<PathBuf> {
     let exe_path = std::env::current_exe()?;
-    let exe_dir = exe_path.parent().unwrap_or(Path::new(""));
+    let exe_dir = exe_path.parent().unwrap_or_else(|| Path::new(""));
     let portable_data_dir = exe_dir.join("PixelHand_Data");
 
     if !portable_data_dir.exists() {
-        fs::create_dir_all(&portable_data_dir)?;
+        fs::create_dir_all(&portable_data_dir).with_context(|| {
+            format!(
+                "Failed to create portable data directory: {}",
+                portable_data_dir.display()
+            )
+        })?;
     }
 
     Ok(portable_data_dir)
 }
 
-/// Serializes and saves current window state settings to Settings.json.
-/// This extracts properties directly from the active Slint GUI AppWindow.
+/// Serializes active UI state properties from the Slint component and persists them to `Settings.json`.
 pub fn save_settings(ui: &AppWindow) {
     let settings = AppSettings {
         // Directories and Search Context
@@ -69,8 +74,8 @@ pub fn save_settings(ui: &AppWindow) {
         // UI Drag States
         duplicates_panel_height: ui.get_duplicates_panel_height(),
         sidebar_width: ui.get_sidebar_width(),
-        compare_sidebar_width: ui.get_compare_sidebar_width(), // Save resizable Compare Tab sidebar width [4]
-        list_preview_size: ui.get_list_preview_size(),         // Save list row preview size [1]
+        compare_sidebar_width: ui.get_compare_sidebar_width(),
+        list_preview_size: ui.get_list_preview_size(),
 
         // Visual Reports Configurations
         save_visuals: ui.get_save_visuals(),
@@ -103,7 +108,7 @@ pub fn save_settings(ui: &AppWindow) {
         tonemap_enabled: ui.get_tonemap_enabled(),
         tonemap_operator: ui.get_tonemap_operator(),
 
-        // --- NEW PREVIEW & SMART FILTER SAVINGS ---
+        // Preview & Smart Filter settings
         enable_previews: ui.get_enable_previews(),
         preview_quality: ui.get_preview_quality(),
         filter_only_npot: ui.get_filter_only_npot(),
@@ -112,21 +117,70 @@ pub fn save_settings(ui: &AppWindow) {
         filter_only_cubemaps: ui.get_filter_only_cubemaps(),
     };
 
-    if let Ok(dir) = get_portable_app_data_dir() {
-        let path = dir.join("Settings.json");
-        if let Ok(serialized) = serde_json::to_string_pretty(&settings) {
-            let _ = fs::write(path, serialized);
+    match get_portable_app_data_dir() {
+        Ok(dir) => {
+            let path = dir.join("Settings.json");
+            match serde_json::to_string_pretty(&settings) {
+                Ok(serialized) => {
+                    if let Err(e) = fs::write(&path, serialized) {
+                        tracing::error!(
+                            "Failed to write Settings.json to {}: {}",
+                            path.display(),
+                            e
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to serialize application settings: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                "Failed to resolve portable data directory to save settings: {}",
+                e
+            );
         }
     }
 }
 
-/// Loads persistent settings structure from disk.
+/// Loads and deserializes previously saved config values from `Settings.json` if available.
 pub fn load_settings() -> Option<AppSettings> {
-    let path = get_portable_app_data_dir().ok()?.join("Settings.json");
-    if path.exists() {
-        let content = fs::read_to_string(path).ok()?;
-        serde_json::from_str::<AppSettings>(&content).ok()
-    } else {
-        None
+    let dir = match get_portable_app_data_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            tracing::error!(
+                "Failed to resolve portable data directory during settings load: {}",
+                e
+            );
+            return None;
+        }
+    };
+
+    let path = dir.join("Settings.json");
+    if !path.exists() {
+        return None;
+    }
+
+    match fs::read_to_string(&path) {
+        Ok(content) => match serde_json::from_str::<AppSettings>(&content) {
+            Ok(settings) => Some(settings),
+            Err(e) => {
+                tracing::error!(
+                    "Corrupted Settings.json file format at {}: {}",
+                    path.display(),
+                    e
+                );
+                None
+            }
+        },
+        Err(e) => {
+            tracing::error!(
+                "Failed to read Settings.json from {}: {}",
+                path.display(),
+                e
+            );
+            None
+        }
     }
 }

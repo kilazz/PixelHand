@@ -18,25 +18,24 @@ pub struct PreprocessingConfig {
 }
 
 impl PreprocessingConfig {
-    /// Returns the appropriate preprocessing configuration based on the selected AI model index.
-    /// Supports the 5 standard models plus dynamic custom local model configuration.
+    /// Resolves the correct image scaling and normalization parameters based on the chosen AI architecture.
     pub fn for_model(model_idx: i32, custom_arch: i32) -> Self {
         if model_idx == 5 {
             match custom_arch {
                 1 => Self {
-                    // SigLIP-type architectures (384x384, Symmetric normalization: [-1, 1])
+                    // SigLIP-style symmetric normalization [-1, 1] at 384x384 resolution
                     target_size: (384, 384),
                     mean: [0.5, 0.5, 0.5],
                     std: [0.5, 0.5, 0.5],
                 },
                 2 => Self {
-                    // DINOv2-type backbones (224x224, standard ImageNet normalization)
+                    // DINOv2 standard ImageNet normalization
                     target_size: (224, 224),
                     mean: [0.485, 0.456, 0.406],
                     std: [0.229, 0.224, 0.225],
                 },
                 _ => Self {
-                    // CLIP-type architectures (224x224, OpenAI CLIP normalization)
+                    // OpenAI CLIP normalization coefficients
                     target_size: (224, 224),
                     mean: [0.48145466, 0.4578275, 0.40821073],
                     std: [0.26862954, 0.2613026, 0.2757771],
@@ -45,31 +44,21 @@ impl PreprocessingConfig {
         } else {
             match model_idx {
                 1 => Self {
-                    // CLIP-L/14 (224x224, OpenAI CLIP normalization)
                     target_size: (224, 224),
                     mean: [0.48145466, 0.4578275, 0.40821073],
                     std: [0.26862954, 0.2613026, 0.2757771],
                 },
-                2 => Self {
-                    // SigLIP-B (384x384, Symmetric normalization: [-1, 1])
-                    target_size: (384, 384),
-                    mean: [0.5, 0.5, 0.5],
-                    std: [0.5, 0.5, 0.5],
-                },
-                3 => Self {
-                    // SigLIP-L (384x384, Symmetric normalization: [-1, 1])
+                2 | 3 => Self {
                     target_size: (384, 384),
                     mean: [0.5, 0.5, 0.5],
                     std: [0.5, 0.5, 0.5],
                 },
                 4 => Self {
-                    // DINOv2-B (224x224, standard ImageNet normalization)
                     target_size: (224, 224),
                     mean: [0.485, 0.456, 0.406],
                     std: [0.229, 0.224, 0.225],
                 },
                 _ => Self {
-                    // CLIP-B/32 (224x224, OpenAI CLIP normalization)
                     target_size: (224, 224),
                     mean: [0.48145466, 0.4578275, 0.40821073],
                     std: [0.26862954, 0.2613026, 0.2757771],
@@ -85,6 +74,7 @@ impl Default for PreprocessingConfig {
     }
 }
 
+/// Computes L2 vector normalization.
 pub fn normalize_vector(mut vec: Vec<f32>) -> Vec<f32> {
     let norm = vec.iter().map(|&x| x * x).sum::<f32>().sqrt();
     if norm > 1e-12 {
@@ -95,16 +85,16 @@ pub fn normalize_vector(mut vec: Vec<f32>) -> Vec<f32> {
     vec
 }
 
-/// Identifies the output extraction mode for different ONNX model architectures.
+/// Identifies the output tensor node extraction strategy for various model graph shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum VisualOutputMode {
-    /// Extract "image_embeds" directly (Standard for CLIP)
+    /// Extract 'image_embeds' node (typical of CLIP models)
     ImageEmbeds,
-    /// Extract "pooler_output" directly (Standard for SigLIP ONNX models)
+    /// Extract 'pooler_output' node (typical of SigLIP models)
     PoolerOutput,
-    /// Slice "last_hidden_state" to extract the first token ([CLS]) (Required for DINOv2 backbone)
+    /// Slice 'last_hidden_state' to pull the CLS token (typical of raw ViT / DINOv2 backbones)
     ClsToken,
-    /// Safe fallback to the very first output of the ONNX model graph
+    /// Fallback to the first output of the graph
     FirstOutput,
 }
 
@@ -118,90 +108,21 @@ pub struct InferenceEngine {
 }
 
 impl InferenceEngine {
-    /// Loads the compiled visual and text ONNX models along with the native tokenizer
+    /// Builds and configures runtime visual and text sessions.
     pub fn new(
         model_dir: &Path,
         model_dim: usize,
-        threads_per_worker: usize,
+        threads: usize,
         execution_provider: &str,
     ) -> Result<Self> {
         let visual_path = model_dir.join("visual.onnx");
         let text_path = model_dir.join("text.onnx");
         let tokenizer_path = model_dir.join("tokenizer.json");
 
-        // Map non-Send/Sync ort errors explicitly to anyhow strings
-        let mut builder = Session::builder()
-            .map_err(|e| anyhow::anyhow!("Failed to initialize Session builder: {:?}", e))?
-            .with_intra_threads(threads_per_worker)
-            .map_err(|e| anyhow::anyhow!("Failed to set intra threads: {:?}", e))?;
+        // Use decoupled helper to resolve hardware-accelerated runtime sessions
+        let visual_session = create_session(&visual_path, threads, execution_provider)?;
 
-        match execution_provider {
-            "DirectML" => {
-                match builder.with_execution_providers([ort::ep::DirectML::default().build()]) {
-                    Ok(b) => {
-                        builder = b;
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "DirectML EP failed to register, falling back to CPU: {:?}",
-                            e
-                        );
-                        builder = Session::builder()
-                            .map_err(|eb| anyhow::anyhow!("Fallback error: {:?}", eb))?
-                            .with_intra_threads(threads_per_worker)
-                            .map_err(|eb| anyhow::anyhow!("Fallback thread error: {:?}", eb))?;
-                    }
-                }
-            }
-            "CUDA" => match builder.with_execution_providers([ort::ep::CUDA::default().build()]) {
-                Ok(b) => {
-                    builder = b;
-                }
-                Err(e) => {
-                    eprintln!("CUDA EP failed to register, falling back to CPU: {:?}", e);
-                    builder = Session::builder()
-                        .map_err(|eb| anyhow::anyhow!("Fallback error: {:?}", eb))?
-                        .with_intra_threads(threads_per_worker)
-                        .map_err(|eb| anyhow::anyhow!("Fallback thread error: {:?}", eb))?;
-                }
-            },
-            "TensorRT" => {
-                match builder.with_execution_providers([ort::ep::TensorRT::default().build()]) {
-                    Ok(b) => {
-                        builder = b;
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "TensorRT EP failed to register, falling back to CPU: {:?}",
-                            e
-                        );
-                        builder = Session::builder()
-                            .map_err(|eb| anyhow::anyhow!("Fallback error: {:?}", eb))?
-                            .with_intra_threads(threads_per_worker)
-                            .map_err(|eb| anyhow::anyhow!("Fallback thread error: {:?}", eb))?;
-                    }
-                }
-            }
-            "CoreML" => {
-                match builder.with_execution_providers([ort::ep::CoreML::default().build()]) {
-                    Ok(b) => {
-                        builder = b;
-                    }
-                    Err(e) => {
-                        eprintln!("CoreML EP failed to register, falling back to CPU: {:?}", e);
-                        builder = Session::builder()
-                            .map_err(|eb| anyhow::anyhow!("Fallback error: {:?}", eb))?
-                            .with_intra_threads(threads_per_worker)
-                            .map_err(|eb| anyhow::anyhow!("Fallback thread error: {:?}", eb))?;
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        let visual_session = builder.commit_from_file(&visual_path)?;
-
-        // Inspect the ONNX model outputs dynamically to detect the output architecture
+        // Inspect output nodes dynamically to define our tensor extraction strategy
         let output_names: Vec<String> = visual_session
             .outputs()
             .iter()
@@ -224,24 +145,21 @@ impl InferenceEngine {
             .unwrap_or_else(|| "image_embeds".to_string());
 
         tracing::info!(
-            "ONNX Visual Model loaded successfully. Output names detected: {:?}. Strategy chosen: {:?}. Fallback node name: '{}'",
+            "ONNX Session initialized. Graph output nodes: {:?}. Strategy: {:?}.",
             output_names,
-            visual_output_mode,
-            fallback_output_name
+            visual_output_mode
         );
 
         let text_session = if text_path.exists() {
-            let session = Session::builder()
-                .map_err(|e| anyhow::anyhow!("Failed to initialize Text Session builder: {:?}", e))?
-                .with_intra_threads(threads_per_worker)
-                .map_err(|e| anyhow::anyhow!("Failed to set text threads: {:?}", e))?
-                .commit_from_file(&text_path)?;
-            Some(Mutex::new(session))
+            Some(Mutex::new(create_session(
+                &text_path,
+                threads,
+                execution_provider,
+            )?))
         } else {
             None
         };
 
-        // Load the local HuggingFace tokenizer config natively in Rust
         let tokenizer = if tokenizer_path.exists() {
             let tok = Tokenizer::from_file(&tokenizer_path)
                 .map_err(|e| anyhow::anyhow!("Failed to parse tokenizer.json: {}", e))?;
@@ -260,6 +178,7 @@ impl InferenceEngine {
         })
     }
 
+    /// Converts raw RGB buffer into structured planar CHW floats mapping to the normalization coefficients.
     pub fn preprocess_image(
         &self,
         img: &DynamicImage,
@@ -277,14 +196,19 @@ impl InferenceEngine {
             let (g_plane, b_plane) = rest.split_at_mut(plane_len);
 
             for i in 0..plane_len {
-                r_plane[i] = ((raw[i * 3] as f32 / 255.0) - config.mean[0]) / config.std[0];
-                g_plane[i] = ((raw[i * 3 + 1] as f32 / 255.0) - config.mean[1]) / config.std[1];
-                b_plane[i] = ((raw[i * 3 + 2] as f32 / 255.0) - config.mean[2]) / config.std[2];
+                let r_val = raw[i * 3] as f32 / 255.0;
+                let g_val = raw[i * 3 + 1] as f32 / 255.0;
+                let b_val = raw[i * 3 + 2] as f32 / 255.0;
+
+                r_plane[i] = (r_val - config.mean[0]) / config.std[0];
+                g_plane[i] = (g_val - config.mean[1]) / config.std[1];
+                b_plane[i] = (b_val - config.mean[2]) / config.std[2];
             }
         }
         tensor
     }
 
+    /// Preprocesses image frames in parallel, aggregates them into a batch tensor, and executes inference.
     pub fn encode_images_batch(
         &self,
         images: &[DynamicImage],
@@ -323,7 +247,6 @@ impl InferenceEngine {
 
         let outputs = session.run(inputs!["pixel_values" => &input_tensor])?;
 
-        // Dynamically slice or read the correct outputs based on the model signature
         let (shape, raw_slice): (Vec<i64>, std::borrow::Cow<'_, [f32]>) = match self
             .visual_output_mode
         {
@@ -341,7 +264,7 @@ impl InferenceEngine {
                 let seq_len = raw_shape[1] as usize;
                 let hidden_size = raw_shape[2] as usize;
 
-                // DINOv2 returns [batch, seq_len, 768]. Slice the CLS token (sequence index 0)
+                // Slice CLS token (sequence index 0) for ViT backbones (e.g. DINOv2)
                 let mut cls_embeddings = Vec::with_capacity(b_size * hidden_size);
                 for b in 0..b_size {
                     let start_idx = b * seq_len * hidden_size;
@@ -380,12 +303,12 @@ impl InferenceEngine {
         Ok(results)
     }
 
+    /// Tokenizes query text and runs inference inside the text-encoder session.
     pub fn encode_text(&self, text: &str) -> Result<Vec<f32>> {
         let tokenizer = self.tokenizer.as_ref().context("Tokenizer is not loaded")?;
-        let text_session_mutex = self
-            .text_session
-            .as_ref()
-            .context("Text model is not loaded (DINOv2 does not support text search)")?;
+        let text_session_mutex = self.text_session.as_ref().context(
+            "Text model is not loaded (selected architecture does not support text query)",
+        )?;
 
         let encoding = tokenizer
             .encode(text, true)
@@ -412,4 +335,36 @@ impl InferenceEngine {
         let (_, raw_slice) = outputs["text_embeds"].try_extract_tensor::<f32>()?;
         Ok(normalize_vector(raw_slice.to_vec()))
     }
+}
+
+/// Helper function to create an ONNX Runtime session cleanly, handling fallback steps gracefully.
+fn create_session(model_path: &Path, threads: usize, provider: &str) -> Result<Session> {
+    let mut builder = Session::builder()
+        .map_err(|e| anyhow::anyhow!("Failed to instantiate session builder: {:?}", e))?
+        .with_intra_threads(threads)
+        .map_err(|e| anyhow::anyhow!("Failed to set thread pool limit: {:?}", e))?;
+
+    builder = match provider {
+        "DirectML" => builder.with_execution_providers([ort::ep::DirectML::default().build()]),
+        "CUDA" => builder.with_execution_providers([ort::ep::CUDA::default().build()]),
+        "TensorRT" => builder.with_execution_providers([ort::ep::TensorRT::default().build()]),
+        "CoreML" => builder.with_execution_providers([ort::ep::CoreML::default().build()]),
+        _ => Ok(builder),
+    }
+    .unwrap_or_else(|e| {
+        tracing::warn!(
+            "Failed to bind hardware EP '{}', falling back to CPU: {:?}",
+            provider,
+            e
+        );
+        // Fall back to clean CPU builder state
+        Session::builder()
+            .unwrap()
+            .with_intra_threads(threads)
+            .unwrap()
+    });
+
+    builder
+        .commit_from_file(model_path)
+        .map_err(|e| anyhow::anyhow!("Model compilation run failed: {:?}", e))
 }
