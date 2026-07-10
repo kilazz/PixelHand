@@ -6,14 +6,32 @@ pub mod perceptual;
 pub mod qc;
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicBool;
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
+
+// Super-fast in-memory cache for thumbnail pixels (used for real-time hover channel previews)
+pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, image::RgbaImage>>> =
+    OnceLock::new();
+
+fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
+    let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut lock) = cache.lock() {
+        // Prevent RAM bloat: evict oldest items if the memory cache exceeds 200 thumbnails
+        if lock.len() >= 200
+            && let Some(key_to_remove) = lock.keys().next().cloned()
+        {
+            lock.remove(&key_to_remove);
+        }
+        lock.insert(path.to_string(), img);
+    }
+}
 
 /// All configuration parameters gathered from the UI panel to orchestrate a scan.
 /// Derived `Clone` is required to allow app.rs to query the configuration parameters
@@ -36,7 +54,7 @@ pub struct ScanParams {
     pub qc_normals: bool,
     pub qc_normals_tags: String,
     pub extensions: Vec<String>,
-    pub cancel_token: Arc<AtomicBool>,
+    pub cancel_token: Arc<std::sync::atomic::AtomicBool>,
 
     // Properties for Asynchronous Visual Reports (Contact Sheets)
     pub save_visuals: bool,
@@ -83,7 +101,10 @@ pub struct ScanParams {
 
 impl ScanParams {
     /// Compiles the current state of Slint UI properties into a safe, thread-safe ScanParams struct.
-    pub fn from_ui(ui: &crate::app::AppWindow, cancel_token: Arc<AtomicBool>) -> Self {
+    pub fn from_ui(
+        ui: &crate::app::AppWindow,
+        cancel_token: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Self {
         let mut extensions = Vec::new();
         if ui.get_ext_png() {
             extensions.push(".png".to_string());
@@ -348,7 +369,6 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
             let _ = std::fs::create_dir_all(dir);
         });
 
-        // Fast metadata inspection for a bulletproof dynamic key
         if let Ok(metadata) = std::fs::metadata(&path) {
             let size = metadata.len();
             let mtime = metadata
@@ -358,7 +378,6 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
                 .map(|d| d.as_nanos())
                 .unwrap_or(0);
 
-            // Compute high-speed xxh64 hash of the file key properties
             let mut hasher = Xxh64::new(0);
             hasher.update(path.to_string_lossy().as_bytes());
             hasher.update(&size.to_le_bytes());
@@ -378,17 +397,22 @@ fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
         && cp.is_file()
         && let Ok(img) = image::open(cp)
     {
-        return Some(img.to_rgba8());
+        let rgba = img.to_rgba8();
+        store_in_thumbnail_memory_cache(path_str, rgba.clone());
+        return Some(rgba);
     }
 
-    // 2. Fallback: Parse the actual texture and downscale to 64px
+    // 2. Fallback: Parse the actual texture and downscale to 256px for high quality [1]
     if let Ok(mut img) =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(64))
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(256))
     {
-        if img.width() > 64 || img.height() > 64 {
-            img = img.thumbnail(64, 64);
+        if img.width() > 256 || img.height() > 256 {
+            img = img.resize(256, 256, image::imageops::FilterType::Lanczos3);
         }
         let rgba = img.to_rgba8();
+
+        // Store inside the ultra-fast in-memory cache for realtime channel hovering [2]
+        store_in_thumbnail_memory_cache(path_str, rgba.clone());
 
         // Save compressed PNG to local disk cache for instant subsequent loading
         if let Some(ref cp) = cache_path {

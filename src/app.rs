@@ -744,6 +744,101 @@ pub fn run_gui() -> Result<()> {
         slint::winit_030::EventResult::Propagate
     });
 
+    // Columns Auto-Sizer Callback Handler
+    let app_weak_auto = app.as_weak();
+    let state_auto = state.clone();
+    app.on_auto_size_columns(move || {
+        if let Some(ui) = app_weak_auto.upgrade() {
+            let lock = state_auto.lock().unwrap();
+            if lock.results.is_empty() {
+                return;
+            }
+
+            let mut max_file_len = 4; // "FILE" column header string length
+            let mut max_score_len = 5; // "SCORE" column header string length
+            let mut max_path_len = 4; // "PATH" column header string length
+
+            // Traverse only non-header rows to find the absolute maximum text lengths
+            for row in &lock.results {
+                if !row.is_header {
+                    max_file_len = max_file_len.max(row.name.chars().count());
+                    max_score_len = max_score_len.max(row.score_or_detail.chars().count());
+                    max_path_len = max_path_len.max(row.path.chars().count());
+                }
+            }
+
+            // Estimate optimal visual widths using standard font metrics (~7.2px per character)
+            // Plus add standard spacing offsets for thumbnails, checkboxes, and margins
+            let file_w = (max_file_len as f32 * 7.2) + 68.0;
+            let score_w = (max_score_len as f32 * 7.2) + 20.0;
+            let path_w = (max_path_len as f32 * 6.5) + 20.0;
+
+            // Commit calculations back to Slint with safe layout limits
+            ui.set_col_file_w(file_w.clamp(120.0, 600.0));
+            ui.set_col_score_w(score_w.clamp(60.0, 150.0));
+            ui.set_col_path_w(path_w.clamp(150.0, 800.0));
+
+            tracing::info!(
+                "Columns auto-resized. FILE: {:.0}px, SCORE: {:.0}px, PATH: {:.0}px",
+                file_w,
+                score_w,
+                path_w
+            );
+        }
+    });
+
+    // Real-Time Hover Channel Previews Callback Handler [2]
+    let app_weak_hover = app.as_weak();
+    let state_hover = state.clone();
+    app.on_thumbnail_channel_hovered(move |path_str, channel| {
+        if let Some(ui) = app_weak_hover.upgrade() {
+            let mut lock = state_hover.lock().unwrap();
+            let path_std = path_str.to_string();
+            let channel_std = channel.to_string();
+
+            // Instantly fetch the high-resolution cached thumbnail directly from memory
+            let cached_img = {
+                let cache = scanners::THUMBNAIL_MEMORY_CACHE
+                    .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+                cache.lock().unwrap().get(&path_std).cloned()
+            };
+
+            if let Some(rgba) = cached_img {
+                // Isolate the requested channel (R, G, B, A) or restore to original RGB composite
+                let channel_img = if channel_std == "RGB" || channel_std == "Composite" {
+                    rgba
+                } else {
+                    let channel_idx = match channel_std.as_str() {
+                        "R" => 0,
+                        "G" => 1,
+                        "B" => 2,
+                        _ => 3,
+                    };
+                    let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
+                    for (x, y, pixel) in rgba.enumerate_pixels() {
+                        let val = pixel[channel_idx];
+                        if channel_idx == 3 {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, val]));
+                        } else {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
+                        }
+                    }
+                    out_rgba
+                };
+
+                // Hot-swap the active row thumbnail data inside the results model
+                for row in &mut lock.results {
+                    if row.path == path_std {
+                        row.thumbnail_data = Some(channel_img.clone());
+                    }
+                }
+
+                // Push updates to Slint
+                utils::ui::update_results_ui(&ui, &lock);
+            }
+        }
+    });
+
     app.run()
         .context("Slint event loop terminated with an error")?;
     Ok(())
@@ -823,7 +918,8 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
     let active_model = app.get_ai_model();
 
     tokio::spawn(async move {
-        match crate::core::downloader::verify_and_download_models(app_weak.clone(), active_model)
+        let app_weak_clone = app_weak.clone();
+        match crate::core::downloader::verify_and_download_models(app_weak_clone, active_model)
             .await
         {
             Ok(_) => {

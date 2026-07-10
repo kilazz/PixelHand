@@ -68,17 +68,26 @@ component FormRow {
 }
 
 // Custom Interactive Thumbnail with Corner Zones (R / G / B / A)
-component InteractiveThumbnail {
+component InteractiveThumbnail inherits TouchArea {
     in property <image> source;
     in property <string> path;
-    in property <bool> show_corners: false;
+    in property <bool> show_corners: true;
     in property <image> checkerboard; // Checkerboard texture background
-    callback corner_clicked(string, string); // path, channel
+    callback corner_hovered(string, string); // path, channel
 
     width: 32px;
     height: 32px;
 
+    // SMR: Revert to original composite on mouse leave
+    changed has-hover => {
+        if (!self.has-hover) {
+            corner_hovered(path, "RGB");
+        }
+    }
+
     rect := Rectangle {
+        width: 100%;
+        height: 100%;
         background: #111214;
         border-radius: 4px;
         clip: true;
@@ -99,38 +108,100 @@ component InteractiveThumbnail {
             image-fit: contain;
         }
 
-        if show_corners: Rectangle {
-            // Top Left (R)
-            TouchArea {
-                x: 0px;
-                y: 0px;
-                width: parent.width * 0.45;
-                height: parent.height * 0.45;
-                clicked => { corner_clicked(path, "R"); }
+        // Interactive Channel Hover Zones (Visible on mouse hover)
+        // Use root.has-hover since InteractiveThumbnail inherits TouchArea
+        if show_corners && root.has-hover: Rectangle {
+            // Top Left (R - Red Channel)
+            Rectangle {
+                x: 2px;
+                y: 2px;
+                width: 12px;
+                height: 12px;
+                background: r_ta.has-hover ? #f23f43 : #f23f43.darker(30%);
+                border-radius: 2px;
+                Text {
+                    text: "R";
+                    font-size: 8px;
+                    font-weight: 700;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                r_ta := TouchArea {
+                    pointer-event(evt) => {
+                        if evt.kind == PointerEventKind.move { corner_hovered(path, "R"); }
+                    }
+                }
             }
-            // Top Right (G)
-            TouchArea {
-                x: parent.width * 0.55;
-                y: 0px;
-                width: parent.width * 0.45;
-                height: parent.height * 0.45;
-                clicked => { corner_clicked(path, "G"); }
+            // Top Right (G - Green Channel)
+            Rectangle {
+                x: parent.width - 14px;
+                y: 2px;
+                width: 12px;
+                height: 12px;
+                background: g_ta.has-hover ? #23a55a : #23a55a.darker(30%);
+                border-radius: 2px;
+                Text {
+                    text: "G";
+                    font-size: 8px;
+                    font-weight: 700;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                g_ta := TouchArea {
+                    pointer-event(evt) => {
+                        if evt.kind == PointerEventKind.move { corner_hovered(path, "G"); }
+                    }
+                }
             }
-            // Bottom Left (B)
-            TouchArea {
-                x: 0px;
-                y: parent.height * 0.55;
-                width: parent.width * 0.45;
-                height: parent.height * 0.45;
-                clicked => { corner_clicked(path, "B"); }
+            // Bottom Left (B - Blue Channel)
+            Rectangle {
+                x: 2px;
+                y: parent.height - 14px;
+                width: 12px;
+                height: 12px;
+                background: b_ta.has-hover ? #5865f2 : #5865f2.darker(30%);
+                border-radius: 2px;
+                Text {
+                    text: "B";
+                    font-size: 8px;
+                    font-weight: 700;
+                    color: #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                b_ta := TouchArea {
+                    pointer-event(evt) => {
+                        if evt.kind == PointerEventKind.move { corner_hovered(path, "B"); }
+                    }
+                }
             }
-            // Bottom Right (A)
-            TouchArea {
-                x: parent.width * 0.55;
-                y: parent.height * 0.55;
-                width: parent.width * 0.45;
-                height: parent.height * 0.45;
-                clicked => { corner_clicked(path, "A"); }
+            // Bottom Right (A - Alpha Channel)
+            Rectangle {
+                x: parent.width - 14px;
+                y: parent.height - 14px;
+                width: 12px;
+                height: 12px;
+                background: a_ta.has-hover ? #ffffff : #ffffff.darker(50%);
+                border-radius: 2px;
+                Text {
+                    text: "A";
+                    font-size: 8px;
+                    font-weight: 700;
+                    color: a_ta.has-hover ? #000000 : #ffffff;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                a_ta := TouchArea {
+                    pointer-event(evt) => {
+                        if evt.kind == PointerEventKind.move { corner_hovered(path, "A"); }
+                    }
+                }
             }
         }
     }
@@ -579,9 +650,13 @@ export component AppWindow inherits Window {
     callback clear_cache();
     callback clear_models();
     callback select_custom_model();
+    callback auto_size_columns();
 
     // CONTEXT MENU CALLBACK
     callback context_menu_action(string, string); // (action, path)
+
+    // HOVER CHANNELS CALLBACK
+    callback thumbnail_channel_hovered(string, string); // (path, channel)
 
     // --- POPUPS ---
     ext_popup := PopupWindow {
@@ -640,19 +715,19 @@ export component AppWindow inherits Window {
                         CheckBox {
                             text: ".exr";
                             checked <=> root.ext_exr;
-                            toggled => { root.save_settings(); }
+                            toggled => { root.ext_exr; }
                         }
 
                         CheckBox {
                             text: ".hdr";
                             checked <=> root.ext_hdr;
-                            toggled => { root.save_settings(); }
+                            toggled => { root.ext_hdr; }
                         }
 
                         CheckBox {
                             text: ".tif";
                             checked <=> root.ext_tif;
-                            toggled => { root.save_settings(); }
+                            toggled => { root.ext_tif; }
                         }
 
                         CheckBox {
@@ -1388,14 +1463,12 @@ export component AppWindow inherits Window {
                     width: 8px;
                     background: sidebar-splitter-ta.has-hover ? #4e5058 : #1e1f22;
 
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle {
-                            width: 2px;
-                            height: 20px;
-                            background: #6d6f78;
-                            border-radius: 1px;
-                        }
+                    // Centered handle - no layouts needed, Slint automatically centers children of a Rectangle
+                    Rectangle {
+                        width: 2px;
+                        height: 20px;
+                        background: #6d6f78;
+                        border-radius: 1px;
                     }
 
                     sidebar-splitter-ta := TouchArea {
@@ -1496,6 +1569,13 @@ export component AppWindow inherits Window {
                                         primary-color: #4e5058;
                                         clicked => { root.col_file_w = 300px; root.col_score_w = 70px; root.col_path_w = 350px; }
                                     }
+
+                                    CustomButton {
+                                        text: "Auto Cols";
+                                        height: 24px;
+                                        primary-color: #5865f2;
+                                        clicked => { root.auto_size_columns(); }
+                                    }
                                 }
                             }
 
@@ -1549,7 +1629,7 @@ export component AppWindow inherits Window {
                             clip: true;
 
                             VerticalLayout {
-                                // ---- COLUMN HEADERS (Draggable Table Headers) ----
+                                // ---- COLUMN HEADERS (Table Headers) ----
                                 if !root.results_grid_mode && root.results.length > 0: VerticalLayout {
                                     vertical-stretch: 0;
                                     Rectangle {
@@ -1723,14 +1803,8 @@ export component AppWindow inherits Window {
                                                     path: row.path;
                                                     show_corners: true;
                                                     checkerboard: root.checkerboard_pattern;
-                                                    corner_clicked(path, chan) => {
-                                                        if chan == "R" { root.active_r = !root.active_r; root.active_g = false; root.active_b = false; root.active_a = false; }
-                                                        if chan == "G" { root.active_g = !root.active_g; root.active_r = false; root.active_b = false; root.active_a = false; }
-                                                        if chan == "B" { root.active_b = !root.active_b; root.active_r = false; root.active_g = false; root.active_a = false; }
-                                                        if chan == "A" { root.active_a = !root.active_a; root.active_r = false; root.active_g = false; root.active_b = false; }
-                                                        root.channel_toggled();
-                                                        root.row_clicked(idx, false, row.group_index, row.path);
-                                                        root.active_tab = 1;
+                                                    corner_hovered(path, chan) => {
+                                                        root.thumbnail_channel_hovered(path, chan);
                                                     }
                                                 }
 
@@ -1826,10 +1900,11 @@ export component AppWindow inherits Window {
                                                         InteractiveThumbnail {
                                                             source: row.thumbnail;
                                                             path: row.path;
-                                                            show_corners: false;
+                                                            show_corners: true;
                                                             checkerboard: root.checkerboard_pattern;
                                                             width: parent.width - 16px;
                                                             height: parent.height - 52px;
+                                                            corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                                         }
 
                                                         Text {
@@ -1877,10 +1952,11 @@ export component AppWindow inherits Window {
                                                         InteractiveThumbnail {
                                                             source: row.thumbnail;
                                                             path: row.path;
-                                                            show_corners: false;
+                                                            show_corners: true;
                                                             checkerboard: root.checkerboard_pattern;
                                                             width: parent.width - 16px;
                                                             height: parent.height - 52px;
+                                                            corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                                         }
 
                                                         Text {
@@ -1928,10 +2004,11 @@ export component AppWindow inherits Window {
                                                         InteractiveThumbnail {
                                                             source: row.thumbnail;
                                                             path: row.path;
-                                                            show_corners: false;
+                                                            show_corners: true;
                                                             checkerboard: root.checkerboard_pattern;
                                                             width: parent.width - 16px;
                                                             height: parent.height - 52px;
+                                                            corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                                         }
 
                                                         Text {
@@ -1979,10 +2056,11 @@ export component AppWindow inherits Window {
                                                         InteractiveThumbnail {
                                                             source: row.thumbnail;
                                                             path: row.path;
-                                                            show_corners: false;
+                                                            show_corners: true;
                                                             checkerboard: root.checkerboard_pattern;
                                                             width: parent.width - 16px;
                                                             height: parent.height - 52px;
+                                                            corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                                         }
 
                                                         Text {
@@ -2433,8 +2511,11 @@ export component AppWindow inherits Window {
                                     InteractiveThumbnail {
                                         source: row.thumbnail;
                                         path: row.path;
-                                        show_corners: false;
+                                        show_corners: true;
                                         checkerboard: root.checkerboard_pattern;
+                                        width: 32px;
+                                        height: 32px;
+                                        corner_hovered(path, chan) => { root.thumbnail_channel_hovered(path, chan); }
                                     }
 
                                     Text {
