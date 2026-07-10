@@ -446,6 +446,7 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Row Clicked callback implementation (supports duplicate clusters and raw QC audits)
     let app_weak_clicked = app_weak.clone();
     let state_clone_click = state.clone();
     app.on_row_clicked(move |_idx, is_header, group_idx, path| {
@@ -467,10 +468,58 @@ pub fn run_gui() -> Result<()> {
         let path_str = path.to_string();
         let lock = state_clone_click.lock().unwrap();
 
-        let group = match lock.groups.get(group_idx as usize) {
-            Some(g) => g,
-            None => return,
-        };
+        // Check if we are in QC mode or if the group is empty (indicates QC category list)
+        let group = lock.groups.get(group_idx as usize);
+        let ui = app_copy.unwrap();
+
+        if group.is_none() {
+            // QC INTUITIVE INSPECTOR: Extract detailed image metadata on-the-fly for selected issue
+            if let Ok(meta) = crate::core::qc::extract_qc_metadata(std::path::Path::new(&path_str))
+            {
+                let name = std::path::Path::new(&path_str)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+
+                let mipmaps_str = if meta.mipmap_count <= 1 {
+                    "No".to_string()
+                } else {
+                    meta.mipmap_count.to_string()
+                };
+
+                let file_meta = SelectedFile {
+                    name: slint::SharedString::from(name.as_ref()),
+                    size_str: slint::SharedString::from(crate::utils::helpers::format_size(
+                        meta.file_size,
+                    )),
+                    format: slint::SharedString::from(&meta.compression_format),
+                    resolution: slint::SharedString::from(format!(
+                        "{}x{}",
+                        meta.width, meta.height
+                    )),
+                    bit_depth: slint::SharedString::from(format!("{}-bit", meta.bit_depth)),
+                    color_space: slint::SharedString::from(&meta.color_space),
+                    mipmaps: slint::SharedString::from(mipmaps_str),
+                    alpha: slint::SharedString::from(if meta.has_alpha { "Yes" } else { "No" }),
+                    similarity: slint::SharedString::from("-"),
+                    path: slint::SharedString::from(&path_str),
+                };
+
+                ui.set_original_meta(file_meta.clone());
+                ui.set_duplicate_meta(file_meta);
+            }
+
+            // Clear horizontal comparison table for absolute single-file QC inspects
+            ui.set_selected_group_files(ModelRc::from(std::rc::Rc::new(
+                VecModel::from(Vec::new()),
+            )));
+
+            trigger_viewport_update(app_weak_clicked.clone(), path_str.clone(), path_str.clone());
+            return;
+        }
+
+        // Standard Duplicate Grouping Logic
+        let group = group.unwrap();
         let original = match group.files.first() {
             Some(f) => f,
             None => return,
@@ -480,7 +529,6 @@ pub fn run_gui() -> Result<()> {
             None => return,
         };
 
-        let ui = app_copy.unwrap();
         ui.set_original_meta(utils::ui::build_selected_file_meta(original, true));
         ui.set_duplicate_meta(utils::ui::build_selected_file_meta(duplicate, false));
 
@@ -516,8 +564,8 @@ pub fn run_gui() -> Result<()> {
             }
 
             let _ = app_copy.upgrade_in_event_loop({
-                let act = action.clone();
-                move |ui| ui.set_status_text(format!("Processing selection: {}...", act).into())
+                let r#act = action.clone();
+                move |ui| ui.set_status_text(format!("Processing selection: {}...", r#act).into())
             });
 
             let res = utils::fs::execute_file_action(&action, checked_files, pairs).await;
@@ -822,8 +870,11 @@ pub fn run_gui() -> Result<()> {
                     let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
                     for (x, y, pixel) in rgba.enumerate_pixels() {
                         let val = pixel[channel_idx];
-                        // Отрисовываем маску (включая альфа-канал) как непрозрачное черно-белое изображение
-                        out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
+                        if channel_idx == 3 {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, val]));
+                        } else {
+                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
+                        }
                     }
                     out_rgba
                 };

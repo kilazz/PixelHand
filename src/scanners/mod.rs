@@ -522,32 +522,70 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
     rows
 }
 
-/// Converts core technical Quality Control issues into Slint row models.
+/// Converts core technical Quality Control issues into Slint row models grouped by issue category.
 pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRowData> {
     let mut rows = Vec::new();
+    if issues.is_empty() {
+        return rows;
+    }
+
+    // Group issues by the issue text (type of issue)
+    let mut grouped: HashMap<String, Vec<&crate::state::QcIssueSummary>> = HashMap::new();
     for issue in issues {
-        let thumbnail_data = load_thumbnail_for_path(&issue.path);
+        grouped.entry(issue.issue.clone()).or_default().push(issue);
+    }
+
+    // Convert grouped issues to a sorted vector to maintain deterministic order
+    let mut sorted_issue_types: Vec<String> = grouped.keys().cloned().collect();
+    sorted_issue_types.sort();
+
+    for (g_idx, issue_type) in sorted_issue_types.iter().enumerate() {
+        let group_issues = &grouped[issue_type];
+
+        // 1. Add Group Header Row for this specific issue type
         rows.push(ResultsRowData {
-            is_header: false,
+            is_header: true,
             is_qc: true,
             is_ai: false,
-            group_index: -1,
-            hash_or_issue: issue.issue.clone(),
-            path: issue.path.clone(),
-            name: Path::new(&issue.path)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned(),
-            score_or_detail: issue.issue.clone(),
-            size_str: String::new(),
-            meta_str: issue.details.clone(),
+            group_index: g_idx as i32,
+            hash_or_issue: issue_type.clone(),
+            path: String::new(),
+            name: String::new(),
+            score_or_detail: String::new(),
+            size_str: format!("{} files", group_issues.len()),
+            meta_str: String::new(),
             is_best: false,
             is_checked: false,
-            thumbnail_data,
+            thumbnail_data: None,
             similarity: 0.0,
         });
+
+        // 2. Add Child Rows belonging to this issue category
+        for issue in group_issues {
+            let thumbnail_data = load_thumbnail_for_path(&issue.path);
+            rows.push(ResultsRowData {
+                is_header: false,
+                is_qc: true,
+                is_ai: false,
+                group_index: g_idx as i32,
+                hash_or_issue: issue.issue.clone(),
+                path: issue.path.clone(),
+                name: Path::new(&issue.path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                score_or_detail: issue.issue.clone(),
+                size_str: String::new(),
+                meta_str: issue.details.clone(),
+                is_best: false,
+                is_checked: false,
+                thumbnail_data,
+                similarity: 0.0,
+            });
+        }
     }
+
     rows
 }
 
