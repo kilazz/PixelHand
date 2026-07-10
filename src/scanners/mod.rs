@@ -133,6 +133,23 @@ impl ScanParams {
         if ui.get_ext_webp() {
             extensions.push(".webp".to_string());
         }
+        // Parse newly exposed file formats [3]
+        if ui.get_ext_gif() {
+            extensions.push(".gif".to_string());
+        }
+        if ui.get_ext_psd() {
+            extensions.push(".psd".to_string());
+        }
+        if ui.get_ext_jxl() {
+            extensions.push(".jxl".to_string());
+        }
+        if ui.get_ext_heic() {
+            extensions.push(".heic".to_string());
+            extensions.push(".heif".to_string());
+        }
+        if ui.get_ext_avif() {
+            extensions.push(".avif".to_string());
+        }
 
         // Decipher selected Execution Provider index
         let execution_provider = match ui.get_execution_provider() {
@@ -198,7 +215,7 @@ impl ScanParams {
             // AI Model selection index
             ai_model: ui.get_ai_model(),
 
-            // Custom model local properties
+            // Custom Model Local Options
             custom_model_path: ui.get_custom_model_path().to_string(),
             custom_model_arch: ui.get_custom_model_arch(),
             custom_model_dim: ui.get_custom_model_dim(),

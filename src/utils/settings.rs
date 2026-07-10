@@ -59,10 +59,17 @@ pub fn save_settings(ui: &AppWindow) {
         ext_hdr: ui.get_ext_hdr(),
         ext_tif: ui.get_ext_tif(),
         ext_webp: ui.get_ext_webp(),
+        ext_gif: ui.get_ext_gif(),
+        ext_psd: ui.get_ext_psd(),
+        ext_jxl: ui.get_ext_jxl(),
+        ext_heic: ui.get_ext_heic(),
+        ext_avif: ui.get_ext_avif(),
 
         // UI Drag States
         duplicates_panel_height: ui.get_duplicates_panel_height(),
         sidebar_width: ui.get_sidebar_width(),
+        compare_sidebar_width: ui.get_compare_sidebar_width(), // Save resizable Compare Tab sidebar width [4]
+        list_preview_size: ui.get_list_preview_size(),         // Save list row preview size [1]
 
         // Visual Reports Configurations
         save_visuals: ui.get_save_visuals(),

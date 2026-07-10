@@ -839,6 +839,29 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
+    // Select Reference Photo Callback Handler [2]
+    let app_weak_ref = app.as_weak();
+    app.on_select_reference_image(move || {
+        if let Some(file) = rfd::FileDialog::new()
+            .set_title("Select Reference Image")
+            .add_filter(
+                "Images",
+                &[
+                    "png", "jpg", "jpeg", "tga", "dds", "exr", "hdr", "tif", "tiff", "webp", "gif",
+                    "psd", "jxl", "heic", "heif", "avif",
+                ],
+            )
+            .pick_file()
+        {
+            let path_str = file.to_string_lossy().to_string();
+            if let Some(ui) = app_weak_ref.upgrade() {
+                ui.set_query_text(path_str.into());
+                ui.set_search_method(2); // Instantly shift search mode combobox to AI
+                utils::settings::save_settings(&ui);
+            }
+        }
+    });
+
     app.run()
         .context("Slint event loop terminated with an error")?;
     Ok(())
@@ -875,9 +898,16 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_ext_hdr(settings.ext_hdr);
     app.set_ext_tif(settings.ext_tif);
     app.set_ext_webp(settings.ext_webp);
+    app.set_ext_gif(settings.ext_gif);
+    app.set_ext_psd(settings.ext_psd);
+    app.set_ext_jxl(settings.ext_jxl);
+    app.set_ext_heic(settings.ext_heic);
+    app.set_ext_avif(settings.ext_avif);
 
     app.set_duplicates_panel_height(settings.duplicates_panel_height);
     app.set_sidebar_width(settings.sidebar_width);
+    app.set_compare_sidebar_width(settings.compare_sidebar_width);
+    app.set_list_preview_size(settings.list_preview_size);
 
     // Apply Visual Reports configurations to Slint UI
     app.set_save_visuals(settings.save_visuals);

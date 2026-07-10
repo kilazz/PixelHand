@@ -42,10 +42,17 @@ pub struct AppSettings {
     pub ext_hdr: bool,
     pub ext_tif: bool,
     pub ext_webp: bool,
+    pub ext_gif: bool,
+    pub ext_psd: bool,
+    pub ext_jxl: bool,
+    pub ext_heic: bool,
+    pub ext_avif: bool,
 
     // UI Layout States
     pub duplicates_panel_height: f32,
     pub sidebar_width: f32,
+    pub compare_sidebar_width: f32, // Resizable Specifications table width on Compare Tab [4]
+    pub list_preview_size: f32,     // Row Size slider state for List View row heights
 
     // Visual Reports (Contact Sheets)
     pub save_visuals: bool,
@@ -64,11 +71,9 @@ pub struct AppSettings {
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
 
-    // Directory Traversing and Vector Matching Limits
+    // Exclude Folders, LanceDB Precision, and AI Model Configuration
     pub excluded_folders: String,
     pub search_precision: i32,
-
-    // Registered active AI model state persistent property
     pub ai_model: i32, // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: Custom
 
     // Local Custom ONNX Model configurations
@@ -76,7 +81,7 @@ pub struct AppSettings {
     pub custom_model_arch: i32, // 0: CLIP, 1: SigLIP, 2: DINOv2
     pub custom_model_dim: i32,
 
-    // HDR Tonemapping Configuration
+    // HDR Tonemapping Options
     pub tonemap_enabled: bool,
     pub tonemap_operator: i32, // 0: ACES Filmic, 1: ICtCp, 2: Khronos PBR Neutral
 }
@@ -116,9 +121,16 @@ impl Default for AppSettings {
             ext_hdr: true,
             ext_tif: true,
             ext_webp: true,
+            ext_gif: true,
+            ext_psd: true,
+            ext_jxl: true,
+            ext_heic: true,
+            ext_avif: true,
 
             duplicates_panel_height: 180.0,
             sidebar_width: 380.0,
+            compare_sidebar_width: 440.0,
+            list_preview_size: 40.0, // Default row size for list results
 
             save_visuals: false,
             visuals_columns: 6,
