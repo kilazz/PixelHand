@@ -19,7 +19,6 @@ export component FindSidebar inherits Rectangle {
     border-width: 1px;
     border-radius: 4px;
 
-    // Standard child-to-parent callback propagation
     callback show_formats_popup();
 
     VerticalLayout {
@@ -110,11 +109,11 @@ export component FindSidebar inherits Rectangle {
                             CustomButton {
                                 text: "File Formats";
                                 height: 32px;
-                                primary-color: #4e5058; // Secondary gray instead of blue
+                                primary-color: #4e5058;
                                 clicked => {
                                     Store.ext_popup_x = self.absolute-position.x;
                                     Store.ext_popup_y = self.absolute-position.y + self.height;
-                                    root.show_formats_popup(); // Trigger the local UI callback
+                                    root.show_formats_popup();
                                 }
                             }
                         }
@@ -126,7 +125,6 @@ export component FindSidebar inherits Rectangle {
                     VerticalLayout {
                         spacing: 4px;
 
-                        // Only show similarity slider for dHash (method 1)
                         if Store.search_method == 1: FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
@@ -174,7 +172,7 @@ export component FindSidebar inherits Rectangle {
                                     minimum: 2;
                                     maximum: 12;
                                     height: 32px;
-                                    width: 95px; // Width increased to ensure arrows fit cleanly [1]
+                                    width: 95px;
                                     edited(val) => { Store.save_settings(); }
                                 }
 
@@ -191,7 +189,7 @@ export component FindSidebar inherits Rectangle {
                                     minimum: 1;
                                     maximum: 1000;
                                     height: 32px;
-                                    width: 110px; // Width increased to ensure arrows fit cleanly [1]
+                                    width: 110px;
                                     edited(val) => { Store.save_settings(); }
                                 }
                             }
@@ -211,7 +209,7 @@ export component FindSidebar inherits Rectangle {
                                     minimum: 8;
                                     maximum: 36;
                                     height: 32px;
-                                    width: 95px; // Width increased to ensure arrows fit cleanly [1]
+                                    width: 95px;
                                     edited(val) => { Store.save_settings(); }
                                 }
 
@@ -226,7 +224,7 @@ export component FindSidebar inherits Rectangle {
                                 Slider {
                                     value <=> Store.visuals_scale;
                                     minimum: 1.0;
-                                    maximum: 4.0; // Increased max scale limit to x4
+                                    maximum: 4.0;
                                     height: 32px;
                                     width: 70px;
                                     changed(val) => { Store.save_settings(); }
@@ -256,10 +254,9 @@ export component FindSidebar inherits Rectangle {
                         if Store.search_method == 1 && Store.prep_channels: VerticalLayout {
                             spacing: 4px;
                             padding-left: 12px;
-
                             FormRow {
                                 title: "Channels:";
-                                label-width: 60px; // Explicitly set smaller label-width to close the empty gap [1]
+                                label-width: 60px;
                                 HorizontalLayout {
                                     spacing: 6px;
                                     alignment: start;
@@ -332,9 +329,9 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 CustomButton {
-                                    text: ""; // Removed standard label to make it icon-only
-                                    icon-type: 1; // Beautiful Vector Frame Image instead of emoji
-                                    width: 32px; // Centered square aligned with 32px LineEdit height
+                                    text: "";
+                                    icon-type: 1;
+                                    width: 32px;
                                     height: 32px;
                                     enabled: Store.ai_model != 4;
                                     clicked => { Store.select_reference_image(); }
@@ -342,7 +339,6 @@ export component FindSidebar inherits Rectangle {
                             }
                         }
 
-                        // Similarity slider for AI duplicate search (when query is empty)
                         if Store.query_text == "": FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
@@ -445,7 +441,6 @@ export component FindSidebar inherits Rectangle {
                             toggled => { Store.save_settings(); }
                         }
 
-                        // Layout settings panel for visual reports in AI Duplicate Search mode
                         if Store.query_text == "" && Store.save_visuals: VerticalLayout {
                             spacing: 4px;
                             padding-left: 8px;
@@ -464,7 +459,7 @@ export component FindSidebar inherits Rectangle {
                                     minimum: 2;
                                     maximum: 12;
                                     height: 32px;
-                                    width: 95px; // Width increased to ensure arrows fit cleanly [1]
+                                    width: 95px;
                                     edited(val) => { Store.save_settings(); }
                                 }
 
@@ -481,7 +476,7 @@ export component FindSidebar inherits Rectangle {
                                     minimum: 1;
                                     maximum: 1000;
                                     height: 32px;
-                                    width: 110px; // Width increased to ensure arrows fit cleanly [1]
+                                    width: 110px;
                                     edited(val) => { Store.save_settings(); }
                                 }
                             }
@@ -501,7 +496,7 @@ export component FindSidebar inherits Rectangle {
                                     minimum: 8;
                                     maximum: 36;
                                     height: 32px;
-                                    width: 95px; // Width increased to ensure arrows fit cleanly [1]
+                                    width: 95px;
                                     edited(val) => { Store.save_settings(); }
                                 }
 
@@ -516,7 +511,7 @@ export component FindSidebar inherits Rectangle {
                                 Slider {
                                     value <=> Store.visuals_scale;
                                     minimum: 1.0;
-                                    maximum: 4.0; // Increased max scale limit to x4
+                                    maximum: 4.0;
                                     height: 32px;
                                     width: 70px;
                                     changed(val) => { Store.save_settings(); }
@@ -539,7 +534,6 @@ export component FindSidebar inherits Rectangle {
                     VerticalLayout {
                         spacing: 6px;
 
-                        // Category 1: General Options
                         Text {
                             text: "General Settings";
                             font-size: 11px;
@@ -559,7 +553,6 @@ export component FindSidebar inherits Rectangle {
                             toggled => { Store.save_settings(); }
                         }
 
-                        // Category 2: Standalone Checks
                         Text {
                             text: "Standalone Asset Rules";
                             font-size: 11px;
@@ -597,7 +590,6 @@ export component FindSidebar inherits Rectangle {
                             toggled => { Store.save_settings(); }
                         }
 
-                        // Category 3: Normal Maps
                         Text {
                             text: "Normal Maps Validation";
                             font-size: 11px;
@@ -618,7 +610,6 @@ export component FindSidebar inherits Rectangle {
                             edited => { Store.save_settings(); }
                         }
 
-                        // Category 4: Relative Comparison Checks
                         Text {
                             text: "Relative Comparison (Folder A vs B)";
                             font-size: 11px;
@@ -694,7 +685,6 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            // Only show neural network Hardware execution Providers if the AI search is active
                             if Store.search_method == 2: FormRow {
                                 title: "Provider:";
                                 ComboBox {
@@ -709,6 +699,58 @@ export component FindSidebar inherits Rectangle {
                                 text: "Enable Previews Window";
                                 checked <=> Store.enable_previews;
                                 toggled => { Store.save_settings(); }
+                            }
+
+                            // Dynamic slider for resizing List Preview thumbnails [1]
+                            if Store.enable_previews: FormRow {
+                                title: "List Thumb Size:";
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Slider {
+                                        value: Store.list_preview_size / 1px;
+                                        minimum: 32;
+                                        maximum: 120; // Allows increasing duplicate thumbnail size up to 120px [1]
+                                        height: 32px;
+                                        changed(val) => {
+                                            Store.list_preview_size = val * 1px;
+                                            Store.save_settings();
+                                        }
+                                    }
+
+                                    Text {
+                                        text: Math.round(Store.list_preview_size / 1px) + "px";
+                                        width: 36px;
+                                        font-size: 11px;
+                                        color: #ffffff;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Dynamic slider for resizing Grid Mode cards
+                            if Store.enable_previews: FormRow {
+                                title: "Grid Card Size:";
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Slider {
+                                        value: Store.grid_card_size / 1px;
+                                        minimum: 100;
+                                        maximum: 250; // Allows increasing grid card size up to 250px [1]
+                                        height: 32px;
+                                        changed(val) => {
+                                            Store.grid_card_size = val * 1px;
+                                            Store.save_settings();
+                                        }
+                                    }
+
+                                    Text {
+                                        text: Math.round(Store.grid_card_size / 1px) + "px";
+                                        width: 36px;
+                                        font-size: 11px;
+                                        color: #ffffff;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
 
                             if Store.enable_previews: FormRow {
@@ -738,14 +780,14 @@ export component FindSidebar inherits Rectangle {
                                 CustomButton {
                                     text: "Clear Caches";
                                     height: 32px;
-                                    primary-color: #4e5058; // Secondary gray instead of blue
+                                    primary-color: #4e5058;
                                     clicked => { Store.clear_cache(); }
                                 }
 
                                 CustomButton {
                                     text: "Clear Models";
                                     height: 32px;
-                                    primary-color: #4e5058; // Secondary gray instead of blue
+                                    primary-color: #4e5058;
                                     clicked => { Store.clear_models(); }
                                 }
                             }
@@ -755,7 +797,6 @@ export component FindSidebar inherits Rectangle {
             }
         }
 
-        // --- FIXED BOTTOM RUN SCANNER BUTTON ---
         Rectangle {
             height: 40px;
             background: #1e1f22;
