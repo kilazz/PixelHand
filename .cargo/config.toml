@@ -2,3 +2,9 @@
 # Instructs Cargo to use the native git CLI executable rather than built-in libgit2.
 # This resolves SSH key resolution and custom credential helper issues during dependency resolution.
 git-fetch-with-cli = true
+
+[target.x86_64-pc-windows-msvc]
+# Configures Cargo to use LLVM's built-in fast LLD linker (rust-lld.exe)
+# instead of the standard Microsoft MSVC linker (link.exe).
+# This significantly accelerates link times, especially during incremental builds.
+linker = "rust-lld.exe"
