@@ -23,7 +23,7 @@ memmap2 = "0.9.11"
 
 # Image Processing and Specialized Loaders
 image = { version = "0.25.10", features = ["png", "jpeg", "tga", "bmp", "tiff", "webp", "avif"] }
-exr = "1.74.1"
+exr = "1.74.2"
 ddsfile = "0.6.0"
 image_dds = { version = "0.7.2", features = ["image"] }
 imagesize = "0.14.0"
@@ -64,6 +64,8 @@ open = "5.3.6"
 # Error Diagnostics
 anyhow = "1.0.103"
 thiserror = "2.0.18"
+
+moka = { version = "0.12.15", features = ["sync"] }
 
 [patch.crates-io]
 # Override for suffix automaton crate compatibility

@@ -158,6 +158,7 @@ export component AppWindow inherits Window {
     in-out property <float> flicker_interval_val <=> Store.flicker_interval_val;
     in-out property <image> histogram_image <=> Store.histogram_image;
 
+    // --- ACCIDENTALLY EXPOSED IN SOME FIND MODES IN IMAGE 1 ---
     in-out property <bool> qc_mode <=> Store.qc_mode;
     in-out property <bool> qc_npot <=> Store.qc_npot;
     in-out property <bool> qc_mipmaps <=> Store.qc_mipmaps;
@@ -305,6 +306,44 @@ export component AppWindow inherits Window {
                                     height: 24px;
                                     width: 145px;
                                     selected(val) => { Store.results_sort_changed(Store.results_sort_index); }
+                                }
+
+                                // Conditionally render expand/collapse only when in List Mode
+                                if !Store.results_grid_mode && Store.results.length > 0: CustomButton {
+                                    text: "Expand All";
+                                    height: 24px;
+                                    primary-color: #4e5058; // Secondary neutral styling
+                                    clicked => { Store.expand_all_groups(); }
+                                }
+
+                                if !Store.results_grid_mode && Store.results.length > 0: CustomButton {
+                                    text: "Collapse All";
+                                    height: 24px;
+                                    primary-color: #4e5058; // Secondary neutral styling
+                                    clicked => { Store.collapse_all_groups(); }
+                                }
+
+                                // Columns resizing utility buttons
+                                if Store.results.length > 0: CustomButton {
+                                    text: "Auto Cols";
+                                    height: 24px;
+                                    primary-color: #4e5058; // Secondary neutral styling
+                                    clicked => { Store.auto_size_columns(); }
+                                }
+
+                                if Store.results.length > 0: CustomButton {
+                                    text: "Reset Cols";
+                                    height: 24px;
+                                    primary-color: #4e5058; // Secondary neutral styling
+                                    clicked => { Store.reset_size_columns(); }
+                                }
+
+                                // Integrated missing Export CSV Button
+                                if Store.results.length > 0: CustomButton {
+                                    text: "Export CSV";
+                                    height: 24px;
+                                    primary-color: #0e639c; // Muted steel blue for exports
+                                    clicked => { Store.export_csv(); }
                                 }
 
                                 if Store.search_method == 2: HorizontalLayout {

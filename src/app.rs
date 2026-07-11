@@ -91,7 +91,10 @@ pub fn append_to_console_log(msg: &str) {
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    utils::cache::run_vector_cache_garbage_collector();
+    // Run database vector cache garbage collection asynchronously to prevent blocking the startup thread
+    tokio::task::spawn_blocking(|| {
+        utils::cache::run_vector_cache_garbage_collector();
+    });
 
     if let Ok(dir) = utils::settings::get_portable_app_data_dir() {
         let log_path = dir.join("PixelHand.log");
@@ -332,7 +335,10 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
 
 /// Triggers background download tasks for default ONNX model weights on startup if missing.
 fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
-    let app = app_weak.unwrap();
+    let app = match app_weak.upgrade() {
+        Some(ui) => ui,
+        None => return,
+    };
     let active_model = app.get_ai_model();
 
     tokio::spawn(async move {
@@ -369,7 +375,10 @@ pub fn trigger_viewport_update(
     orig_path: String,
     dup_path: String,
 ) {
-    let ui = app_weak.unwrap();
+    let ui = match app_weak.upgrade() {
+        Some(ui) => ui,
+        None => return,
+    };
     let store = ui.global::<crate::app::Store>(); // Obtained the global Store handle
     let channel = utils::ui::get_current_active_channel(&store).to_string();
     let compare_mode = store.get_compare_mode();

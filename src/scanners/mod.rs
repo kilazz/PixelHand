@@ -6,10 +6,9 @@ pub mod perceptual;
 pub mod qc;
 
 use anyhow::Result;
-use std::collections::HashMap;
+use moka::sync::Cache;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use xxhash_rust::xxh64::Xxh64;
@@ -84,39 +83,44 @@ impl CachedThumbnail {
     }
 }
 
-/// Fast in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
-pub static THUMBNAIL_MEMORY_CACHE: OnceLock<
-    Mutex<HashMap<String, (CachedThumbnail, std::time::Instant)>>,
-> = OnceLock::new();
+/// Fast thread-safe in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
+/// Automatically handles weight-based eviction using LRU policy under the hood.
+pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Cache<String, CachedThumbnail>> = OnceLock::new();
 
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
 pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
 
-/// Normalizes path representations on Windows to guarantee absolute cache hit consistency.
+/// Normalizes path representations across Windows and Unix platforms to guarantee absolute cache hit consistency.
 pub fn normalize_path_key(path_str: &str) -> String {
-    path_str.replace('/', "\\").to_lowercase()
+    let normalized: String = path_str
+        .chars()
+        .map(|c| {
+            if c == '/' || c == '\\' {
+                std::path::MAIN_SEPARATOR
+            } else {
+                c
+            }
+        })
+        .collect();
+    normalized.to_lowercase()
 }
 
-/// Stores an image buffer in the memory cache, evicting the oldest key if size exceeds 200 entries (LRU).
+/// Stores an image buffer in the memory cache, evicting the oldest items if total memory footprint exceeds 500 MB.
 fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
-    let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(mut lock) = cache.lock() {
-        if lock.len() >= 200 {
-            // Find the least recently accessed key to evict
-            let oldest_key = lock
-                .iter()
-                .min_by_key(|(_, entry)| entry.1)
-                .map(|(k, _)| k.clone());
-            if let Some(key_to_remove) = oldest_key {
-                lock.remove(&key_to_remove);
-            }
-        }
-        let normalized_key = normalize_path_key(path);
-        lock.insert(
-            normalized_key,
-            (CachedThumbnail::new(img), std::time::Instant::now()),
-        );
-    }
+    let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| {
+        Cache::builder()
+            // Limit to approximately 500 MB for thumbnail caches to prevent system memory bloat
+            .max_capacity(500 * 1024 * 1024)
+            // Weigh each item according to its actual decompressed pixel payload (Width * Height * 4 channels)
+            .weigher(|_k, v: &CachedThumbnail| {
+                let bytes = v.composite.width() as u64 * v.composite.height() as u64 * 4;
+                bytes.min(u32::MAX as u64) as u32
+            })
+            .build()
+    });
+
+    let normalized_key = normalize_path_key(path);
+    cache.insert(normalized_key, CachedThumbnail::new(img));
 }
 
 /// Data structure mapping all options gathered from the UI panel to orchestrate a scan.
@@ -635,7 +639,8 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
         return rows;
     }
 
-    let mut grouped: HashMap<String, Vec<&crate::state::QcIssueSummary>> = HashMap::new();
+    let mut grouped: std::collections::HashMap<String, Vec<&crate::state::QcIssueSummary>> =
+        std::collections::HashMap::new();
     for issue in issues {
         grouped.entry(issue.issue.clone()).or_default().push(issue);
     }

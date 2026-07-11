@@ -1,21 +1,21 @@
 // src/utils/cache.rs
 
-use std::collections::HashMap;
+use moka::sync::Cache;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
+#[derive(Clone)]
 pub struct DecodedCacheItem {
     pub mtime: std::time::SystemTime,
-    pub last_accessed: std::time::Instant,
-    pub image: image::RgbaImage,
+    pub image: Arc<image::RgbaImage>, // Wrapped in Arc to prevent copying heavy raw pixel allocations
 }
 
 /// Global dynamic memory cache to hold decrypted 1:1 original pixel buffers.
-pub static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
+pub static DECODED_CACHE: OnceLock<Cache<String, DecodedCacheItem>> = OnceLock::new();
 
 /// Decodes and returns the requested color channels (R, G, B, A, or Composite)
-/// of the image at the specified path for a specific mipmap level, utilizing a lightweight LRU memory cache.
+/// of the image at the specified path for a specific mipmap level, utilizing an automated weight-based memory cache.
 pub async fn get_channel_preview_image(
     path: &str,
     channel: &str,
@@ -33,15 +33,23 @@ pub async fn get_channel_preview_image(
     // Generate unique cache key incorporating both path and mip level
     let cache_key = format!("{}_mip{}", path, mip_level);
 
-    let cache_mutex = DECODED_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache = cache_mutex.lock().ok()?;
+    let cache = DECODED_CACHE.get_or_init(|| {
+        Cache::builder()
+            // Limit to approximately 2.0 GB of decompressed texture preview data in RAM
+            .max_capacity(2 * 1024 * 1024 * 1024)
+            // Weigh each item according to its actual decompressed pixel payload (Width * Height * 4 channels)
+            .weigher(|_k, v: &DecodedCacheItem| {
+                let bytes = v.image.width() as u64 * v.image.height() as u64 * 4;
+                bytes.min(u32::MAX as u64) as u32
+            })
+            .build()
+    });
 
-    if let Some(item) = cache.get_mut(&cache_key) {
-        if item.mtime == current_mtime {
-            item.last_accessed = std::time::Instant::now();
-        } else {
-            cache.remove(&cache_key);
-        }
+    // Invalidate the cache entry if the underlying file has been modified on disk
+    if let Some(item) = cache.get(&cache_key)
+        && item.mtime != current_mtime
+    {
+        cache.invalidate(&cache_key);
     }
 
     if !cache.contains_key(&cache_key) {
@@ -49,29 +57,17 @@ pub async fn get_channel_preview_image(
         let img =
             crate::format_loaders::dds_loader::open_image_with_specific_mip(&p, mip_level).ok()?;
 
-        // Evict Least Recently Used (LRU) asset if cache limit is exceeded
-        if cache.len() >= 4 {
-            let oldest_key = cache
-                .iter()
-                .min_by_key(|(_, item)| item.last_accessed)
-                .map(|(k, _)| k.clone());
-            if let Some(k) = oldest_key {
-                cache.remove(&k);
-            }
-        }
-
         cache.insert(
             cache_key.clone(),
             DecodedCacheItem {
                 mtime: current_mtime,
-                last_accessed: std::time::Instant::now(),
-                image: img.into_rgba8(),
+                image: Arc::new(img.into_rgba8()),
             },
         );
     }
 
     let cached_item = cache.get(&cache_key)?;
-    let rgba = &cached_item.image;
+    let rgba = &*cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {
         if crate::core::perceptual::is_vfx_transparent_texture(rgba) {

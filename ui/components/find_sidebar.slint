@@ -10,7 +10,7 @@ import {
 } from "std-widgets.slint";
 import { Store } from "../store.slint";
 import { PanelSection, FormRow } from "./common.slint";
-import { CustomButton } from "./buttons.slint";
+import { CustomButton, ChannelButton } from "./buttons.slint";
 
 export component FindSidebar inherits Rectangle {
     width: Store.sidebar_width;
@@ -110,6 +110,7 @@ export component FindSidebar inherits Rectangle {
                             CustomButton {
                                 text: "File Formats";
                                 height: 32px;
+                                primary-color: #4e5058; // Secondary gray instead of blue
                                 clicked => {
                                     Store.ext_popup_x = self.absolute-position.x;
                                     Store.ext_popup_y = self.absolute-position.y + self.height;
@@ -124,7 +125,9 @@ export component FindSidebar inherits Rectangle {
                     title: "Duplicates Finder Options";
                     VerticalLayout {
                         spacing: 4px;
-                        FormRow {
+
+                        // Only show similarity slider for dHash (method 1) [1]
+                        if Store.search_method == 1: FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
                                 spacing: 6px;
@@ -253,30 +256,41 @@ export component FindSidebar inherits Rectangle {
                         if Store.search_method == 1 && Store.prep_channels: VerticalLayout {
                             spacing: 4px;
                             padding-left: 12px;
-                            HorizontalLayout {
-                                spacing: 12px;
-                                CheckBox {
-                                    text: "R";
-                                    checked <=> Store.prep_r;
-                                    toggled => { Store.save_settings(); }
-                                }
 
-                                CheckBox {
-                                    text: "G";
-                                    checked <=> Store.prep_g;
-                                    toggled => { Store.save_settings(); }
-                                }
+                            // Replaced standard checkboxes with a row of beautiful, space-efficient ChannelButtons
+                            FormRow {
+                                title: "Channels:";
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    ChannelButton {
+                                        text: "R";
+                                        active-color: #f23f43;
+                                        active <=> Store.prep_r;
+                                        clicked => { Store.prep_r = !Store.prep_r; Store.save_settings(); }
+                                    }
 
-                                CheckBox {
-                                    text: "B";
-                                    checked <=> Store.prep_b;
-                                    toggled => { Store.save_settings(); }
-                                }
+                                    ChannelButton {
+                                        text: "G";
+                                        active-color: #23a55a;
+                                        active <=> Store.prep_g;
+                                        clicked => { Store.prep_g = !Store.prep_g; Store.save_settings(); }
+                                    }
 
-                                CheckBox {
-                                    text: "A";
-                                    checked <=> Store.prep_a;
-                                    toggled => { Store.save_settings(); }
+                                    ChannelButton {
+                                        text: "B";
+                                        active-color: #5865f2;
+                                        active <=> Store.prep_b;
+                                        clicked => { Store.prep_b = !Store.prep_b; Store.save_settings(); }
+                                    }
+
+                                    ChannelButton {
+                                        text: "A";
+                                        active-color: #ffffff;
+                                        text-color: #000000;
+                                        active <=> Store.prep_a;
+                                        clicked => { Store.prep_a = !Store.prep_a; Store.save_settings(); }
+                                    }
                                 }
                             }
 
@@ -323,6 +337,29 @@ export component FindSidebar inherits Rectangle {
                                     height: 32px;
                                     enabled: Store.ai_model != 4;
                                     clicked => { Store.select_reference_image(); }
+                                }
+                            }
+                        }
+
+                        // Added similarity slider for AI duplicate search (when no semantic text query is active)
+                        if Store.query_text == "": FormRow {
+                            title: "Similarity:";
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Slider {
+                                    value <=> Store.similarity_threshold;
+                                    minimum: 50;
+                                    maximum: 100;
+                                    height: 32px;
+                                    changed(val) => { Store.save_settings(); }
+                                }
+
+                                Text {
+                                    text: Math.round(Store.similarity_threshold) + "%";
+                                    width: 36px;
+                                    font-size: 12px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
                                 }
                             }
                         }
@@ -399,7 +436,9 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
                         }
-                        CheckBox {
+
+                        // Dynamically hide "Save Visual Reports" when performing an active text search
+                        if Store.query_text == "": CheckBox {
                             text: "Save Visual Reports";
                             checked <=> Store.save_visuals;
                             height: 20px;
@@ -411,7 +450,16 @@ export component FindSidebar inherits Rectangle {
                 if Store.search_method == 4: PanelSection {
                     title: "QC Criteria List";
                     VerticalLayout {
-                        spacing: 4px;
+                        spacing: 6px;
+
+                        // Category 1: General Options
+                        Text {
+                            text: "General Settings";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
                         CheckBox {
                             text: "Match by stem";
                             checked <=> Store.qc_match_by_stem;
@@ -422,6 +470,14 @@ export component FindSidebar inherits Rectangle {
                             text: "Hide same resolution";
                             checked <=> Store.qc_hide_same_resolution;
                             toggled => { Store.save_settings(); }
+                        }
+
+                        // Category 2: Standalone Checks
+                        Text {
+                            text: "Standalone Asset Rules";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
                         }
 
                         CheckBox {
@@ -449,13 +505,21 @@ export component FindSidebar inherits Rectangle {
                         }
 
                         CheckBox {
-                            text: "Check Solid Colors";
+                            text: "Check Solid Colors & Empty Channels";
                             checked <=> Store.qc_solid_colors;
                             toggled => { Store.save_settings(); }
                         }
 
+                        // Category 3: Normal Maps
+                        Text {
+                            text: "Normal Maps Validation";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
                         CheckBox {
-                            text: "Validate Normal Maps";
+                            text: "Validate Normal Vectors";
                             checked <=> Store.qc_normals;
                             toggled => { Store.save_settings(); }
                         }
@@ -466,6 +530,15 @@ export component FindSidebar inherits Rectangle {
                             height: 32px;
                             edited => { Store.save_settings(); }
                         }
+
+                        // Category 4: Relative Comparison Checks
+                        Text {
+                            text: "Relative Comparison (Folder A vs B)";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
                         CheckBox {
                             text: "Check Size Bloat";
                             checked <=> Store.qc_check_bloat;
@@ -479,7 +552,7 @@ export component FindSidebar inherits Rectangle {
                         }
 
                         CheckBox {
-                            text: "Check Color Space";
+                            text: "Check Color Space Mismatch";
                             checked <=> Store.qc_check_colorspace;
                             toggled => { Store.save_settings(); }
                         }
@@ -533,7 +606,9 @@ export component FindSidebar inherits Rectangle {
                                     selected(val) => { Store.save_settings(); }
                                 }
                             }
-                            FormRow {
+
+                            // Only show neural network Hardware execution Providers if the AI search is active
+                            if Store.search_method == 2: FormRow {
                                 title: "Provider:";
                                 ComboBox {
                                     model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
@@ -576,12 +651,14 @@ export component FindSidebar inherits Rectangle {
                                 CustomButton {
                                     text: "Clear Caches";
                                     height: 32px;
+                                    primary-color: #4e5058; // Secondary gray instead of blue
                                     clicked => { Store.clear_cache(); }
                                 }
 
                                 CustomButton {
                                     text: "Clear Models";
                                     height: 32px;
+                                    primary-color: #4e5058; // Secondary gray instead of blue
                                     clicked => { Store.clear_models(); }
                                 }
                             }

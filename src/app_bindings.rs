@@ -118,7 +118,11 @@ fn bind_scan_execution(
     store.on_run_scan(move || {
         let app_copy = app_weak_scan.clone();
         let state_copy = state_clone.clone();
-        let ui = app_copy.unwrap();
+
+        let ui = match app_copy.upgrade() {
+            Some(ui) => ui,
+            None => return,
+        };
         let store = ui.global::<Store>();
 
         utils::settings::save_settings(&store);
@@ -340,62 +344,69 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         let lock = state_clone_click.safe_lock();
 
         let group = lock.groups.get(group_idx as usize);
-        let ui = app_copy.unwrap();
+
+        let ui = match app_copy.upgrade() {
+            Some(ui) => ui,
+            None => return,
+        };
         let store = ui.global::<Store>();
 
-        if group.is_none() {
-            if let Ok(meta) = crate::core::qc::extract_qc_metadata(std::path::Path::new(&path_str))
-            {
-                let name = std::path::Path::new(&path_str)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy();
+        let group = match group {
+            None => {
+                if let Ok(meta) =
+                    crate::core::qc::extract_qc_metadata(std::path::Path::new(&path_str))
+                {
+                    let name = std::path::Path::new(&path_str)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy();
 
-                let mipmaps_str = if meta.mipmap_count <= 1 {
-                    "No".to_string()
-                } else {
-                    meta.mipmap_count.to_string()
-                };
+                    let mipmaps_str = if meta.mipmap_count <= 1 {
+                        "No".to_string()
+                    } else {
+                        meta.mipmap_count.to_string()
+                    };
 
-                let file_meta = SelectedFile {
-                    name: slint::SharedString::from(name.as_ref()),
-                    size_str: slint::SharedString::from(format!(
-                        "{} (VRAM: {})",
-                        crate::utils::helpers::format_size(meta.file_size),
-                        crate::utils::helpers::format_size(meta.estimated_vram)
-                    )),
-                    format: slint::SharedString::from(&meta.compression_format),
-                    resolution: slint::SharedString::from(format!(
-                        "{}x{}",
-                        meta.width, meta.height
-                    )),
-                    bit_depth: slint::SharedString::from(format!("{}-bit", meta.bit_depth)),
-                    color_space: slint::SharedString::from(&meta.color_space),
-                    mipmaps: slint::SharedString::from(mipmaps_str),
-                    alpha: slint::SharedString::from(if meta.has_alpha { "Yes" } else { "No" }),
-                    similarity: slint::SharedString::from("-"),
-                    path: slint::SharedString::from(&path_str),
-                };
+                    let file_meta = SelectedFile {
+                        name: slint::SharedString::from(name.as_ref()),
+                        size_str: slint::SharedString::from(format!(
+                            "{} (VRAM: {})",
+                            crate::utils::helpers::format_size(meta.file_size),
+                            crate::utils::helpers::format_size(meta.estimated_vram)
+                        )),
+                        format: slint::SharedString::from(&meta.compression_format),
+                        resolution: slint::SharedString::from(format!(
+                            "{}x{}",
+                            meta.width, meta.height
+                        )),
+                        bit_depth: slint::SharedString::from(format!("{}-bit", meta.bit_depth)),
+                        color_space: slint::SharedString::from(&meta.color_space),
+                        mipmaps: slint::SharedString::from(mipmaps_str),
+                        alpha: slint::SharedString::from(if meta.has_alpha { "Yes" } else { "No" }),
+                        similarity: slint::SharedString::from("-"),
+                        path: slint::SharedString::from(&path_str),
+                    };
 
-                store.set_original_meta(file_meta.clone());
-                store.set_duplicate_meta(file_meta);
-                store.set_max_available_mips(meta.mipmap_count as i32);
-                store.set_active_mip_level(0);
+                    store.set_original_meta(file_meta.clone());
+                    store.set_duplicate_meta(file_meta);
+                    store.set_max_available_mips(meta.mipmap_count as i32);
+                    store.set_active_mip_level(0);
+                }
+
+                store.set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(
+                    Vec::new(),
+                ))));
+
+                crate::app::trigger_viewport_update(
+                    app_weak_clicked.clone(),
+                    path_str.clone(),
+                    path_str.clone(),
+                );
+                return;
             }
+            Some(g) => g,
+        };
 
-            store.set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(
-                Vec::new(),
-            ))));
-
-            crate::app::trigger_viewport_update(
-                app_weak_clicked.clone(),
-                path_str.clone(),
-                path_str.clone(),
-            );
-            return;
-        }
-
-        let group = group.unwrap();
         let original = match group.files.first() {
             Some(f) => f,
             None => return,
@@ -501,19 +512,10 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
             let normalized_path = scanners::normalize_path_key(&path_std);
 
+            // Fetch the cached item directly from Moka sync cache (no explicit locking needed)
             let cached_img = {
-                let cache = scanners::THUMBNAIL_MEMORY_CACHE
-                    .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-                if let Ok(mut lock) = cache.lock() {
-                    if let Some(entry) = lock.get_mut(&normalized_path) {
-                        entry.1 = std::time::Instant::now(); // Update access time (LRU)
-                        Some(entry.0.clone())
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+                let cache = scanners::THUMBNAIL_MEMORY_CACHE.get();
+                cache.and_then(|c| c.get(&normalized_path))
             };
 
             if let Some(cached_thumb) = cached_img {
@@ -618,27 +620,26 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let store = app.global::<Store>();
     store.on_tonemap_toggled(move || {
         let app_copy = app_weak_tonemap.clone();
-        let ui = app_copy.unwrap();
-        let store = ui.global::<Store>();
+        if let Some(ui) = app_copy.upgrade() {
+            let store = ui.global::<Store>();
 
-        utils::settings::save_settings(&store);
+            utils::settings::save_settings(&store);
 
-        crate::core::tonemapper::TONEMAP_ENABLED
-            .store(store.get_tonemap_enabled(), Ordering::Relaxed);
-        crate::core::tonemapper::TONEMAP_OPERATOR
-            .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
+            crate::core::tonemapper::TONEMAP_ENABLED
+                .store(store.get_tonemap_enabled(), Ordering::Relaxed);
+            crate::core::tonemapper::TONEMAP_OPERATOR
+                .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
 
-        if let Some(cache_mutex) = utils::cache::DECODED_CACHE.get()
-            && let Ok(mut cache) = cache_mutex.lock()
-        {
-            cache.clear();
-        }
+            if let Some(cache) = utils::cache::DECODED_CACHE.get() {
+                cache.invalidate_all();
+            }
 
-        let orig_path = store.get_original_meta().path.to_string();
-        let dup_path = store.get_duplicate_meta().path.to_string();
+            let orig_path = store.get_original_meta().path.to_string();
+            let dup_path = store.get_duplicate_meta().path.to_string();
 
-        if !orig_path.is_empty() && !dup_path.is_empty() {
-            crate::app::trigger_viewport_update(app_weak_tonemap.clone(), orig_path, dup_path);
+            if !orig_path.is_empty() && !dup_path.is_empty() {
+                crate::app::trigger_viewport_update(app_weak_tonemap.clone(), orig_path, dup_path);
+            }
         }
     });
 
@@ -859,17 +860,13 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let store = app.global::<Store>();
     store.on_clear_cache(move || {
-        // 1. Clear in-memory caches immediately
-        if let Some(cache_mutex) = crate::utils::cache::DECODED_CACHE.get()
-            && let Ok(mut cache) = cache_mutex.lock()
-        {
-            cache.clear();
+        // 1. Clear in-memory caches immediately using Moka API
+        if let Some(cache) = crate::utils::cache::DECODED_CACHE.get() {
+            cache.invalidate_all();
         }
 
-        if let Some(thumb_mutex) = crate::scanners::THUMBNAIL_MEMORY_CACHE.get()
-            && let Ok(mut thumb_cache) = thumb_mutex.lock()
-        {
-            thumb_cache.clear();
+        if let Some(cache) = crate::scanners::THUMBNAIL_MEMORY_CACHE.get() {
+            cache.invalidate_all();
         }
 
         // 2. Safely delete database files in a background thread
@@ -956,7 +953,7 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_auto = app.as_weak();
-    let state_auto = state;
+    let state_auto = state.clone();
     let store = app.global::<Store>();
     store.on_auto_size_columns(move || {
         if let Some(ui) = app_weak_auto.upgrade() {
@@ -992,6 +989,24 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 score_w,
                 path_w
             );
+        }
+    });
+
+    // Reset columns callback implementation
+    let app_weak_reset = app.as_weak();
+    let store = app.global::<Store>();
+    store.on_reset_size_columns(move || {
+        if let Some(ui) = app_weak_reset.upgrade() {
+            let store = ui.global::<Store>();
+            store.set_col_file_w(300.0);
+            store.set_col_score_w(70.0);
+            store.set_col_path_w(350.0);
+            store.set_col_format_w(110.0);
+            store.set_col_dimensions_w(110.0);
+            store.set_col_mipmaps_w(75.0);
+            store.set_col_cubemap_w(75.0);
+            store.set_col_size_w(85.0);
+            tracing::info!("Column sizes reset to defaults.");
         }
     });
 }
