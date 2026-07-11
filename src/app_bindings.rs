@@ -474,6 +474,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         store.set_results(ModelRc::from(std::rc::Rc::new(VecModel::from(
                             Vec::new(),
                         ))));
+                        store.set_has_results(false); // Reset persistence flag on clear [1]
                         let mut lock = state_copy_inner.safe_lock();
                         lock.results.clear();
                         lock.groups.clear();
@@ -489,7 +490,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_hover = app.as_weak();
-    let state_hover = state;
+    let state_hover = state.clone();
 
     // Thread-safe async debouncing handle to capture rapid mouse hovering and eliminate event loop flooding
     let last_hover_task = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<()>>));
@@ -953,7 +954,7 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_auto = app.as_weak();
-    let state_auto = state.clone();
+    let state_auto = state;
     let store = app.global::<Store>();
     store.on_auto_size_columns(move || {
         if let Some(ui) = app_weak_auto.upgrade() {

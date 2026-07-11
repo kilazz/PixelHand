@@ -93,7 +93,7 @@ export global Store {
     in-out property <length> grid_card_size: 135px;
     in-out property <length> list_preview_size: 40px;
 
-    // Dynamic Columns Widths - expanded to prevent text truncation
+    // Dynamic Columns Widths
     in-out property <length> col_file_w: 320px;
     in-out property <length> col_score_w: 80px;
     in-out property <length> col_path_w: 380px;
@@ -199,6 +199,7 @@ export global Store {
 
     // Smart Filter state variables
     in-out property <bool> results_grid_mode: false;
+    in-out property <bool> has_results: false;
 
     // ==========================================
     // --- OPERATIONAL ACTIONS CALLBACKS --------
@@ -228,7 +229,7 @@ export global Store {
     callback clear_models();
     callback select_custom_model();
     callback auto_size_columns();
-    callback reset_size_columns(); // Added for Reset Cols support
+    callback reset_size_columns();
     callback context_menu_action(string, string);
     callback thumbnail_channel_hovered(string, string);
     callback select_reference_image();

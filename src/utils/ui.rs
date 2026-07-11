@@ -151,6 +151,10 @@ pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize>
 
 /// Synchronizes the active Slint list results and grid representations based on filters and collapse states.
 pub fn update_results_ui(store: &Store, state: &AppState) {
+    // Determine if there is actual scanned data (files or issues), ignoring pure headers
+    let has_any = state.results.iter().any(|r| !r.is_header);
+    store.set_has_results(has_any);
+
     let search_query = store.get_results_search_query().to_string().to_lowercase();
     let min_sim = store.get_results_min_similarity();
 

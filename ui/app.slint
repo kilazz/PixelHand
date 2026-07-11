@@ -307,15 +307,15 @@ export component AppWindow inherits Window {
                                     selected(val) => { Store.results_sort_changed(Store.results_sort_index); }
                                 }
 
-                                // Conditionally render expand/collapse only when in List Mode
-                                if !Store.results_grid_mode && Store.results.length > 0: CustomButton {
+                                // Conditionally render expand/collapse only when in List Mode and when results exist [1]
+                                if !Store.results_grid_mode && Store.has_results: CustomButton {
                                     text: "Expand All";
                                     height: 24px;
                                     primary-color: #4e5058; // Secondary neutral styling
                                     clicked => { Store.expand_all_groups(); }
                                 }
 
-                                if !Store.results_grid_mode && Store.results.length > 0: CustomButton {
+                                if !Store.results_grid_mode && Store.has_results: CustomButton {
                                     text: "Collapse All";
                                     height: 24px;
                                     primary-color: #4e5058; // Secondary neutral styling
@@ -323,22 +323,22 @@ export component AppWindow inherits Window {
                                 }
 
                                 // Columns resizing utility buttons
-                                if Store.results.length > 0: CustomButton {
+                                if Store.has_results: CustomButton {
                                     text: "Auto Cols";
                                     height: 24px;
                                     primary-color: #4e5058; // Secondary neutral styling
                                     clicked => { Store.auto_size_columns(); }
                                 }
 
-                                if Store.results.length > 0: CustomButton {
+                                if Store.has_results: CustomButton {
                                     text: "Reset Cols";
                                     height: 24px;
                                     primary-color: #4e5058; // Secondary neutral styling
                                     clicked => { Store.reset_size_columns(); }
                                 }
 
-                                // Integrated missing Export CSV Button
-                                if Store.results.length > 0: CustomButton {
+                                // Integrated missing Export CSV Button [2]
+                                if Store.has_results: CustomButton {
                                     text: "Export CSV";
                                     height: 24px;
                                     primary-color: #0e639c; // Muted steel blue for exports
@@ -390,8 +390,8 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // SMART FILTER CHECKS
-                        if Store.results.length > 0: HorizontalLayout {
+                        // SMART FILTER CHECKS - Bound to has_results, keeping filters persistently visible [1]
+                        if Store.has_results: HorizontalLayout {
                             spacing: 12px;
                             padding-left: 4px;
                             padding-bottom: 4px;
@@ -473,11 +473,26 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                if Store.results.length == 0: VerticalLayout {
+
+                                // Scenario 1: Initial state before any scans are performed
+                                if !Store.has_results: VerticalLayout {
                                     alignment: center;
                                     spacing: 12px;
                                     Text {
                                         text: "No duplicate assets loaded. Choose scan parameters in the left pane and begin auditing.";
+                                        color: #7c808a;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                        wrap: word-wrap;
+                                    }
+                                }
+
+                                // Scenario 2: Active scan exists, but user filters completely cleared the view [1]
+                                if Store.has_results && Store.results.length == 0: VerticalLayout {
+                                    alignment: center;
+                                    spacing: 12px;
+                                    Text {
+                                        text: "No results match your active smart filters or search query.";
                                         color: #7c808a;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
@@ -869,7 +884,7 @@ export component AppWindow inherits Window {
                                     spacing: 8px; // Added spacing [1]
                                     Text {
                                         text: "Specification";
-                                        width: 130px; // Dynamic proportional alignment [1]
+                                        width: 130px; // Proportional column alignment [1]
                                         font-weight: 700;
                                         color: #949ba4;
                                         font-size: 12px;
@@ -877,7 +892,7 @@ export component AppWindow inherits Window {
 
                                     Rectangle {
                                         width: 1px;
-                                        background: transparent; // Header separator spacer [2]
+                                        background: transparent; // Header spacer matching row divider [2]
                                     }
 
                                     Text {
@@ -890,7 +905,7 @@ export component AppWindow inherits Window {
 
                                     Rectangle {
                                         width: 1px;
-                                        background: transparent; // Header separator spacer [2]
+                                        background: transparent; // Header spacer matching row divider [2]
                                     }
 
                                     Text {
