@@ -164,7 +164,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
             h = safe_read_u32_le(&bytes, 12);
             w = safe_read_u32_le(&bytes, 16);
 
-            // Читаем количество мип-мапов напрямую из заголовка dwMipMapCount без привязки к флагам
+            // Read the mipmap count directly from dwMipMapCount header field
             let mips = safe_read_u32_le(&bytes, 28);
             mipmap_count = if mips > 0 { mips } else { 1 };
 
@@ -399,6 +399,7 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
 }
 
 /// Analyzes standard normal map shading directions in G channel to warn of potential Y-axis inversion (DirectX vs OpenGL).
+/// Optimized using raw slice direct index calculation to eliminate bounds-check overhead [1].
 pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(256)).ok()?;
@@ -413,12 +414,24 @@ pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
         return None;
     }
 
+    let raw = rgb.as_raw();
+    let stride = w as usize * 3;
+
     // Sample pixels in the inner grid to estimate shading orientation
     for y in 1..(h - 1) {
+        let y_idx = y as usize * stride;
+        let prev_y_idx = (y - 1) as usize * stride;
+        let next_y_idx = (y + 1) as usize * stride;
+
         for x in 1..(w - 1) {
-            let cur_g = rgb.get_pixel(x, y)[1] as f32;
-            let prev_g = rgb.get_pixel(x, y - 1)[1] as f32;
-            let next_g = rgb.get_pixel(x, y + 1)[1] as f32;
+            let x_offset = x as usize * 3 + 1; // Green channel offset [1]
+
+            // SAFETY: Since y < h - 1 and x < w - 1, and the total vector length is strictly h * w * 3,
+            // we guarantee that all computed index references are strictly less than raw.len() [1].
+            // This eliminates array boundaries assertion checks and optimizes performance [1].
+            let cur_g = unsafe { *raw.get_unchecked(y_idx + x_offset) } as f32;
+            let prev_g = unsafe { *raw.get_unchecked(prev_y_idx + x_offset) } as f32;
+            let next_g = unsafe { *raw.get_unchecked(next_y_idx + x_offset) } as f32;
 
             if (next_g - prev_g).abs() > 30.0 {
                 if cur_g > 128.0 {

@@ -25,21 +25,26 @@ pub fn extract_selected_files(lock: &AppState) -> (Vec<String>, Vec<(String, Str
 }
 
 /// Routes filesystem deduplication or deletion operations to the appropriate handler.
+/// Offloads synchronous blocking IO operations to a dedicated blocking thread pool [1].
 pub async fn execute_file_action(
     action: &str,
     files: Vec<String>,
     pairs: Vec<(String, String)>,
 ) -> anyhow::Result<()> {
-    match action {
-        "trash" => delete_files(files).await,
-        "hardlink" => create_hardlinks(pairs).await,
-        "reflink" => create_reflinks(pairs).await,
+    let action_owned = action.to_string();
+
+    // Safety check: run blocking filesystem operations inside the dedicated Tokio blocking pool [1]
+    tokio::task::spawn_blocking(move || match action_owned.as_str() {
+        "trash" => delete_files_sync(files),
+        "hardlink" => create_hardlinks_sync(pairs),
+        "reflink" => create_reflinks_sync(pairs),
         _ => Err(anyhow::anyhow!("Unknown filesystem action type requested")),
-    }
+    })
+    .await?
 }
 
-/// Safely moves targeted duplicate files to the operating system recycle bin.
-async fn delete_files(paths: Vec<String>) -> anyhow::Result<()> {
+/// Safely moves targeted duplicate files to the operating system recycle bin (Synchronous blocking runner).
+fn delete_files_sync(paths: Vec<String>) -> anyhow::Result<()> {
     let files_to_delete: Vec<PathBuf> = paths
         .into_iter()
         .map(PathBuf::from)
@@ -51,9 +56,8 @@ async fn delete_files(paths: Vec<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Transforms duplicates into hard links pointing to the master source file.
-/// Processes files sequentially and logs isolated lock/permission errors to prevent batch interruption.
-async fn create_hardlinks(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
+/// Transforms duplicates into hard links pointing to the master source file (Synchronous blocking runner).
+fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     for (source_str, target_str) in pairs {
         let source = PathBuf::from(source_str);
         let target = PathBuf::from(target_str);
@@ -86,9 +90,9 @@ async fn create_hardlinks(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Transforms duplicates into reflinks (Copy-on-Write clones) pointing to the master source file.
+/// Transforms duplicates into reflinks pointing to the master source file (Synchronous blocking runner).
 /// Falls back to deep copies if the underlying filesystem does not support reflinking.
-async fn create_reflinks(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
+fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     for (source_str, target_str) in pairs {
         let source = PathBuf::from(source_str);
         let target = PathBuf::from(target_str);
@@ -109,6 +113,7 @@ async fn create_reflinks(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
+        // Standard library / reflink handles internally release raw file descriptors safely on Scope exit
         if let Err(e) = reflink_copy::reflink_or_copy(&source, &target) {
             tracing::error!(
                 "Failed to generate reflink clone from '{}' to '{}': {}",
