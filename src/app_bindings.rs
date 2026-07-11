@@ -797,15 +797,16 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     app.on_clear_cache(move || {
         // 1. Clear in-memory caches immediately
-        if let Some(cache_mutex) = crate::utils::cache::DECODED_CACHE.get() {
-            if let Ok(mut cache) = cache_mutex.lock() {
-                cache.clear();
-            }
+        if let Some(cache_mutex) = crate::utils::cache::DECODED_CACHE.get()
+            && let Ok(mut cache) = cache_mutex.lock()
+        {
+            cache.clear();
         }
-        if let Some(thumb_mutex) = crate::scanners::THUMBNAIL_MEMORY_CACHE.get() {
-            if let Ok(mut thumb_cache) = thumb_mutex.lock() {
-                thumb_cache.clear();
-            }
+
+        if let Some(thumb_mutex) = crate::scanners::THUMBNAIL_MEMORY_CACHE.get()
+            && let Ok(mut thumb_cache) = thumb_mutex.lock()
+        {
+            thumb_cache.clear();
         }
 
         // 2. Safely delete database files in a background thread
@@ -815,17 +816,18 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 let cache_dir = app_dir.join(".cache");
                 let mut success = true;
 
-                if lancedb_dir.exists() {
-                    if let Err(e) = std::fs::remove_dir_all(&lancedb_dir) {
-                        tracing::error!("Failed to clear LanceDB cache (possibly locked): {}", e);
-                        success = false;
-                    }
+                if lancedb_dir.exists()
+                    && let Err(e) = std::fs::remove_dir_all(&lancedb_dir)
+                {
+                    tracing::error!("Failed to clear LanceDB cache (possibly locked): {}", e);
+                    success = false;
                 }
-                if cache_dir.exists() {
-                    if let Err(e) = std::fs::remove_dir_all(&cache_dir) {
-                        tracing::error!("Failed to clear thumbnails cache: {}", e);
-                        success = false;
-                    }
+
+                if cache_dir.exists()
+                    && let Err(e) = std::fs::remove_dir_all(&cache_dir)
+                {
+                    tracing::error!("Failed to clear thumbnails cache: {}", e);
+                    success = false;
                 }
 
                 if success {
