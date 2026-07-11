@@ -109,7 +109,7 @@ export component CustomButton {
     callback clicked;
 
     height: 26px; // Height adjusted to prevent vertical truncation
-    min-width: 90px; // Raised min-width to support longer labels
+    min-width: root.text == "" ? self.height : 90px; // Automatically scale to a perfect square if no text is specified (Using self.height to resolve build error) [1]
 
     rect := Rectangle {
         background: !enabled ? #2f3136 : primary-color;
@@ -122,9 +122,9 @@ export component CustomButton {
 
         HorizontalLayout {
             alignment: center;
-            spacing: 8px; // Spacing between the icon and text
-            padding-left: 12px; // Raised horizontal padding to ensure text fits
-            padding-right: 12px;
+            spacing: root.text == "" ? 0px : 8px; // Remove spacing when text is absent
+            padding-left: root.text == "" ? 0px : 12px; // Remove padding bias for centering icon-only buttons
+            padding-right: root.text == "" ? 0px : 12px;
 
             if icon-type == 1: Rectangle { // Vector Frame Image (Clean alternative to emoji)
                 width: 12px;
@@ -147,23 +147,9 @@ export component CustomButton {
                 VerticalLayout {
                     spacing: 2px;
                     alignment: center;
-                    Rectangle {
-                        height: 1.5px;
-                        background: !enabled ? #7c808a : #ffffff;
-                        border-radius: 0.5px;
-                    }
-
-                    Rectangle {
-                        height: 1.5px;
-                        background: !enabled ? #7c808a : #ffffff;
-                        border-radius: 0.5px;
-                    }
-
-                    Rectangle {
-                        height: 1.5px;
-                        background: !enabled ? #7c808a : #ffffff;
-                        border-radius: 0.5px;
-                    }
+                    Rectangle { height: 1.5px; background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
+                    Rectangle { height: 1.5px; background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
+                    Rectangle { height: 1.5px; background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
                 }
             }
 
@@ -173,32 +159,17 @@ export component CustomButton {
                 GridLayout {
                     spacing: 1.5px;
                     Row {
-                        Rectangle {
-                            background: !enabled ? #7c808a : #ffffff;
-                            border-radius: 0.5px;
-                        }
-
-                        Rectangle {
-                            background: !enabled ? #7c808a : #ffffff;
-                            border-radius: 0.5px;
-                        }
+                        Rectangle { background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
+                        Rectangle { background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
                     }
-
                     Row {
-                        Rectangle {
-                            background: !enabled ? #7c808a : #ffffff;
-                            border-radius: 0.5px;
-                        }
-
-                        Rectangle {
-                            background: !enabled ? #7c808a : #ffffff;
-                            border-radius: 0.5px;
-                        }
+                        Rectangle { background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
+                        Rectangle { background: !enabled ? #7c808a : #ffffff; border-radius: 0.5px; }
                     }
                 }
             }
 
-            txt := Text {
+            if root.text != "": txt := Text { // Only instantiate text box if text is not empty
                 text: root.text;
                 color: !enabled ? #7c808a : #ffffff;
                 font-size: 11px;
