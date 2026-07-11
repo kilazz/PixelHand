@@ -1,56 +1,45 @@
 # PixelHand WIP ~
-**A lightning-fast, local, and hardware-accelerated tool for visual duplicate detection, semantic AI search, and technical quality control auditing of graphics and textures.**
 
-## Features
-*   🔍 **Multi-Tier Duplicate Detection**
-    Identify duplicates starting from byte-exact matches (**xxHash64**) to perceptual similarities (**dHash / pHash**) and deep conceptual lookalikes using vector embeddings.
-*   🧠 **Smart Local AI Search**
-    *   **Text-to-Image (Semantic)**: Search your local drives using natural language prompts (e.g., "damaged concrete wall").
-    *   **Image-to-Image (Sample Search)**: Drag and drop a reference image to retrieve visually similar assets, powered by fully offline visual encoders.
-    *   **Flexible Model Registry**: Out-of-the-box support for 5 remote models (`CLIP-B/32`, `CLIP-L/14`, `SigLIP-B`, `SigLIP-L`, and `DINOv2-B`) or **load your own local custom ONNX models** with adjustable dimension and architecture configurations.
-*   📐 **Quality Control (QC) & Pipeline Validation**
-    Specifically tailored for GameDev & VFX pipelines. Automates routine graphics asset integrity checks:
-    *   **Absolute Checks**: NPOT (Non-Power-of-Two) dimensions validation, missing Mip-maps inspection, block compression alignment (4px) verification, and bit depth analysis.
-    *   **Surface Inspection**: Constant flat color detection and tangent-space **Normal Map vector integrity validation** (identifies non-normalized vectors and inverted axes).
-    *   **Relative Compare Checks**: Evaluation of resolution downgrades, file size bloat (>1.5x), lost alpha channels, color space discrepancies (sRGB vs Linear), and unexpected compression format transitions.
-*   📂 **Advanced Comparative Modes**
-    *   **Folder A vs Folder B**: Audit build directories or asset releases against source repositories, with optimized single-pass metadata evaluations.
-    *   **Channel Toggle Analysis**: Isolate and inspect individual RGBA color channels (**R, G, B, A**) to analyze packed channel masks.
-*   🖼️ **High-Fidelity Interactive Viewer**
-    Pixel-perfect comparative canvas tools with synchronized panning and zooming:
-    *   **Side-by-Side** layout.
-    *   **Interactive Wipe Mode**: Drag the orange vertical splitter line directly inside the viewport canvas, bi-directionally bound (`<=>`) to the toolbar slider for instant visual feedback.
-    *   **Overlay Blend** with alpha transparency controls.
-    *   **Difference Heatmap**: Computes pixel differences in parallel across all CPU cores using `rayon::par_chunks_exact_mut` to eliminate UI stuttering when loading massive 4K/8K textures.
-    *   **Professional HDR-to-SDR Tonemapping**: Selectable realtime operators supporting **ACES Filmic**, per-channel **ICtCp Perceptual (BT.2446c)**, and **Khronos PBR Neutral** to display linear float textures accurately without hue shifting.
-*   ⚡ **Fluid UI & Live Feedback**
-    *   **Virtualized Responsive Grid View**: Grid cards are grouped into rows of 4-column packages (`GridRow`) rendered inside a virtualized Slint `ListView`, maintaining fluid scrolling on directories with tens of thousands of duplicate clusters.
-    *   **Zero-Lag Hover Channel Previews**: Enhanced with an asynchronous, non-blocking 80ms debouncer (throttling) in the Rust background task to prevent Slint event loop spam and maintain 60+ FPS during rapid cursor movement.
-    *   **Live progress bar updating** during CPU-bound hashing and GPU-bound ML inference loops.
-    *   Instant `Expand All` and `Collapse All` duplicate group triggers.
+A local, hardware-accelerated desktop tool written in Rust and Slint for visual duplicate detection, semantic AI search, and technical quality control auditing of graphics and textures.
 
-## Format Support
-*   **HDR Formats**: `.dds`,`.exr`, `.hdr`
-*   **Source Formats**: `.psd`,`.jxl`, `.heic`/`.heif`
-*   **Standard Formats**: `.png`, `.jpg`, `.jpeg`, `.tga`, `.bmp`, `.tiff`, `.webp`
+## Key Features
 
-## Tech Stack
-*   **GUI Engine**: [Slint UI](https://slint.dev/)
-*   **Machine Learning**: [ONNX Runtime](https://onnxruntime.ai/)
-*   **Vector Database**: [LanceDB](https://lancedb.com/)
+### 🔍 Duplicate Detection & AI Search
+*   **Multi-Tier Scan**: Find duplicates via byte-exact matches (**xxHash64**), perceptual similarity (**dHash / pHash**), or local AI embeddings.
+*   **Smart AI Search**: Search visually similar assets (Image-to-Image) or query with natural language (Text-to-Image), completely offline.
+*   **Supported AI Models**: CLIP-B/32, CLIP-L/14, SigLIP-B, SigLIP-L, DINOv2-B, or load your own local custom ONNX models.
+*   **Lazy DDS Mip Loading**: Dynamic resolution matching (256px or 384px) that decodes only the necessary mipmap level directly from DDS files, reducing RAM footprint during AI scans.
+
+### 📐 Pipeline Technical QC
+*   **Absolute Audits**: Non-Power-of-Two (NPOT) verification, missing Mip-maps, block compression alignment (4px), and bit depth analysis.
+*   **Normal Map Integrity**: Tangent-space normal vector validation and automatic **DirectX vs OpenGL Y-axis check** (shading orientation detection).
+*   **ORM/RMA Empty Channel Detection**: Auto-detects empty, missing, or flat-color masks (R, G, B, A) in packed textures.
+*   **GPU VRAM Estimation**: Displays estimated GPU memory footprint (with block padding and mip pyramids calculated) alongside disk size.
+*   **Relative Compare**: Folder A vs Folder B auditing to track resolution downgrades, lost alpha, colorspace shifts, and size bloat.
+
+### 🖼️ Interactive Comparative Viewer
+*   **5 Compare Modes**: Side-by-Side, Wipe, Overlay, Difference Heatmap, and **Flicker/Blink Mode** (toggle between original and duplicate at custom intervals to spot sub-pixel artifacts).
+*   **Luminance Histogram**: Overlapping real-time slate graphs showing gamma, exposure, and contrast mismatches.
+*   **RGBA Isolator**: Quick toggle to analyze isolated color channels (**R, G, B, A**) with zero-lag debounced cursor hovering.
+*   **HDR Tonemapping**: Selectable realtime operators (**ACES Filmic**, BT.2446c **ICtCp Perceptual**, and **Khronos PBR Neutral**) for linear float textures.
+
+## Technical Stack & Formats
+*   **GUI**: [Slint UI](https://slint.dev/)
+*   **AI Inference**: [ONNX Runtime](https://onnxruntime.ai/)
+*   **Vector DB**: [LanceDB](https://lancedb.com/)
+*   **Supported Formats**: `.dds`, `.exr`, `.hdr`, `.psd`, `.jxl`, `.heic`/`.heif`, `.png`, `.jpg`/`.jpeg`, `.tga`, `.bmp`, `.tiff`, `.webp`
 
 ## Development
 ```
-Run GUI
+# Run GUI
 cargo run
 
-Run the command-line (CLI) auditor mode
+# Run CLI exact scan
 cargo run -- -c --scan-exact <directory_path>
+
+# Run CLI technical QC audit
 cargo run -- -c --scan-qc <directory_path> --check-npot --validate-normals
 
-Clean security audit (Zero vulnerabilities / unmaintained warning-free)
-cargo audit
-
-Compile optimized production release binaries
+# Build production release binary
 cargo build --release
 ```
