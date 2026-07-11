@@ -998,9 +998,9 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     store.on_reset_size_columns(move || {
         if let Some(ui) = app_weak_reset.upgrade() {
             let store = ui.global::<Store>();
-            store.set_col_file_w(300.0);
-            store.set_col_score_w(70.0);
-            store.set_col_path_w(350.0);
+            store.set_col_file_w(320.0);
+            store.set_col_score_w(80.0);
+            store.set_col_path_w(380.0);
             store.set_col_format_w(110.0);
             store.set_col_dimensions_w(110.0);
             store.set_col_mipmaps_w(75.0);
