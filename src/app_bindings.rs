@@ -461,27 +461,9 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 cache.lock().unwrap().get(&normalized_path).cloned()
             };
 
-            if let Some(rgba) = cached_img {
-                let channel_img = if channel_std == "RGB" || channel_std == "Composite" {
-                    rgba
-                } else {
-                    let channel_idx = match channel_std.as_str() {
-                        "R" => 0,
-                        "G" => 1,
-                        "B" => 2,
-                        _ => 3,
-                    };
-                    let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
-                    for (x, y, pixel) in rgba.enumerate_pixels() {
-                        let val = pixel[channel_idx];
-                        if channel_idx == 3 {
-                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, val]));
-                        } else {
-                            out_rgba.put_pixel(x, y, image::Rgba([val, val, val, 255]));
-                        }
-                    }
-                    out_rgba
-                };
+            if let Some(cached_thumb) = cached_img {
+                // Highly optimized: fetch pre-computed (or lazily initialized once) channel-isolated buffer
+                let channel_img = cached_thumb.get_channel(&channel_std);
 
                 // Sync the shared state representation under isolated scope
                 {
@@ -601,6 +583,19 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
             if !orig_path.is_empty() && !dup_path.is_empty() {
                 crate::app::trigger_viewport_update(app_weak_channel.clone(), orig_path, dup_path);
+            }
+        }
+    });
+
+    let app_weak_mip = app.as_weak();
+    app.on_mip_level_changed(move || {
+        let app_copy = app_weak_mip.clone();
+        if let Some(ui) = app_copy.upgrade() {
+            let orig_path = ui.get_original_meta().path.to_string();
+            let dup_path = ui.get_duplicate_meta().path.to_string();
+
+            if !orig_path.is_empty() && !dup_path.is_empty() {
+                crate::app::trigger_viewport_update(app_weak_mip.clone(), orig_path, dup_path);
             }
         }
     });

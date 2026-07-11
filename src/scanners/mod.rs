@@ -17,8 +17,75 @@ use xxhash_rust::xxh64::Xxh64;
 use crate::core::perceptual::AnalysisType;
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
+/// High-performance container holding composite and lazy-allocated channel-isolated preview buffers.
+#[derive(Clone)]
+pub struct CachedThumbnail {
+    pub composite: image::RgbaImage,
+    pub r_channel: Arc<OnceLock<image::RgbaImage>>,
+    pub g_channel: Arc<OnceLock<image::RgbaImage>>,
+    pub b_channel: Arc<OnceLock<image::RgbaImage>>,
+    pub a_channel: Arc<OnceLock<image::RgbaImage>>,
+}
+
+impl CachedThumbnail {
+    pub fn new(composite: image::RgbaImage) -> Self {
+        Self {
+            composite,
+            r_channel: Arc::new(OnceLock::new()),
+            g_channel: Arc::new(OnceLock::new()),
+            b_channel: Arc::new(OnceLock::new()),
+            a_channel: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Retrieves or dynamically computes a color-isolated preview on a separate thread, caching the result.
+    pub fn get_channel(&self, channel: &str) -> image::RgbaImage {
+        let lock = match channel {
+            "R" => &self.r_channel,
+            "G" => &self.g_channel,
+            "B" => &self.b_channel,
+            "A" => &self.a_channel,
+            _ => return self.composite.clone(),
+        };
+
+        lock.get_or_init(|| {
+            let idx = match channel {
+                "R" => 0,
+                "G" => 1,
+                "B" => 2,
+                _ => 3,
+            };
+
+            let width = self.composite.width();
+            let height = self.composite.height();
+            let mut out_rgba = image::RgbaImage::new(width, height);
+
+            let composite_raw = self.composite.as_raw();
+            let out_raw = out_rgba.as_mut();
+
+            for (i, chunk) in composite_raw.chunks_exact(4).enumerate() {
+                let val = chunk[idx];
+                let dst_idx = i * 4;
+                if idx == 3 {
+                    out_raw[dst_idx] = val;
+                    out_raw[dst_idx + 1] = val;
+                    out_raw[dst_idx + 2] = val;
+                    out_raw[dst_idx + 3] = val;
+                } else {
+                    out_raw[dst_idx] = val;
+                    out_raw[dst_idx + 1] = val;
+                    out_raw[dst_idx + 2] = val;
+                    out_raw[dst_idx + 3] = 255;
+                }
+            }
+            out_rgba
+        })
+        .clone()
+    }
+}
+
 /// Fast in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
-pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, image::RgbaImage>>> =
+pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, CachedThumbnail>>> =
     OnceLock::new();
 
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
@@ -39,7 +106,7 @@ fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
             lock.remove(&key_to_remove);
         }
         let normalized_key = normalize_path_key(path);
-        lock.insert(normalized_key, img);
+        lock.insert(normalized_key, CachedThumbnail::new(img));
     }
 }
 

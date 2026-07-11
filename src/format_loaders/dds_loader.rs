@@ -139,7 +139,7 @@ fn unswizzle_block_linear(
     Ok(())
 }
 
-/// Swaps endian layouts specifically for Xbox 360 parsed compressed texture streams.
+/// Computes normal map vector bounds, verifies normalize properties, and screens for invalid normal length directions.
 fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
     if matches!(
         format_fourcc,
@@ -426,7 +426,7 @@ pub fn decode_dds_bytes(dds_bytes: &[u8], target_size: Option<u32>) -> Result<Dy
     Ok(DynamicImage::ImageRgba8(rgba_img))
 }
 
-/// Helper wrapper that opens any supported graphics asset, utilizing fast mipmap seeking for DDS.
+/// Helper wrapper that opens any supported graphics asset, utilizing same mipmap seeking for DDS.
 /// Dynamically detects floating-point textures to perform high-fidelity HDR-to-SDR tonemapping.
 pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
     path: P,
@@ -513,5 +513,129 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
             }
             _ => Ok(DynamicImage::ImageRgba8(img.to_rgba8())),
         }
+    }
+}
+
+/// Decodes DDS-file structure and extracts a specific mipmap level.
+pub fn decode_dds_bytes_specific_mip(dds_bytes: &[u8], mip_level: u32) -> Result<DynamicImage> {
+    let info = analyze_header(dds_bytes)?;
+
+    let clean_dds_bytes = if info.is_swizzled || info.is_xbox {
+        let mut pixel_data = if info.is_swizzled {
+            let mut unswizzled = vec![0u8; info.slice_pitch];
+            unswizzle_block_linear(
+                &dds_bytes[info.pixel_data_offset..],
+                &mut unswizzled,
+                info.width,
+                info.height,
+                info.block_bytes,
+            )?;
+            unswizzled
+        } else {
+            let limit = dds_bytes
+                .len()
+                .min(info.pixel_data_offset + info.slice_pitch);
+            let mut raw_pixels = vec![0u8; info.slice_pitch];
+            let bytes_to_copy = limit.saturating_sub(info.pixel_data_offset);
+
+            if let Some(src_slice) =
+                dds_bytes.get(info.pixel_data_offset..info.pixel_data_offset + bytes_to_copy)
+            {
+                raw_pixels[0..bytes_to_copy].copy_from_slice(src_slice);
+            }
+            raw_pixels
+        };
+
+        if info.is_xbox {
+            perform_xbox_endian_swap(&mut pixel_data, info.fourcc);
+        }
+
+        // Reconstruct standard DDS header in memory
+        let mut clean = Vec::with_capacity(128 + pixel_data.len());
+        clean.extend_from_slice(b"DDS ");
+
+        let mut dds_header = [0u8; 124];
+        dds_header[0..4].copy_from_slice(&124u32.to_le_bytes());
+
+        let mut dw_flags: u32 = 0x1 | 0x2 | 0x4 | 0x1000;
+        dw_flags |= if info.is_compressed { 0x80000 } else { 0x8 };
+        dds_header[4..8].copy_from_slice(&dw_flags.to_le_bytes());
+
+        dds_header[8..12].copy_from_slice(&info.height.to_le_bytes());
+        dds_header[12..16].copy_from_slice(&info.width.to_le_bytes());
+
+        let dw_pitch = if info.is_compressed {
+            info.slice_pitch as u32
+        } else {
+            info.pitch as u32
+        };
+        dds_header[16..20].copy_from_slice(&dw_pitch.to_le_bytes());
+        dds_header[20..24].copy_from_slice(&1u32.to_le_bytes()); // Depth
+        dds_header[24..28].copy_from_slice(&1u32.to_le_bytes()); // MipMapCount
+
+        dds_header[72..76].copy_from_slice(&32u32.to_le_bytes()); // pf_size
+        let pf_flags: u32 = if info.is_compressed {
+            0x00000004
+        } else {
+            0x00000040 | 0x00000001
+        };
+        dds_header[76..80].copy_from_slice(&pf_flags.to_le_bytes());
+
+        let pf_fourcc = if info.is_compressed { info.fourcc } else { 0 };
+        dds_header[80..84].copy_from_slice(&pf_fourcc.to_le_bytes());
+
+        let pf_rgb_bitcount: u32 = if info.is_compressed { 0 } else { 32 };
+        dds_header[84..88].copy_from_slice(&pf_rgb_bitcount.to_le_bytes());
+        if !info.is_compressed {
+            dds_header[88..92].copy_from_slice(&0x00ff0000u32.to_le_bytes());
+            dds_header[92..96].copy_from_slice(&0x0000ff00u32.to_le_bytes());
+            dds_header[96..100].copy_from_slice(&0x000000ffu32.to_le_bytes());
+            dds_header[100..104].copy_from_slice(&0xff000000u32.to_le_bytes());
+        }
+
+        dds_header[104..108].copy_from_slice(&0x1000u32.to_le_bytes()); // dwCaps
+        clean.extend_from_slice(&dds_header);
+
+        if info.fourcc == FOURCC_DX10
+            && let Some(dx10_header) = dds_bytes.get(128..148)
+        {
+            clean.extend_from_slice(dx10_header);
+        }
+
+        clean.extend_from_slice(&pixel_data);
+        Cow::Owned(clean)
+    } else {
+        Cow::Borrowed(dds_bytes)
+    };
+
+    let dds = image_dds::ddsfile::Dds::read(Cursor::new(&*clean_dds_bytes))
+        .context("Failed to parse DDS file structure")?;
+
+    let max_mips = dds.header.mip_map_count.unwrap_or(1);
+    let level = mip_level.min(max_mips.saturating_sub(1));
+
+    let rgba_img = image_dds::image_from_dds(&dds, level)
+        .context("Failed to decode compressed DDS payload")?;
+
+    Ok(DynamicImage::ImageRgba8(rgba_img))
+}
+
+/// Helper wrapper that opens any supported graphics asset, utilizing specific mipmap level extraction for DDS.
+pub fn open_image_with_specific_mip<P: AsRef<Path>>(
+    path: P,
+    mip_level: u32,
+) -> Result<DynamicImage> {
+    let path_ref = path.as_ref();
+    let ext = path_ref
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if ext == "dds" {
+        let file = std::fs::File::open(path_ref).context("Failed to open DDS file")?;
+        let mmap = unsafe { memmap2::Mmap::map(&file).context("Failed to memory map DDS file")? };
+        decode_dds_bytes_specific_mip(&mmap, mip_level)
+    } else {
+        open_image_with_dds_fallback(path_ref, None)
     }
 }

@@ -182,6 +182,9 @@ export component AppWindow inherits Window {
     in-out property <bool> active_b: false;
     in-out property <bool> active_a: false;
 
+    // Tracking the active mip level selected in the UI
+    in-out property <int> active_mip_level: 0;
+
     in-out property <bool> qc_mode: false;
     in-out property <bool> qc_npot: true;
     in-out property <bool> qc_mipmaps: true;
@@ -203,7 +206,7 @@ export component AppWindow inherits Window {
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
 
-    // --- NEW PREVIEW & SMART FILTER PROPERTIES ---
+    // --- PREVIEW & SMART FILTER PROPERTIES ---
     in-out property <bool> enable_previews: true;
     in-out property <int> preview_quality: 1;
     in-out property <bool> filter_only_npot: false;
@@ -229,6 +232,7 @@ export component AppWindow inherits Window {
     callback row_clicked(int, bool, int, string);
     callback row_checkbox_toggled(int);
     callback channel_toggled();
+    callback mip_level_changed();
     callback trigger_selection_rule(string);
     callback save_settings();
     callback tonemap_toggled();
@@ -390,7 +394,7 @@ export component AppWindow inherits Window {
         close-policy: close-on-click;
         Rectangle {
             background: #2b2d31;
-            border-color: #f23f43;
+            border-color: #1f2023;
             border-width: 1.5px;
             border-radius: 4px;
             VerticalLayout {
@@ -1225,7 +1229,7 @@ export component AppWindow inherits Window {
                                         text: "Expand All";
                                         height: 24px;
                                         primary-color: #5865f2;
-                                        clicked => { root.expand_all_groups(); }
+                                        clicked => { root.export_csv(); }
                                     }
                                     if root.search_method != 3: CustomButton {
                                         text: "Collapse All";
@@ -2007,6 +2011,27 @@ export component AppWindow inherits Window {
                             }
                         }
 
+                        // Added option to select specific Mipmap level
+                        HorizontalLayout {
+                            spacing: 8px;
+                            width: 180px;
+                            Text {
+                                text: "Mip Level:";
+                                vertical-alignment: center;
+                                font-size: 12px;
+                                color: #dcddde;
+                            }
+
+                            SpinBox {
+                                value: root.active_mip_level;
+                                minimum: 0;
+                                maximum: 16;
+                                height: 24px;
+                                width: 100px;
+                                edited(val) => { root.active_mip_level = val; root.mip_level_changed(); }
+                            }
+                        }
+
                         CheckBox {
                             text: "HDR";
                             checked <=> root.tonemap_enabled;
@@ -2202,7 +2227,7 @@ export component AppWindow inherits Window {
                             text: "B";
                             active-color: #5865f2;
                             active <=> root.active_b;
-                            clicked => { root.active_b = !root.active_b; if root.active_b { root.active_r = false; root.active_g = false; root.active_b = false; } root.channel_toggled(); }
+                            clicked => { root.active_b = !root.active_b; if root.active_b { root.active_r = false; root.active_g = false; root.active_a = false; } root.channel_toggled(); }
                         }
 
                         ChannelButton {

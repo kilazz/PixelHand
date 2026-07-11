@@ -4,6 +4,13 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
+/// Represents the texture normal map encoding format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum NormalMapFormat {
+    TangentSpaceRgb, // Standard TS (X in Red, Y in Green, Z in Blue)
+    Bc5RxGy,         // Two-channel (Z is reconstructed on the GPU: Z = sqrt(1 - X^2 - Y^2))
+}
+
 #[derive(Debug, Clone)]
 pub struct QcImageMetadata {
     pub width: u32,
@@ -238,7 +245,11 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
 }
 
 /// Computes normal map vector bounds, verifies normalize properties, and screens for invalid normal length directions.
-pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String, String)> {
+pub fn check_normal_map_integrity(
+    path: &Path,
+    threshold: f32,
+    format: NormalMapFormat,
+) -> Option<(String, String)> {
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(512)).ok()?;
     let processed_img = if img.width() > 512 || img.height() > 512 {
@@ -253,62 +264,90 @@ pub fn check_normal_map_integrity(path: &Path, threshold: f32) -> Option<(String
         return None;
     }
 
-    let mut sum_z = 0.0f32;
-    for pixel in rgb_img.pixels() {
-        let z = (pixel[2] as f32 / 255.0) * 2.0 - 1.0;
-        sum_z += z;
-    }
-    let mean_z = sum_z / total_pixels as f32;
     let mut bad_pixels = 0;
 
-    if mean_z > 0.98 {
-        // Flat normal maps (clipping check on XY unit boundary circle)
-        for pixel in rgb_img.pixels() {
-            let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
-            let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
-            let len_xy = (x * x + y * y).sqrt();
-            let diff_xy = (len_xy - 1.0).max(0.0);
-            if diff_xy > threshold {
-                bad_pixels += 1;
+    match format {
+        NormalMapFormat::TangentSpaceRgb => {
+            let mut sum_z = 0.0f32;
+            for pixel in rgb_img.pixels() {
+                let z = (pixel[2] as f32 / 255.0) * 2.0 - 1.0;
+                sum_z += z;
+            }
+            let mean_z = sum_z / total_pixels as f32;
+
+            if mean_z > 0.98 {
+                // Flat normal maps (clipping check on XY unit boundary circle)
+                for pixel in rgb_img.pixels() {
+                    let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
+                    let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
+                    let len_xy = (x * x + y * y).sqrt();
+                    let diff_xy = (len_xy - 1.0).max(0.0);
+                    if diff_xy > threshold {
+                        bad_pixels += 1;
+                    }
+                }
+                let bad_ratio = bad_pixels as f32 / total_pixels as f32;
+                if bad_ratio > 0.10 {
+                    return Some((
+                        "Bad Normal Map (XY Clip)".to_string(),
+                        format!(
+                            "{:.0}% of pixels exceed unit circle bounds",
+                            bad_ratio * 100.0
+                        ),
+                    ));
+                }
+            } else {
+                // Standard normal maps (unit vector scale validations)
+                for pixel in rgb_img.pixels() {
+                    let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
+                    let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
+                    let z = (pixel[2] as f32 / 255.0) * 2.0 - 1.0;
+                    let magnitude = (x * x + y * y + z * z).sqrt();
+                    let diff = (magnitude - 1.0).abs();
+                    if diff > threshold {
+                        bad_pixels += 1;
+                    }
+                }
+                let bad_ratio = bad_pixels as f32 / total_pixels as f32;
+                if bad_ratio > 0.10 {
+                    return Some((
+                        "Bad Normal Map (Integrity)".to_string(),
+                        format!(
+                            "{:.0}% of pixels have invalid vector lengths",
+                            bad_ratio * 100.0
+                        ),
+                    ));
+                }
+                if mean_z < 0.2 {
+                    return Some((
+                        "Inverted Z / Not Tangent Space".to_string(),
+                        "Z-Axis represents flat or inverted normals".to_string(),
+                    ));
+                }
             }
         }
-        let bad_ratio = bad_pixels as f32 / total_pixels as f32;
-        if bad_ratio > 0.10 {
-            return Some((
-                "Bad Normal Map (XY Clip)".to_string(),
-                format!(
-                    "{:.0}% of pixels exceed unit circle bounds",
-                    bad_ratio * 100.0
-                ),
-            ));
-        }
-    } else {
-        // Standard normal maps (unit vector scale validations)
-        for pixel in rgb_img.pixels() {
-            let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
-            let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
-            let z = (pixel[2] as f32 / 255.0) * 2.0 - 1.0;
-            let magnitude = (x * x + y * y + z * z).sqrt();
-            let diff = (magnitude - 1.0).abs();
-            if diff > threshold {
-                bad_pixels += 1;
+        NormalMapFormat::Bc5RxGy => {
+            // Two-channel BC5/RG format: Blue channel is empty, Z must be reconstructed: Z = sqrt(max(0, 1 - X^2 - Y^2))
+            for pixel in rgb_img.pixels() {
+                let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
+                let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
+
+                // Verify if the 2D vector lies inside or reasonably close to the unit circle
+                let sq_len = x * x + y * y;
+                if sq_len > (1.0 + threshold) {
+                    bad_pixels += 1;
+                }
             }
-        }
-        let bad_ratio = bad_pixels as f32 / total_pixels as f32;
-        if bad_ratio > 0.10 {
-            return Some((
-                "Bad Normal Map (Integrity)".to_string(),
-                format!(
-                    "{:.0}% of pixels have invalid vector lengths",
-                    bad_ratio * 100.0
-                ),
-            ));
-        }
-        if mean_z < 0.2 {
-            return Some((
-                "Inverted Z / Not Tangent Space".to_string(),
-                "Z-Axis represents flat or inverted normals".to_string(),
-            ));
+            let bad_ratio = bad_pixels as f32 / total_pixels as f32;
+            if bad_ratio > 0.10 {
+                return Some((
+                    "Bad BC5 Normal Map".to_string(),
+                    format!(
+                        "{:.0}% of pixels exceed reconstruction limits (X^2 + Y^2 > 1.0)",
+                        bad_ratio * 100.0
+                    ),
+                ));
+            }
         }
     }
     None

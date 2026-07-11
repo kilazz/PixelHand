@@ -2,7 +2,8 @@
 
 use ab_glyph::{FontRef, PxScale};
 use anyhow::{Context, Result};
-use image::{Rgba, RgbaImage, imageops::FilterType};
+use fast_image_resize as fr;
+use image::{Rgba, RgbaImage};
 use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use std::path::{Path, PathBuf};
@@ -72,6 +73,9 @@ pub async fn generate_visual_reports(
             .expect("Failed to construct Font from compiled bytes");
         let layout = SheetLayout::new(scale_factor, font_size as f32);
 
+        // Initialize the fast_image_resize resizer once per thread execution
+        let mut resizer = fr::Resizer::new();
+
         let color_bg = Rgba([45, 45, 45, 255]);
         let color_text_white = Rgba([220, 220, 220, 255]);
         let color_text_gray = Rgba([180, 180, 180, 255]);
@@ -109,19 +113,46 @@ pub async fn generate_visual_reports(
                     let y = layout.padding
                         + row * (layout.thumb_size + layout.text_area + layout.padding);
 
-                    // Decode high-resolution DDS fallback thumbnails securely
+                    // Decode high-resolution textures with fast_image_resize fallback
                     let thumb =
                         match crate::format_loaders::dds_loader::open_image_with_dds_fallback(
                             Path::new(&file.path),
                             Some(layout.thumb_size),
                         ) {
                             Ok(img) => {
-                                let resized = img.resize(
+                                let mut rgba_img = img.to_rgba8();
+
+                                // fast_image_resize v6.0.0 API: directly pass u32 dimensions and borrow mutably
+                                let src_image = fr::images::Image::from_slice_u8(
+                                    rgba_img.width(),
+                                    rgba_img.height(),
+                                    rgba_img.as_mut(),
+                                    fr::PixelType::U8x4,
+                                )
+                                .unwrap();
+
+                                // Construct destination image with direct u32 dimensions
+                                let mut dst_image = fr::images::Image::new(
                                     layout.thumb_size,
                                     layout.thumb_size,
-                                    FilterType::Lanczos3,
+                                    fr::PixelType::U8x4,
                                 );
-                                resized.to_rgba8()
+
+                                // Execute resizing using processor-optimized SIMD architectures
+                                let mut options = fr::ResizeOptions::new();
+                                options = options.resize_alg(fr::ResizeAlg::Interpolation(
+                                    fr::FilterType::Lanczos3,
+                                ));
+                                resizer
+                                    .resize(&src_image, &mut dst_image, Some(&options))
+                                    .unwrap();
+
+                                RgbaImage::from_raw(
+                                    layout.thumb_size,
+                                    layout.thumb_size,
+                                    dst_image.into_vec(),
+                                )
+                                .unwrap()
                             }
                             Err(e) => {
                                 tracing::warn!(

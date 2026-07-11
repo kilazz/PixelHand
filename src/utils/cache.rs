@@ -15,8 +15,12 @@ pub struct DecodedCacheItem {
 pub static DECODED_CACHE: OnceLock<Mutex<HashMap<String, DecodedCacheItem>>> = OnceLock::new();
 
 /// Decodes and returns the requested color channels (R, G, B, A, or Composite)
-/// of the image at the specified path, utilizing a lightweight LRU memory cache.
-pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<image::RgbaImage> {
+/// of the image at the specified path for a specific mipmap level, utilizing a lightweight LRU memory cache.
+pub async fn get_channel_preview_image(
+    path: &str,
+    channel: &str,
+    mip_level: u32,
+) -> Option<image::RgbaImage> {
     let p = PathBuf::from(path);
     if !p.is_file() {
         return None;
@@ -26,22 +30,26 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
         .and_then(|m| m.modified())
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
 
+    // Generate unique cache key incorporating both path and mip level
+    let cache_key = format!("{}_mip{}", path, mip_level);
+
     let cache_mutex = DECODED_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let mut cache = cache_mutex.lock().ok()?;
 
-    if let Some(item) = cache.get_mut(path) {
+    if let Some(item) = cache.get_mut(&cache_key) {
         if item.mtime == current_mtime {
             item.last_accessed = std::time::Instant::now();
         } else {
-            cache.remove(path);
+            cache.remove(&cache_key);
         }
     }
 
-    if !cache.contains_key(path) {
-        // Fall back to opening and decoding the full 1:1 original graphics payload
-        let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(&p, None).ok()?;
+    if !cache.contains_key(&cache_key) {
+        // Call our new dds fallback loader capable of extracting specific mip levels
+        let img =
+            crate::format_loaders::dds_loader::open_image_with_specific_mip(&p, mip_level).ok()?;
 
-        // Evict Least Recently Used (LRU) asset if cache exceeds memory boundaries
+        // Evict Least Recently Used (LRU) asset if cache limit is exceeded
         if cache.len() >= 4 {
             let oldest_key = cache
                 .iter()
@@ -53,7 +61,7 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
         }
 
         cache.insert(
-            path.to_string(),
+            cache_key.clone(),
             DecodedCacheItem {
                 mtime: current_mtime,
                 last_accessed: std::time::Instant::now(),
@@ -62,7 +70,7 @@ pub async fn get_channel_preview_image(path: &str, channel: &str) -> Option<imag
         );
     }
 
-    let cached_item = cache.get(path)?;
+    let cached_item = cache.get(&cache_key)?;
     let rgba = &cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {

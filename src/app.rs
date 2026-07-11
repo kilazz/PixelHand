@@ -334,6 +334,7 @@ pub fn trigger_viewport_update(
     let ui = app_weak.unwrap();
     let channel = utils::ui::get_current_active_channel(&ui).to_string();
     let compare_mode = ui.get_compare_mode();
+    let mip_level = ui.get_active_mip_level() as u32;
     let app_weak_clone = app_weak.clone();
 
     crate::core::tonemapper::TONEMAP_ENABLED.store(ui.get_tonemap_enabled(), Ordering::Relaxed);
@@ -341,14 +342,17 @@ pub fn trigger_viewport_update(
         .store(ui.get_tonemap_operator() as usize, Ordering::Relaxed);
 
     tokio::spawn(async move {
-        if let Some(raw_orig) = utils::cache::get_channel_preview_image(&orig_path, &channel).await
+        if let Some(raw_orig) =
+            utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await
         {
             let app_weak_orig = app_weak_clone.clone();
             let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
                 ui.set_image_original(utils::ui::convert_to_slint_image(&raw_orig));
             });
         }
-        if let Some(raw_dup) = utils::cache::get_channel_preview_image(&dup_path, &channel).await {
+        if let Some(raw_dup) =
+            utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await
+        {
             let app_weak_dup = app_weak_clone.clone();
             let _ = app_weak_dup.upgrade_in_event_loop(move |ui| {
                 ui.set_image_duplicate(utils::ui::convert_to_slint_image(&raw_dup));

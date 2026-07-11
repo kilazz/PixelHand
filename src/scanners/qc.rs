@@ -110,7 +110,16 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                         .filter(|t| !t.is_empty())
                         .any(|t| path_str.contains(&t))
                 };
-                if should_check && let Some((issue, details)) = check_normal_map_integrity(p, 0.15)
+
+                let normal_format = if qc_meta.compression_format.to_uppercase().contains("BC5") {
+                    crate::core::qc::NormalMapFormat::Bc5RxGy
+                } else {
+                    crate::core::qc::NormalMapFormat::TangentSpaceRgb
+                };
+
+                if should_check
+                    && let Some((issue, details)) =
+                        check_normal_map_integrity(p, 0.15, normal_format)
                 {
                     file_issues.push(QcIssueSummary {
                         path: p.to_string_lossy().to_string(),
