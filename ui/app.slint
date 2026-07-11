@@ -930,6 +930,104 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                         }
+
+                                        CheckBox {
+                                            text: "Save Visual Reports";
+                                            checked <=> root.save_visuals;
+                                            height: 20px;
+                                            toggled => { root.save_settings(); }
+                                        }
+
+                                        if root.save_visuals: VerticalLayout {
+                                            spacing: 4px;
+                                            padding-left: 8px;
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: "Cols:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                SpinBox {
+                                                    value <=> root.visuals_columns;
+                                                    minimum: 2;
+                                                    maximum: 12;
+                                                    height: 32px;
+                                                    width: 80px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: "Max:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                SpinBox {
+                                                    value <=> root.visuals_max_count;
+                                                    minimum: 1;
+                                                    maximum: 1000;
+                                                    height: 32px;
+                                                    width: 90px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+
+                                                Rectangle {
+                                                    horizontal-stretch: 1;
+                                                }
+                                            }
+
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Text {
+                                                    text: "Font:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                SpinBox {
+                                                    value <=> root.visuals_font_size;
+                                                    minimum: 8;
+                                                    maximum: 36;
+                                                    height: 32px;
+                                                    width: 80px;
+                                                    edited(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: "Scale:";
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #dcddde;
+                                                    width: 35px;
+                                                }
+
+                                                Slider {
+                                                    value <=> root.visuals_scale;
+                                                    minimum: 1.0;
+                                                    maximum: 3.0;
+                                                    height: 32px;
+                                                    width: 70px;
+                                                    changed(val) => { root.save_settings(); }
+                                                }
+
+                                                Text {
+                                                    text: (Math.round(root.visuals_scale * 10) / 10) + "x";
+                                                    width: 30px;
+                                                    horizontal-alignment: right;
+                                                    vertical-alignment: center;
+                                                    font-size: 11px;
+                                                    color: #ffffff;
+                                                }
+                                            }
+                                        }
                                     }
                                 }
 
