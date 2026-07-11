@@ -158,7 +158,6 @@ export component AppWindow inherits Window {
     in-out property <float> flicker_interval_val <=> Store.flicker_interval_val;
     in-out property <image> histogram_image <=> Store.histogram_image;
 
-    // --- ACCIDENTALLY EXPOSED IN SOME FIND MODES IN IMAGE 1 ---
     in-out property <bool> qc_mode <=> Store.qc_mode;
     in-out property <bool> qc_npot <=> Store.qc_npot;
     in-out property <bool> qc_mipmaps <=> Store.qc_mipmaps;
@@ -383,7 +382,8 @@ export component AppWindow inherits Window {
                                     clicked => { Store.skipped_popup_x = self.absolute-position.x - 120px; Store.skipped_popup_y = self.absolute-position.y + self.height; skipped_popup.show(); }
                                 }
                                 CustomButton {
-                                    text: Store.results_grid_mode ? "List Mode (☰)" : "Grid Mode (⊞)";
+                                    text: Store.results_grid_mode ? "List Mode" : "Grid Mode";
+                                    icon-type: Store.results_grid_mode ? 2 : 3; // Swapped dynamically between Vector List and Grid
                                     height: 24px;
                                     clicked => { Store.results_grid_mode = !Store.results_grid_mode; }
                                 }
@@ -866,20 +866,31 @@ export component AppWindow inherits Window {
                                 padding: 10px;
                                 spacing: 4px;
                                 HorizontalLayout {
+                                    spacing: 8px; // Added spacing [1]
                                     Text {
                                         text: "Specification";
-                                        width: 120px;
+                                        width: 130px; // Dynamic proportional alignment [1]
                                         font-weight: 700;
                                         color: #949ba4;
                                         font-size: 12px;
                                     }
 
+                                    Rectangle {
+                                        width: 1px;
+                                        background: transparent; // Header separator spacer [2]
+                                    }
+
                                     Text {
                                         text: "Original [Best]";
-                                        width: 120px;
                                         font-weight: 700;
                                         color: #f0b132;
                                         font-size: 12px;
+                                        horizontal-stretch: 1; // Elastic stretch [1]
+                                    }
+
+                                    Rectangle {
+                                        width: 1px;
+                                        background: transparent; // Header separator spacer [2]
                                     }
 
                                     Text {
@@ -887,6 +898,7 @@ export component AppWindow inherits Window {
                                         font-weight: 700;
                                         color: #dcddde;
                                         font-size: 12px;
+                                        horizontal-stretch: 1; // Elastic stretch [1]
                                     }
                                 }
 

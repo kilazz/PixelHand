@@ -27,19 +27,29 @@ export component SpecsRow {
         spacing: 8px;
         Text {
             text: name;
-            width: 120px;
+            width: 130px; // Slightly expanded width to prevent clipping long labels [1]
             color: #949ba4;
             font-size: 12px;
             vertical-alignment: center;
         }
 
+        Rectangle {
+            width: 1px;
+            background: #1f2023; // Subtle divider between labels and data [2]
+        }
+
         Text {
             text: val1;
-            color: #dcddde;
+            color: #f0b132; // Color-coded to match the gold "Original [Best]" header [1, 2]
             font-size: 12px;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 1;
+        }
+
+        Rectangle {
+            width: 1px;
+            background: #1f2023; // Subtle visual vertical separator between columns [2]
         }
 
         Text {
