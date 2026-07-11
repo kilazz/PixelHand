@@ -1,0 +1,244 @@
+// ui/components/list_row.slint
+
+import { CheckBox } from "std-widgets.slint";
+import { ResultsRow } from "../structs.slint";
+import { InteractiveThumbnail } from "./thumbnail.slint";
+import { Store } from "../store.slint";
+
+export component ListRow inherits Rectangle {
+    // Renamed from 'row' to 'row-data' to avoid Slint keyword conflicts
+    in property <ResultsRow> row-data;
+
+    callback row_clicked(bool, int, string);
+    callback checkbox_toggled();
+    callback right_clicked(length, length);
+    callback channel_hovered(string, string);
+
+    height: row-data.is_header ? 28px : (Store.list_preview_size + 8px);
+    background: row-data.is_header ? #1e1f22 : (row-data.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
+    border-color: #1f2023;
+    border-width: 1px;
+
+    main_row_ta := TouchArea {
+        x: 28px + 24px + 8px + Store.list_preview_size + 8px;
+        width: parent.width - self.x;
+        height: 100%;
+        clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
+        pointer-event(evt) => {
+            if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                if (!row-data.is_header) { root.right_clicked(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+            }
+        }
+    }
+
+    if row-data.is_header: TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.row_clicked(true, row-data.group_index, row-data.path); }
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 8px;
+            alignment: space-between;
+            Text {
+                text: row-data.is_qc ? ((row-data.is_checked ? "▶ " : "▼ ") + "QC Issue: " + row-data.hash_or_issue) : ((row-data.is_checked ? "▶ " : "▼ ") + "Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
+                color: #949ba4;
+                font-size: 12px;
+                font-weight: 700;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+
+            Text {
+                text: row-data.size_str;
+                color: #949ba4;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if !row-data.is_header: HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 8px;
+        spacing: 0px;
+
+        CheckBox {
+            checked: row-data.is_checked;
+            toggled => { root.checkbox_toggled(); }
+            width: 24px;
+        }
+
+        Rectangle {
+            width: 8px;
+        }
+
+        if Store.enable_previews: InteractiveThumbnail {
+            source: row-data.thumbnail;
+            path: row-data.path;
+            show_corners: true;
+            checkerboard: Store.checkerboard_pattern;
+            width: Store.list_preview_size;
+            height: Store.list_preview_size;
+            corner_hovered(path, chan) => { root.channel_hovered(path, chan); }
+            clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
+        }
+        if Store.enable_previews: Rectangle {
+            width: 8px;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 0px;
+                width: 100%;
+                height: 100%;
+
+                HorizontalLayout {
+                    width: Store.enable_previews ? (Store.col_file_w - Store.list_preview_size - 16px) : (Store.col_file_w - 32px);
+                    Text {
+                        text: row-data.name;
+                        color: #dcddde;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                Rectangle {
+                    width: 8px;
+                }
+
+                if Store.search_method != 3: HorizontalLayout {
+                    spacing: 0px;
+                    HorizontalLayout {
+                        width: Store.col_score_w;
+                        Text {
+                            text: row-data.is_best ? "[Best]" : row-data.score_or_detail;
+                            color: row-data.is_best ? #f0b132 : #dcddde;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            width: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        width: Store.col_path_w;
+                        Text {
+                            text: row-data.path;
+                            color: #949ba4;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        Text {
+                            text: row-data.meta_str;
+                            color: #949ba4;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if Store.search_method == 3: HorizontalLayout {
+                    spacing: 0px;
+                    HorizontalLayout {
+                        width: Store.col_format_w;
+                        Text {
+                            text: row-data.format_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        width: Store.col_dimensions_w;
+                        Text {
+                            text: row-data.dimensions_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        width: Store.col_mipmaps_w;
+                        Text {
+                            text: row-data.mipmaps_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        width: Store.col_cubemap_w;
+                        Text {
+                            text: row-data.cubemap_str;
+                            color: row-data.cubemap_str == "YES" ? #f0b132 : #dcddde;
+                            font-weight: row-data.cubemap_str == "YES" ? 700 : 400;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        width: Store.col_size_w;
+                        Text {
+                            text: row-data.size_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        Text {
+                            text: row-data.path;
+                            color: #5865f2;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

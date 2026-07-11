@@ -1,0 +1,51 @@
+// ui/components/context_menu.slint
+
+import { MenuItem } from "./buttons.slint";
+import { Store } from "../store.slint";
+
+export component ContextMenuPopup inherits PopupWindow {
+    width: 160px;
+    close-policy: close-on-click;
+
+    Rectangle {
+        background: #2b2d31;
+        border-color: #1f2023;
+        border-width: 1px;
+        border-radius: 4px;
+
+        VerticalLayout {
+            padding: 4px;
+            spacing: 2px;
+
+            MenuItem {
+                text: "Open File";
+                clicked => {
+                    Store.context_menu_action("open", Store.context_hovered_path);
+                    root.close();
+                }
+            }
+
+            MenuItem {
+                text: "Show in Explorer";
+                clicked => {
+                    Store.context_menu_action("explore", Store.context_hovered_path);
+                    root.close();
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: #1f2023;
+            }
+
+            MenuItem {
+                text: "Move to Trash";
+                text-color: #f23f43;
+                clicked => {
+                    Store.context_menu_action("trash", Store.context_hovered_path);
+                    root.close();
+                }
+            }
+        }
+    }
+}

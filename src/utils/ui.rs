@@ -1,6 +1,6 @@
 // src/utils/ui.rs
 
-use crate::app::{AppWindow, GridRow, ResultsRow, SelectedFile};
+use crate::app::{GridRow, ResultsRow, SelectedFile, Store};
 use crate::state::{AppState, DuplicateFileSummary, ResultsRowData};
 use slint::{ModelRc, SharedPixelBuffer, VecModel};
 use std::path::Path;
@@ -150,14 +150,14 @@ pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize>
 }
 
 /// Synchronizes the active Slint list results and grid representations based on filters and collapse states.
-pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
-    let search_query = ui.get_results_search_query().to_string().to_lowercase();
-    let min_sim = ui.get_results_min_similarity();
+pub fn update_results_ui(store: &Store, state: &AppState) {
+    let search_query = store.get_results_search_query().to_string().to_lowercase();
+    let min_sim = store.get_results_min_similarity();
 
-    let filter_only_npot = ui.get_filter_only_npot();
-    let filter_uncompressed = ui.get_filter_only_uncompressed();
-    let filter_missing_mips = ui.get_filter_only_missing_mips();
-    let filter_cubemaps = ui.get_filter_only_cubemaps();
+    let filter_only_npot = store.get_filter_only_npot();
+    let filter_uncompressed = store.get_filter_only_uncompressed();
+    let filter_missing_mips = store.get_filter_only_missing_mips();
+    let filter_cubemaps = store.get_filter_only_cubemaps();
 
     let has_filter = !search_query.is_empty()
         || filter_only_npot
@@ -239,19 +239,19 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
         grid_row_results.push(row);
     }
 
-    ui.set_results(ModelRc::from(Rc::new(VecModel::from(slint_rows))));
-    ui.set_grid_row_results(ModelRc::from(Rc::new(VecModel::from(grid_row_results))));
+    store.set_results(ModelRc::from(Rc::new(VecModel::from(slint_rows))));
+    store.set_grid_row_results(ModelRc::from(Rc::new(VecModel::from(grid_row_results))));
 }
 
 /// Evaluates which radio/toggle channel matches active pixel viewport options.
-pub fn get_current_active_channel(ui: &AppWindow) -> &'static str {
-    if ui.get_active_r() {
+pub fn get_current_active_channel(store: &Store) -> &'static str {
+    if store.get_active_r() {
         "R"
-    } else if ui.get_active_g() {
+    } else if store.get_active_g() {
         "G"
-    } else if ui.get_active_b() {
+    } else if store.get_active_b() {
         "B"
-    } else if ui.get_active_a() {
+    } else if store.get_active_a() {
         "A"
     } else {
         "RGB"

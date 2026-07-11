@@ -117,11 +117,12 @@ pub fn run_gui() -> Result<()> {
     let app = AppWindow::new().context("Failed to initialize Slint UI Window")?;
     let _ = APP_HANDLE.set(app.as_weak());
 
+    let store = app.global::<crate::app::Store>(); // Retrieve the global Store handle
     let loaded_settings = utils::settings::load_settings().unwrap_or_default();
     apply_settings_to_ui(&app, &loaded_settings);
 
     let checkerboard = utils::ui::generate_checkerboard();
-    app.set_checkerboard_pattern(checkerboard);
+    store.set_checkerboard_pattern(checkerboard);
 
     crate::core::tonemapper::TONEMAP_ENABLED
         .store(loaded_settings.tonemap_enabled, Ordering::Relaxed);
@@ -136,7 +137,8 @@ pub fn run_gui() -> Result<()> {
         let logs_to_flush = std::mem::take(&mut *q);
         if !logs_to_flush.is_empty() {
             let _ = app_weak_init.upgrade_in_event_loop(move |ui| {
-                let mut current = ui.get_console_log().to_string();
+                let store = ui.global::<crate::app::Store>();
+                let mut current = store.get_console_log().to_string();
                 for line in logs_to_flush {
                     let cleaned = clean_sample_log(line);
                     if current.is_empty() {
@@ -145,7 +147,7 @@ pub fn run_gui() -> Result<()> {
                         current = format!("{}\n{}", current, cleaned);
                     }
                 }
-                ui.set_console_log(current.into());
+                store.set_console_log(current.into());
             });
         }
     }
@@ -178,7 +180,8 @@ pub fn run_gui() -> Result<()> {
 
             let app_clone = app_weak_log.clone();
             let _ = app_clone.upgrade_in_event_loop(move |ui| {
-                let current_log = ui.get_console_log().to_string();
+                let store = ui.global::<crate::app::Store>();
+                let current_log = store.get_console_log().to_string();
                 let mut lines: Vec<&str> = current_log.lines().collect();
 
                 for p in &pending {
@@ -191,7 +194,7 @@ pub fn run_gui() -> Result<()> {
                     lines = lines[start..].to_vec();
                 }
 
-                ui.set_console_log(lines.join("\n").into());
+                store.set_console_log(lines.join("\n").into());
             });
         }
     });
@@ -207,15 +210,17 @@ pub fn run_gui() -> Result<()> {
             elapsed_ms += tick_rate_ms;
 
             if let Some(ui) = app_weak_flicker.upgrade() {
-                let target_duration = ui.get_flicker_interval_val() as u64;
+                let store = ui.global::<crate::app::Store>();
+                let target_duration = store.get_flicker_interval_val() as u64;
 
                 // If elapsed time exceeds the current slider value
                 if elapsed_ms >= target_duration.max(50) {
                     elapsed_ms = 0; // Reset timer
 
-                    if ui.get_compare_mode() == 4 {
+                    if store.get_compare_mode() == 4 {
                         let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
-                            ui.set_flicker_show_duplicate(!ui.get_flicker_show_duplicate());
+                            let store = ui.global::<crate::app::Store>();
+                            store.set_flicker_show_duplicate(!store.get_flicker_show_duplicate());
                         });
                     }
                 }
@@ -337,8 +342,9 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
         {
             Ok(_) => {
                 let _ = app_weak.upgrade_in_event_loop(|ui| {
-                    ui.set_status_text("AI models verified. System ready.".into());
-                    ui.set_progress(1.0);
+                    let store = ui.global::<crate::app::Store>();
+                    store.set_status_text("AI models verified. System ready.".into());
+                    store.set_progress(1.0);
                 });
             }
             Err(e) => {
@@ -346,8 +352,9 @@ fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
                 tracing::error!("Model download failed: {}", err_msg);
                 let err_msg_clone = err_msg.clone();
                 let _ = app_weak.upgrade_in_event_loop(move |ui| {
-                    ui.set_is_scanning(false);
-                    ui.set_status_text(
+                    let store = ui.global::<crate::app::Store>();
+                    store.set_is_scanning(false);
+                    store.set_status_text(
                         format!("Model verification failed: {}", err_msg_clone).into(),
                     );
                 });
@@ -363,14 +370,15 @@ pub fn trigger_viewport_update(
     dup_path: String,
 ) {
     let ui = app_weak.unwrap();
-    let channel = utils::ui::get_current_active_channel(&ui).to_string();
-    let compare_mode = ui.get_compare_mode();
-    let mip_level = ui.get_active_mip_level() as u32;
+    let store = ui.global::<crate::app::Store>(); // Obtained the global Store handle
+    let channel = utils::ui::get_current_active_channel(&store).to_string();
+    let compare_mode = store.get_compare_mode();
+    let mip_level = store.get_active_mip_level() as u32;
     let app_weak_clone = app_weak.clone();
 
-    crate::core::tonemapper::TONEMAP_ENABLED.store(ui.get_tonemap_enabled(), Ordering::Relaxed);
+    crate::core::tonemapper::TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
     crate::core::tonemapper::TONEMAP_OPERATOR
-        .store(ui.get_tonemap_operator() as usize, Ordering::Relaxed);
+        .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
 
     tokio::spawn(async move {
         let raw_orig =
@@ -396,27 +404,31 @@ pub fn trigger_viewport_update(
         if let Some(img) = raw_orig {
             let app_weak_orig = app_weak_clone.clone();
             let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
-                ui.set_image_original(utils::ui::convert_to_slint_image(&img));
+                let store = ui.global::<crate::app::Store>();
+                store.set_image_original(utils::ui::convert_to_slint_image(&img));
             });
         }
         if let Some(img) = raw_dup {
             let app_weak_dup = app_weak_clone.clone();
             let _ = app_weak_dup.upgrade_in_event_loop(move |ui| {
-                ui.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
+                let store = ui.global::<crate::app::Store>();
+                store.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
             });
         }
 
         if let Some(diff) = raw_diff {
             let app_weak_diff = app_weak_clone.clone();
             let _ = app_weak_diff.upgrade_in_event_loop(move |ui| {
-                ui.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
+                let store = ui.global::<crate::app::Store>();
+                store.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
             });
         }
 
         if let Some(hist) = hist_img {
             let app_weak_hist = app_weak_clone.clone();
             let _ = app_weak_hist.upgrade_in_event_loop(move |ui| {
-                ui.set_histogram_image(utils::ui::convert_to_slint_image(&hist));
+                let store = ui.global::<crate::app::Store>();
+                store.set_histogram_image(utils::ui::convert_to_slint_image(&hist));
             });
         }
     });

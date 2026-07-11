@@ -180,60 +180,60 @@ pub struct ScanParams {
 }
 
 impl ScanParams {
-    /// Compiles Slint UI properties into thread-safe ScanParams.
-    pub fn from_ui(
-        ui: &crate::app::AppWindow,
+    /// Compiles Slint UI properties from the global Store singleton into thread-safe ScanParams.
+    pub fn from_store(
+        store: &crate::app::Store,
         cancel_token: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let mut extensions = Vec::new();
 
-        if ui.get_ext_png() {
+        if store.get_ext_png() {
             extensions.push(".png".to_string());
         }
-        if ui.get_ext_jpg() {
+        if store.get_ext_jpg() {
             extensions.push(".jpg".to_string());
             extensions.push(".jpeg".to_string());
         }
-        if ui.get_ext_tga() {
+        if store.get_ext_tga() {
             extensions.push(".tga".to_string());
         }
-        if ui.get_ext_dds() {
+        if store.get_ext_dds() {
             extensions.push(".dds".to_string());
         }
-        if ui.get_ext_bmp() {
+        if store.get_ext_bmp() {
             extensions.push(".bmp".to_string());
         }
-        if ui.get_ext_exr() {
+        if store.get_ext_exr() {
             extensions.push(".exr".to_string());
         }
-        if ui.get_ext_hdr() {
+        if store.get_ext_hdr() {
             extensions.push(".hdr".to_string());
         }
-        if ui.get_ext_tif() {
+        if store.get_ext_tif() {
             extensions.push(".tif".to_string());
             extensions.push(".tiff".to_string());
         }
-        if ui.get_ext_webp() {
+        if store.get_ext_webp() {
             extensions.push(".webp".to_string());
         }
-        if ui.get_ext_gif() {
+        if store.get_ext_gif() {
             extensions.push(".gif".to_string());
         }
-        if ui.get_ext_psd() {
+        if store.get_ext_psd() {
             extensions.push(".psd".to_string());
         }
-        if ui.get_ext_jxl() {
+        if store.get_ext_jxl() {
             extensions.push(".jxl".to_string());
         }
-        if ui.get_ext_heic() {
+        if store.get_ext_heic() {
             extensions.push(".heic".to_string());
             extensions.push(".heif".to_string());
         }
-        if ui.get_ext_avif() {
+        if store.get_ext_avif() {
             extensions.push(".avif".to_string());
         }
 
-        let execution_provider = match ui.get_execution_provider() {
+        let execution_provider = match store.get_execution_provider() {
             1 => "DirectML".to_string(),
             2 => "CUDA".to_string(),
             3 => "TensorRT".to_string(),
@@ -242,56 +242,56 @@ impl ScanParams {
         };
 
         Self {
-            dir_a: ui.get_dir_a().to_string(),
-            dir_b: ui.get_dir_b().to_string(),
-            query_text: ui.get_query_text().to_string(),
-            similarity: ui.get_similarity_threshold(),
-            batch_size: ui.get_batch_size() as usize,
-            search_method: ui.get_search_method(),
+            dir_a: store.get_dir_a().to_string(),
+            dir_b: store.get_dir_b().to_string(),
+            query_text: store.get_query_text().to_string(),
+            similarity: store.get_similarity_threshold(),
+            batch_size: store.get_batch_size() as usize,
+            search_method: store.get_search_method(),
             execution_provider,
 
-            qc_mode: ui.get_qc_mode(),
-            qc_npot: ui.get_qc_npot(),
-            qc_mipmaps: ui.get_qc_mipmaps(),
-            qc_block_align: ui.get_qc_block_align(),
-            qc_bit_depth: ui.get_qc_bit_depth(),
-            qc_solid_colors: ui.get_qc_solid_colors(),
-            qc_normals: ui.get_qc_normals(),
-            qc_normals_tags: ui.get_qc_normals_tags().to_string(),
+            qc_mode: store.get_qc_mode(),
+            qc_npot: store.get_qc_npot(),
+            qc_mipmaps: store.get_qc_mipmaps(),
+            qc_block_align: store.get_qc_block_align(),
+            qc_bit_depth: store.get_qc_bit_depth(),
+            qc_solid_colors: store.get_qc_solid_colors(),
+            qc_normals: store.get_qc_normals(),
+            qc_normals_tags: store.get_qc_normals_tags().to_string(),
 
             extensions,
             cancel_token,
 
-            save_visuals: ui.get_save_visuals(),
-            visuals_columns: ui.get_visuals_columns() as usize,
-            visuals_max_count: ui.get_visuals_max_count() as usize,
-            visuals_font_size: ui.get_visuals_font_size() as usize,
-            visuals_scale: ui.get_visuals_scale(),
+            save_visuals: store.get_save_visuals(),
+            visuals_columns: store.get_visuals_columns() as usize,
+            visuals_max_count: store.get_visuals_max_count() as usize,
+            visuals_font_size: store.get_visuals_font_size() as usize,
+            visuals_scale: store.get_visuals_scale(),
 
-            prep_luminance: ui.get_prep_luminance(),
-            prep_channels: ui.get_prep_channels(),
-            prep_r: ui.get_prep_r(),
-            prep_g: ui.get_prep_g(),
-            prep_b: ui.get_prep_b(),
-            prep_a: ui.get_prep_a(),
-            prep_tags: ui.get_prep_tags().to_string(),
-            prep_ignore_solid: ui.get_prep_ignore_solid(),
+            prep_luminance: store.get_prep_luminance(),
+            prep_channels: store.get_prep_channels(),
+            prep_r: store.get_prep_r(),
+            prep_g: store.get_prep_g(),
+            prep_b: store.get_prep_b(),
+            prep_a: store.get_prep_a(),
+            prep_tags: store.get_prep_tags().to_string(),
+            prep_ignore_solid: store.get_prep_ignore_solid(),
 
-            excluded_folders: ui.get_excluded_folders().to_string(),
-            qc_match_by_stem: ui.get_qc_match_by_stem(),
-            qc_hide_same_resolution: ui.get_qc_hide_same_resolution(),
+            excluded_folders: store.get_excluded_folders().to_string(),
+            qc_match_by_stem: store.get_qc_match_by_stem(),
+            qc_hide_same_resolution: store.get_qc_hide_same_resolution(),
 
-            qc_check_bloat: ui.get_qc_check_bloat(),
-            qc_check_alpha: ui.get_qc_check_alpha(),
-            qc_check_colorspace: ui.get_qc_check_colorspace(),
-            qc_check_compression: ui.get_qc_check_compression(),
+            qc_check_bloat: store.get_qc_check_bloat(),
+            qc_check_alpha: store.get_qc_check_alpha(),
+            qc_check_colorspace: store.get_qc_check_colorspace(),
+            qc_check_compression: store.get_qc_check_compression(),
 
-            search_precision: ui.get_search_precision(),
-            ai_model: ui.get_ai_model(),
+            search_precision: store.get_search_precision(),
+            ai_model: store.get_ai_model(),
 
-            custom_model_path: ui.get_custom_model_path().to_string(),
-            custom_model_arch: ui.get_custom_model_arch(),
-            custom_model_dim: ui.get_custom_model_dim(),
+            custom_model_path: store.get_custom_model_path().to_string(),
+            custom_model_arch: store.get_custom_model_arch(),
+            custom_model_dim: store.get_custom_model_dim(),
 
             on_progress: None,
         }

@@ -6,7 +6,7 @@ use slint::{ModelRc, VecModel};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use crate::app::{AppWindow, SelectedFile};
+use crate::app::{AppWindow, SelectedFile, Store};
 use crate::scanners;
 use crate::state::AppState;
 use crate::utils;
@@ -28,35 +28,43 @@ pub fn register_callbacks(
 /// Binds UI handlers responsible for folder, reference image, and custom model selection.
 fn bind_directory_selection(app: &AppWindow) {
     let app_weak_a = app.as_weak();
-    app.on_select_folder_a(move || {
+    let store = app.global::<Store>();
+
+    store.on_select_folder_a(move || {
         if let Some(folder) = rfd::FileDialog::new()
             .set_title("Select Folder A")
             .pick_folder()
         {
             let path_str = folder.to_string_lossy().to_string();
             if let Some(ui) = app_weak_a.upgrade() {
-                ui.set_dir_a(path_str.into());
-                utils::settings::save_settings(&ui);
+                let store = ui.global::<Store>();
+                store.set_dir_a(path_str.into());
+                utils::settings::save_settings(&store);
             }
         }
     });
 
     let app_weak_b = app.as_weak();
-    app.on_select_folder_b(move || {
+    let store = app.global::<Store>();
+
+    store.on_select_folder_b(move || {
         if let Some(folder) = rfd::FileDialog::new()
             .set_title("Select Folder B")
             .pick_folder()
         {
             let path_str = folder.to_string_lossy().to_string();
             if let Some(ui) = app_weak_b.upgrade() {
-                ui.set_dir_b(path_str.into());
-                utils::settings::save_settings(&ui);
+                let store = ui.global::<Store>();
+                store.set_dir_b(path_str.into());
+                utils::settings::save_settings(&store);
             }
         }
     });
 
     let app_weak_ref = app.as_weak();
-    app.on_select_reference_image(move || {
+    let store = app.global::<Store>();
+
+    store.on_select_reference_image(move || {
         if let Some(file) = rfd::FileDialog::new()
             .set_title("Select Reference Image")
             .add_filter(
@@ -70,23 +78,27 @@ fn bind_directory_selection(app: &AppWindow) {
         {
             let path_str = file.to_string_lossy().to_string();
             if let Some(ui) = app_weak_ref.upgrade() {
-                ui.set_query_text(path_str.into());
-                ui.set_search_method(2);
-                utils::settings::save_settings(&ui);
+                let store = ui.global::<Store>();
+                store.set_query_text(path_str.into());
+                store.set_search_method(2);
+                utils::settings::save_settings(&store);
             }
         }
     });
 
     let app_weak_custom = app.as_weak();
-    app.on_select_custom_model(move || {
+    let store = app.global::<Store>();
+
+    store.on_select_custom_model(move || {
         if let Some(folder) = rfd::FileDialog::new()
             .set_title("Select Custom ONNX Model Directory")
             .pick_folder()
         {
             let path_str = folder.to_string_lossy().to_string();
             if let Some(ui) = app_weak_custom.upgrade() {
-                ui.set_custom_model_path(path_str.into());
-                utils::settings::save_settings(&ui);
+                let store = ui.global::<Store>();
+                store.set_custom_model_path(path_str.into());
+                utils::settings::save_settings(&store);
             }
         }
     });
@@ -101,30 +113,33 @@ fn bind_scan_execution(
     let app_weak_scan = app.as_weak();
     let state_clone = state.clone();
     let cancel_token_clone = cancel_token.clone();
+    let store = app.global::<Store>();
 
-    app.on_run_scan(move || {
+    store.on_run_scan(move || {
         let app_copy = app_weak_scan.clone();
         let state_copy = state_clone.clone();
         let ui = app_copy.unwrap();
+        let store = ui.global::<Store>();
 
-        utils::settings::save_settings(&ui);
+        utils::settings::save_settings(&store);
         cancel_token_clone.store(false, Ordering::Relaxed);
 
-        let mut params = scanners::ScanParams::from_ui(&ui, cancel_token_clone.clone());
+        let mut params = scanners::ScanParams::from_store(&store, cancel_token_clone.clone());
 
         let app_weak_progress = app_copy.clone();
         params.on_progress = Some(Arc::new(move |prog, current, total| {
             let _ = app_weak_progress.upgrade_in_event_loop(move |ui| {
-                ui.set_progress(prog);
-                ui.set_status_text(
+                let store = ui.global::<Store>();
+                store.set_progress(prog);
+                store.set_status_text(
                     format!("Processing assets ({} / {})...", current, total).into(),
                 );
             });
         }));
 
-        ui.set_is_scanning(true);
-        ui.set_status_text("Scanning assets...".into());
-        ui.set_progress(0.0);
+        store.set_is_scanning(true);
+        store.set_status_text("Scanning assets...".into());
+        store.set_progress(0.0);
         tracing::info!("Starting scan on directory: {}", params.dir_a);
 
         let params_for_task = params.clone();
@@ -139,17 +154,19 @@ fn bind_scan_execution(
                 .await
             {
                 let _ = app_weak_download.upgrade_in_event_loop(move |ui| {
-                    ui.set_is_scanning(false);
-                    ui.set_status_text(format!("AI Model download failed: {}", e).into());
+                    let store = ui.global::<Store>();
+                    store.set_is_scanning(false);
+                    store.set_status_text(format!("AI Model download failed: {}", e).into());
                 });
                 return;
             }
 
             if let Some(ref_ui) = app_weak_download.upgrade() {
+                let store = ref_ui.global::<Store>();
                 crate::core::tonemapper::TONEMAP_ENABLED
-                    .store(ref_ui.get_tonemap_enabled(), Ordering::Relaxed);
+                    .store(store.get_tonemap_enabled(), Ordering::Relaxed);
                 crate::core::tonemapper::TONEMAP_OPERATOR
-                    .store(ref_ui.get_tonemap_operator() as usize, Ordering::Relaxed);
+                    .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
             }
 
             let scan_result = scanners::execute_scan(params_for_task.clone()).await;
@@ -158,7 +175,8 @@ fn bind_scan_execution(
                 && let Ok((ref groups, _)) = scan_result
             {
                 let _ = app_copy.upgrade_in_event_loop(|ui| {
-                    ui.set_status_text("Generating contact sheet reports...".into());
+                    let store = ui.global::<Store>();
+                    store.set_status_text("Generating contact sheet reports...".into());
                 });
 
                 if let Ok(app_dir) = crate::utils::settings::get_portable_app_data_dir() {
@@ -179,8 +197,9 @@ fn bind_scan_execution(
             }
 
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
-                ui.set_is_scanning(false);
-                ui.set_progress(1.0);
+                let store = ui.global::<Store>();
+                store.set_is_scanning(false);
+                store.set_progress(1.0);
                 match scan_result {
                     Ok((groups, rows)) => {
                         let mut state_lock = state_copy.safe_lock();
@@ -188,18 +207,18 @@ fn bind_scan_execution(
                         state_lock.groups = groups;
                         state_lock.results = rows;
 
-                        utils::ui::update_results_ui(&ui, &state_lock);
+                        utils::ui::update_results_ui(&store, &state_lock);
 
                         let msg = if params_for_task.save_visuals {
                             "Scan and visual reports finished successfully!"
                         } else {
                             "Scan finished successfully!"
                         };
-                        ui.set_status_text(msg.into());
+                        store.set_status_text(msg.into());
                         tracing::info!("Scan completed.");
                     }
                     Err(e) => {
-                        ui.set_status_text(format!("Scan stopped: {}", e).into());
+                        store.set_status_text(format!("Scan stopped: {}", e).into());
                         tracing::warn!("Scan interrupted: {}", e);
                     }
                 }
@@ -208,7 +227,8 @@ fn bind_scan_execution(
     });
 
     let cancel_token_cancel = cancel_token.clone();
-    app.on_cancel_scan(move || {
+    let store = app.global::<Store>();
+    store.on_cancel_scan(move || {
         cancel_token_cancel.store(true, Ordering::Relaxed);
         tracing::warn!("User requested scan cancellation. Waiting for threads to stop...");
     });
@@ -218,7 +238,9 @@ fn bind_scan_execution(
 fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let app_weak_ctx = app.as_weak();
     let state_clone_ctx = state.clone();
-    app.on_context_menu_action(move |action, path| {
+    let store = app.global::<Store>();
+
+    store.on_context_menu_action(move |action, path| {
         let path_str = path.to_string();
         if path_str.is_empty() {
             return;
@@ -246,7 +268,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         Ok(_) => {
                             tracing::info!("Moved to trash via context menu: {}", path_str);
                             if let Some(ui) = app_weak_ctx.upgrade() {
-                                ui.set_status_text(
+                                let store = ui.global::<Store>();
+                                store.set_status_text(
                                     format!(
                                         "Moved to trash: {}",
                                         p.file_name().unwrap_or_default().to_string_lossy()
@@ -255,7 +278,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                                 );
                                 let mut lock = state_clone_ctx.safe_lock();
                                 lock.results.retain(|r| r.path != path_str);
-                                utils::ui::update_results_ui(&ui, &lock);
+                                utils::ui::update_results_ui(&store, &lock);
                             }
                         }
                         Err(e) => tracing::error!("Failed to move to trash: {}", e),
@@ -266,7 +289,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         }
     });
 
-    app.on_open_file_in_viewer(move |path| {
+    let store = app.global::<Store>();
+    store.on_open_file_in_viewer(move |path| {
         let path_str = path.to_string();
         if !path_str.is_empty() {
             tracing::info!("Opening file in default viewer: {}", path_str);
@@ -278,7 +302,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let app_weak_checkbox = app.as_weak();
     let state_clone_cb = state.clone();
-    app.on_row_checkbox_toggled(move |idx| {
+    let store = app.global::<Store>();
+    store.on_row_checkbox_toggled(move |idx| {
         let mut lock = state_clone_cb.safe_lock();
         if let Some(abs_idx) = utils::ui::get_absolute_index(&lock, idx as usize)
             && let Some(row) = lock.results.get_mut(abs_idx)
@@ -286,13 +311,15 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             row.is_checked = !row.is_checked;
         }
         if let Some(ui) = app_weak_checkbox.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
     let app_weak_clicked = app.as_weak();
     let state_clone_click = state.clone();
-    app.on_row_clicked(move |_idx, is_header, group_idx, path| {
+    let store = app.global::<Store>();
+    store.on_row_clicked(move |_idx, is_header, group_idx, path| {
         let app_copy = app_weak_clicked.clone();
 
         if is_header {
@@ -303,7 +330,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 lock.collapsed_groups.insert(group_idx);
             }
             if let Some(ui) = app_copy.upgrade() {
-                utils::ui::update_results_ui(&ui, &lock);
+                let store = ui.global::<Store>();
+                utils::ui::update_results_ui(&store, &lock);
             }
             return;
         }
@@ -313,6 +341,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
         let group = lock.groups.get(group_idx as usize);
         let ui = app_copy.unwrap();
+        let store = ui.global::<Store>();
 
         if group.is_none() {
             if let Ok(meta) = crate::core::qc::extract_qc_metadata(std::path::Path::new(&path_str))
@@ -348,15 +377,15 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                     path: slint::SharedString::from(&path_str),
                 };
 
-                ui.set_original_meta(file_meta.clone());
-                ui.set_duplicate_meta(file_meta);
-                ui.set_max_available_mips(meta.mipmap_count as i32);
-                ui.set_active_mip_level(0);
+                store.set_original_meta(file_meta.clone());
+                store.set_duplicate_meta(file_meta);
+                store.set_max_available_mips(meta.mipmap_count as i32);
+                store.set_active_mip_level(0);
             }
 
-            ui.set_selected_group_files(ModelRc::from(std::rc::Rc::new(
-                VecModel::from(Vec::new()),
-            )));
+            store.set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(
+                Vec::new(),
+            ))));
 
             crate::app::trigger_viewport_update(
                 app_weak_clicked.clone(),
@@ -376,10 +405,10 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             None => return,
         };
 
-        ui.set_original_meta(utils::ui::build_selected_file_meta(original, true));
-        ui.set_duplicate_meta(utils::ui::build_selected_file_meta(duplicate, false));
-        ui.set_max_available_mips(original.mipmap_count as i32);
-        ui.set_active_mip_level(0);
+        store.set_original_meta(utils::ui::build_selected_file_meta(original, true));
+        store.set_duplicate_meta(utils::ui::build_selected_file_meta(duplicate, false));
+        store.set_max_available_mips(original.mipmap_count as i32);
+        store.set_active_mip_level(0);
 
         let mut group_files = Vec::new();
         for row in &lock.results {
@@ -387,7 +416,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 group_files.push(utils::ui::convert_to_slint_row(row));
             }
         }
-        ui.set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(group_files))));
+        store
+            .set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(group_files))));
         crate::app::trigger_viewport_update(
             app_weak_clicked.clone(),
             original.path.clone(),
@@ -397,7 +427,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let app_weak_action = app.as_weak();
     let state_copy_act = state.clone();
-    app.on_trigger_action(move |action_type| {
+    let store = app.global::<Store>();
+    store.on_trigger_action(move |action_type| {
         let app_copy = app_weak_action.clone();
         let state_copy_inner = state_copy_act.clone();
         let action = action_type.to_string();
@@ -414,25 +445,33 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
             let _ = app_copy.upgrade_in_event_loop({
                 let r#act = action.clone();
-                move |ui| ui.set_status_text(format!("Processing selection: {}...", r#act).into())
+                move |ui| {
+                    let store = ui.global::<Store>();
+                    store.set_status_text(format!("Processing selection: {}...", r#act).into());
+                }
             });
 
             let res = utils::fs::execute_file_action(&action, checked_files, pairs).await;
 
-            let _ = app_copy.upgrade_in_event_loop(move |ui| match res {
-                Ok(_) => {
-                    ui.set_status_text(
-                        format!("Successfully completed {} operation.", action).into(),
-                    );
-                    ui.set_results(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
-                    let mut lock = state_copy_inner.safe_lock();
-                    lock.results.clear();
-                    lock.groups.clear();
-                    lock.collapsed_groups.clear();
-                }
-                Err(e) => {
-                    ui.set_status_text(format!("Action failed: {}", e).into());
-                    tracing::error!("Action failed: {}", e);
+            let _ = app_copy.upgrade_in_event_loop(move |ui| {
+                let store = ui.global::<Store>();
+                match res {
+                    Ok(_) => {
+                        store.set_status_text(
+                            format!("Successfully completed {} operation.", action).into(),
+                        );
+                        store.set_results(ModelRc::from(std::rc::Rc::new(VecModel::from(
+                            Vec::new(),
+                        ))));
+                        let mut lock = state_copy_inner.safe_lock();
+                        lock.results.clear();
+                        lock.groups.clear();
+                        lock.collapsed_groups.clear();
+                    }
+                    Err(e) => {
+                        store.set_status_text(format!("Action failed: {}", e).into());
+                        tracing::error!("Action failed: {}", e);
+                    }
                 }
             });
         });
@@ -444,7 +483,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     // Thread-safe async debouncing handle to capture rapid mouse hovering and eliminate event loop flooding
     let last_hover_task = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<()>>));
 
-    app.on_thumbnail_channel_hovered(move |path_str, channel| {
+    let store = app.global::<Store>();
+    store.on_thumbnail_channel_hovered(move |path_str, channel| {
         let path_std = path_str.to_string();
         let channel_std = channel.to_string();
         let app_weak_clone = app_weak_hover.clone();
@@ -493,10 +533,11 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 // Update UI components dynamically inside the event loop
                 let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
                     use slint::Model;
+                    let store = ui.global::<Store>();
                     let slint_img = utils::ui::convert_to_slint_image(&channel_img);
 
                     // Update List Results
-                    let results_model = ui.get_results();
+                    let results_model = store.get_results();
                     for i in 0..results_model.row_count() {
                         if let Some(mut r) = results_model.row_data(i)
                             && scanners::normalize_path_key(r.path.as_str()) == normalized_path
@@ -507,7 +548,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                     }
 
                     // Update Grid Results (mapping dynamically into virtualized GridRow columns)
-                    let grid_model = ui.get_grid_row_results();
+                    let grid_model = store.get_grid_row_results();
                     for i in 0..grid_model.row_count() {
                         if let Some(mut r) = grid_model.row_data(i) {
                             if r.has_col1
@@ -539,7 +580,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                     }
 
                     // Update Selected Group Files (Compare Panel)
-                    let group_model = ui.get_selected_group_files();
+                    let group_model = store.get_selected_group_files();
                     for i in 0..group_model.row_count() {
                         if let Some(mut r) = group_model.row_data(i)
                             && scanners::normalize_path_key(r.path.as_str()) == normalized_path
@@ -558,11 +599,14 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 /// Binds UI utility parameters, tonemapping options, sorting/filtering engines, and column resizers.
 fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let app_weak_comp = app.as_weak();
-    app.on_compare_mode_changed(move || {
+    let store = app.global::<Store>();
+
+    store.on_compare_mode_changed(move || {
         let app_copy = app_weak_comp.clone();
         if let Some(ui) = app_copy.upgrade() {
-            let orig_path = ui.get_original_meta().path.to_string();
-            let dup_path = ui.get_duplicate_meta().path.to_string();
+            let store = ui.global::<Store>();
+            let orig_path = store.get_original_meta().path.to_string();
+            let dup_path = store.get_duplicate_meta().path.to_string();
 
             if !orig_path.is_empty() && !dup_path.is_empty() {
                 crate::app::trigger_viewport_update(app_weak_comp.clone(), orig_path, dup_path);
@@ -571,15 +615,18 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_tonemap = app.as_weak();
-    app.on_tonemap_toggled(move || {
+    let store = app.global::<Store>();
+    store.on_tonemap_toggled(move || {
         let app_copy = app_weak_tonemap.clone();
         let ui = app_copy.unwrap();
+        let store = ui.global::<Store>();
 
-        utils::settings::save_settings(&ui);
+        utils::settings::save_settings(&store);
 
-        crate::core::tonemapper::TONEMAP_ENABLED.store(ui.get_tonemap_enabled(), Ordering::Relaxed);
+        crate::core::tonemapper::TONEMAP_ENABLED
+            .store(store.get_tonemap_enabled(), Ordering::Relaxed);
         crate::core::tonemapper::TONEMAP_OPERATOR
-            .store(ui.get_tonemap_operator() as usize, Ordering::Relaxed);
+            .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
 
         if let Some(cache_mutex) = utils::cache::DECODED_CACHE.get()
             && let Ok(mut cache) = cache_mutex.lock()
@@ -587,8 +634,8 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             cache.clear();
         }
 
-        let orig_path = ui.get_original_meta().path.to_string();
-        let dup_path = ui.get_duplicate_meta().path.to_string();
+        let orig_path = store.get_original_meta().path.to_string();
+        let dup_path = store.get_duplicate_meta().path.to_string();
 
         if !orig_path.is_empty() && !dup_path.is_empty() {
             crate::app::trigger_viewport_update(app_weak_tonemap.clone(), orig_path, dup_path);
@@ -596,11 +643,13 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_channel = app.as_weak();
-    app.on_channel_toggled(move || {
+    let store = app.global::<Store>();
+    store.on_channel_toggled(move || {
         let app_copy = app_weak_channel.clone();
         if let Some(ui) = app_copy.upgrade() {
-            let orig_path = ui.get_original_meta().path.to_string();
-            let dup_path = ui.get_duplicate_meta().path.to_string();
+            let store = ui.global::<Store>();
+            let orig_path = store.get_original_meta().path.to_string();
+            let dup_path = store.get_duplicate_meta().path.to_string();
 
             if !orig_path.is_empty() && !dup_path.is_empty() {
                 crate::app::trigger_viewport_update(app_weak_channel.clone(), orig_path, dup_path);
@@ -609,11 +658,13 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_mip = app.as_weak();
-    app.on_mip_level_changed(move || {
+    let store = app.global::<Store>();
+    store.on_mip_level_changed(move || {
         let app_copy = app_weak_mip.clone();
         if let Some(ui) = app_copy.upgrade() {
-            let orig_path = ui.get_original_meta().path.to_string();
-            let dup_path = ui.get_duplicate_meta().path.to_string();
+            let store = ui.global::<Store>();
+            let orig_path = store.get_original_meta().path.to_string();
+            let dup_path = store.get_duplicate_meta().path.to_string();
 
             if !orig_path.is_empty() && !dup_path.is_empty() {
                 crate::app::trigger_viewport_update(app_weak_mip.clone(), orig_path, dup_path);
@@ -623,27 +674,32 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let app_weak_rule = app.as_weak();
     let state_clone_rule = state.clone();
-    app.on_trigger_selection_rule(move |rule| {
+    let store = app.global::<Store>();
+    store.on_trigger_selection_rule(move |rule| {
         let mut lock = state_clone_rule.safe_lock();
         utils::ui::apply_selection_rule(&mut lock, rule.as_str());
         if let Some(ui) = app_weak_rule.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
     let app_weak_expand = app.as_weak();
     let state_clone_exp = state.clone();
-    app.on_expand_all_groups(move || {
+    let store = app.global::<Store>();
+    store.on_expand_all_groups(move || {
         let mut lock = state_clone_exp.safe_lock();
         lock.collapsed_groups.clear();
         if let Some(ui) = app_weak_expand.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
     let app_weak_collapse = app.as_weak();
     let state_clone_col = state.clone();
-    app.on_collapse_all_groups(move || {
+    let store = app.global::<Store>();
+    store.on_collapse_all_groups(move || {
         let mut lock = state_clone_col.safe_lock();
         lock.collapsed_groups.clear();
 
@@ -659,22 +715,26 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         }
 
         if let Some(ui) = app_weak_collapse.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
-    app.on_export_log(move |log_text| {
+    let store = app.global::<Store>();
+    store.on_export_log(move |log_text| {
         utils::export::export_diagnostics_log(log_text.as_str());
     });
 
     let state_clone_csv = state.clone();
-    app.on_export_csv(move || {
+    let store = app.global::<Store>();
+    store.on_export_csv(move || {
         utils::export::export_results_to_csv(state_clone_csv.clone());
     });
 
     let app_weak_col_sort = app.as_weak();
     let state_clone_col_sort = state.clone();
-    app.on_sort_by_column(move |col| {
+    let store = app.global::<Store>();
+    store.on_sort_by_column(move |col| {
         let mut lock = state_clone_col_sort.safe_lock();
         let col_str = col.to_string();
 
@@ -780,13 +840,15 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         }
 
         if let Some(ui) = app_weak_col_sort.upgrade() {
-            ui.set_active_sort_column(lock.sort_column.clone().into());
-            ui.set_sort_ascending(lock.sort_ascending);
-            utils::ui::update_results_ui(&ui, &lock);
+            let store = ui.global::<Store>();
+            store.set_active_sort_column(lock.sort_column.clone().into());
+            store.set_sort_ascending(lock.sort_ascending);
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
-    app.on_clear_models(move || {
+    let store = app.global::<Store>();
+    store.on_clear_models(move || {
         if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
             let _ = std::fs::remove_dir_all(app_dir.join("models"));
             crate::app::append_to_console_log(
@@ -795,7 +857,8 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         }
     });
 
-    app.on_clear_cache(move || {
+    let store = app.global::<Store>();
+    store.on_clear_cache(move || {
         // 1. Clear in-memory caches immediately
         if let Some(cache_mutex) = crate::utils::cache::DECODED_CACHE.get()
             && let Ok(mut cache) = cache_mutex.lock()
@@ -845,16 +908,19 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let app_weak_filter = app.as_weak();
     let state_clone_filt = state.clone();
-    app.on_results_filter_changed(move || {
+    let store = app.global::<Store>();
+    store.on_results_filter_changed(move || {
         if let Some(ui) = app_weak_filter.upgrade() {
             let lock = state_clone_filt.safe_lock();
-            utils::ui::update_results_ui(&ui, &lock);
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
     let app_weak_sort = app.as_weak();
     let state_clone_sort = state.clone();
-    app.on_results_sort_changed(move |sort_idx| {
+    let store = app.global::<Store>();
+    store.on_results_sort_changed(move |sort_idx| {
         let mut lock = state_clone_sort.safe_lock();
         if !lock.groups.is_empty() {
             match sort_idx {
@@ -883,13 +949,16 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
         }
         if let Some(ui) = app_weak_sort.upgrade() {
-            utils::ui::update_results_ui(&ui, &lock);
+            let lock = state_clone_sort.safe_lock();
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 
     let app_weak_auto = app.as_weak();
     let state_auto = state;
-    app.on_auto_size_columns(move || {
+    let store = app.global::<Store>();
+    store.on_auto_size_columns(move || {
         if let Some(ui) = app_weak_auto.upgrade() {
             let lock = state_auto.safe_lock();
             if lock.results.is_empty() {
@@ -912,9 +981,10 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             let score_w = (max_score_len as f32 * 7.2) + 20.0;
             let path_w = (max_path_len as f32 * 6.5) + 20.0;
 
-            ui.set_col_file_w(file_w.clamp(120.0, 600.0));
-            ui.set_col_score_w(score_w.clamp(60.0, 150.0));
-            ui.set_col_path_w(path_w.clamp(150.0, 800.0));
+            let store = ui.global::<Store>();
+            store.set_col_file_w(file_w.clamp(120.0, 600.0));
+            store.set_col_score_w(score_w.clamp(60.0, 150.0));
+            store.set_col_path_w(path_w.clamp(150.0, 800.0));
 
             tracing::info!(
                 "Columns auto-resized. FILE: {:.0}px, SCORE: {:.0}px, PATH: {:.0}px",
@@ -937,15 +1007,16 @@ fn bind_drag_and_drop(app: &AppWindow) {
             let app_copy = app_weak_dnd.clone();
 
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
+                let store = ui.global::<Store>();
                 if is_dir {
-                    ui.set_dir_a(path_str.clone().into());
-                    ui.set_status_text(format!("Scan folder updated: {}", path_str).into());
+                    store.set_dir_a(path_str.clone().into());
+                    store.set_status_text(format!("Scan folder updated: {}", path_str).into());
                 } else if is_file {
-                    ui.set_query_text(path_str.clone().into());
-                    ui.set_search_method(2);
-                    ui.set_status_text(format!("Reference image loaded: {}", path_str).into());
+                    store.set_query_text(path_str.clone().into());
+                    store.set_search_method(2);
+                    store.set_status_text(format!("Reference image loaded: {}", path_str).into());
                 }
-                utils::settings::save_settings(&ui);
+                utils::settings::save_settings(&store);
             });
         }
         slint::winit_030::EventResult::Propagate

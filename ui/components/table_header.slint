@@ -1,0 +1,266 @@
+// ui/components/table_header.slint
+
+import { Store } from "../store.slint";
+
+export component TableHeader inherits Rectangle {
+    height: 24px;
+    background: #1e1f22;
+
+    HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 8px;
+        spacing: 0px;
+
+        Rectangle {
+            width: 32px;
+        }
+
+        HorizontalLayout {
+            width: Store.col_file_w;
+            TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: pointer;
+                clicked => { Store.sort_by_column("name"); }
+                Text {
+                    text: "FILE" + (Store.active_sort_column == "name" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                    color: #949ba4;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle {
+            width: 8px;
+            background: file_split.has-hover ? #4e5058 : transparent;
+            file_split := TouchArea {
+                mouse-cursor: col-resize;
+                moved => { if (self.pressed) { Store.col_file_w = (Store.col_file_w + self.mouse-x - self.pressed-x).clamp(100px, 800px); } }
+            }
+        }
+
+        if Store.search_method != 3: HorizontalLayout {
+            spacing: 0px;
+            HorizontalLayout {
+                width: Store.col_score_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("score"); }
+                    Text {
+                        text: "SCORE" + (Store.active_sort_column == "score" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                        width: 100%;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: score_split.has-hover ? #4e5058 : transparent;
+                score_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_score_w = (Store.col_score_w + self.mouse-x - self.pressed-x).clamp(50px, 200px); } }
+                }
+            }
+
+            HorizontalLayout {
+                width: Store.col_path_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("path"); }
+                    Text {
+                        text: "PATH" + (Store.active_sort_column == "path" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: path_split.has-hover ? #4e5058 : transparent;
+                path_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_path_w = (Store.col_path_w + self.mouse-x - self.pressed-x).clamp(100px, 1000px); } }
+                }
+            }
+
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                Text {
+                    text: "METADATA";
+                    color: #949ba4;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        if Store.search_method == 3: HorizontalLayout {
+            spacing: 0px;
+            HorizontalLayout {
+                width: Store.col_format_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("format"); }
+                    Text {
+                        text: "FORMAT" + (Store.active_sort_column == "format" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: format_split.has-hover ? #4e5058 : transparent;
+                format_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_format_w = (Store.col_format_w + self.mouse-x - self.pressed-x).clamp(50px, 300px); } }
+                }
+            }
+
+            HorizontalLayout {
+                width: Store.col_dimensions_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("dimensions"); }
+                    Text {
+                        text: "DIMENSIONS" + (Store.active_sort_column == "dimensions" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: dim_split.has-hover ? #4e5058 : transparent;
+                dim_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_dimensions_w = (Store.col_dimensions_w + self.mouse-x - self.pressed-x).clamp(50px, 300px); } }
+                }
+            }
+
+            HorizontalLayout {
+                width: Store.col_mipmaps_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("mipmaps"); }
+                    Text {
+                        text: "MIPMAPS" + (Store.active_sort_column == "mipmaps" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                        width: 100%;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: mips_split.has-hover ? #4e5058 : transparent;
+                mips_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_mipmaps_w = (Store.col_mipmaps_w + self.mouse-x - self.pressed-x).clamp(40px, 200px); } }
+                }
+            }
+
+            HorizontalLayout {
+                width: Store.col_cubemap_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("cubemap"); }
+                    Text {
+                        text: "CUBEMAP" + (Store.active_sort_column == "cubemap" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                        horizontal-alignment: center;
+                        width: 100%;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: cube_split.has-hover ? #4e5058 : transparent;
+                cube_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_cubemap_w = (Store.col_cubemap_w + self.mouse-x - self.pressed-x).clamp(40px, 200px); } }
+                }
+            }
+
+            HorizontalLayout {
+                width: Store.col_size_w;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("size"); }
+                    Text {
+                        text: "SIZE" + (Store.active_sort_column == "size" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 8px;
+                background: size_split.has-hover ? #4e5058 : transparent;
+                size_split := TouchArea {
+                    mouse-cursor: col-resize;
+                    moved => { if (self.pressed) { Store.col_size_w = (Store.col_size_w + self.mouse-x - self.pressed-x).clamp(40px, 250px); } }
+                }
+            }
+
+            HorizontalLayout {
+                horizontal-stretch: 1;
+                TouchArea {
+                    width: 100%;
+                    height: 100%;
+                    mouse-cursor: pointer;
+                    clicked => { Store.sort_by_column("path"); }
+                    Text {
+                        text: "PATH" + (Store.active_sort_column == "path" ? (Store.sort_ascending ? " ▲" : " ▼") : "");
+                        color: #949ba4;
+                        font-size: 11px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

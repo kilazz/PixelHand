@@ -1,0 +1,212 @@
+// ui/components/compare_viewport.slint
+
+import { WipeViewport } from "./common.slint";
+import { Store } from "../store.slint";
+
+export component InteractiveCompareViewport inherits Rectangle {
+    background: #111214;
+    clip: true;
+
+    TouchArea {
+        property <length> start_x;
+        property <length> start_y;
+
+        pointer-event(evt) => {
+            if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                Store.zoom_factor = 1.0;
+                Store.pan_x = 0px;
+                Store.pan_y = 0px;
+            }
+            if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
+                self.start_x = self.mouse-x;
+                self.start_y = self.mouse-y;
+            }
+            if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.move) {
+                if (self.pressed) {
+                    Store.pan_x = Store.pan_x + (self.mouse-x - self.start_x);
+                    Store.pan_y = Store.pan_y + (self.mouse-y - self.start_y);
+                    self.start_x = self.mouse-x;
+                    self.start_y = self.mouse-y;
+                }
+            }
+        }
+        scroll-event(evt) => {
+            let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
+            Store.zoom_factor = (Store.zoom_factor + zoom_delta).clamp(1.0, 10.0);
+            if (Store.zoom_factor == 1.0) {
+                Store.pan_x = 0px;
+                Store.pan_y = 0px;
+            }
+            EventResult.accept
+        }
+        double-clicked => {
+            if (self.mouse-x < parent.width / 2) {
+                Store.open_file_in_viewer(Store.original_meta.path);
+            } else {
+                Store.open_file_in_viewer(Store.duplicate_meta.path);
+            }
+        }
+    }
+
+    if Store.compare_mode == 0: Rectangle { // Side-by-Side
+        width: 100%;
+        height: 100%;
+
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width / 2 - 6px;
+            height: parent.height;
+            clip: true;
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                background: #111214;
+                border-color: #3e3e42;
+                border-width: 1px;
+                border-radius: 4px;
+                clip: true;
+
+                Image {
+                    source: Store.checkerboard_pattern;
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                    width: 100%;
+                    height: 100%;
+                }
+
+                Image {
+                    source: Store.image_original;
+                    image-fit: contain;
+                    width: parent.width * Store.zoom_factor;
+                    height: parent.height * Store.zoom_factor;
+                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
+                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                }
+            }
+        }
+
+        Rectangle {
+            x: parent.width / 2 + 6px;
+            y: 0px;
+            width: parent.width / 2 - 6px;
+            height: parent.height;
+            clip: true;
+
+            Rectangle {
+                width: parent.width;
+                height: parent.height;
+                background: #111214;
+                border-color: #3e3e42;
+                border-width: 1px;
+                border-radius: 4px;
+                clip: true;
+
+                Image {
+                    source: Store.checkerboard_pattern;
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                    width: 100%;
+                    height: 100%;
+                }
+
+                Image {
+                    source: Store.image_duplicate;
+                    image-fit: contain;
+                    width: parent.width * Store.zoom_factor;
+                    height: parent.height * Store.zoom_factor;
+                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
+                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                }
+            }
+        }
+    }
+
+    if Store.compare_mode == 1: WipeViewport { // Wipe Mode
+        original: Store.image_original;
+        duplicate: Store.image_duplicate;
+        checkerboard: Store.checkerboard_pattern;
+        wipe-val <=> Store.wipe_slider_val;
+        width: parent.width * Store.zoom_factor;
+        height: parent.height * Store.zoom_factor;
+        x: parent.width / 2 - self.width / 2 + Store.pan_x;
+        y: parent.height / 2 - self.height / 2 + Store.pan_y;
+    }
+
+    if Store.compare_mode == 2: Rectangle { // Overlay Blend
+        width: 100%;
+        height: 100%;
+        clip: true;
+        Image {
+            source: Store.checkerboard_pattern;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        Image {
+            source: Store.image_original;
+            image-fit: contain;
+            width: parent.width * Store.zoom_factor;
+            height: parent.height * Store.zoom_factor;
+            x: parent.width / 2 - self.width / 2 + Store.pan_x;
+            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+        }
+
+        Image {
+            source: Store.image_duplicate;
+            image-fit: contain;
+            opacity: Store.wipe_slider_val;
+            width: parent.width * Store.zoom_factor;
+            height: parent.height * Store.zoom_factor;
+            x: parent.width / 2 - self.width / 2 + Store.pan_x;
+            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+        }
+    }
+
+    if Store.compare_mode == 3: Rectangle { // Difference Heatmap
+        width: 100%;
+        height: 100%;
+        clip: true;
+        Image {
+            source: Store.checkerboard_pattern;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        Image {
+            source: Store.image_heatmap;
+            image-fit: contain;
+            width: parent.width * Store.zoom_factor;
+            height: parent.height * Store.zoom_factor;
+            x: parent.width / 2 - self.width / 2 + Store.pan_x;
+            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+        }
+    }
+
+    if Store.compare_mode == 4: Rectangle { // Flicker Mode
+        width: 100%;
+        height: 100%;
+        clip: true;
+        Image {
+            source: Store.checkerboard_pattern;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        Image {
+            source: Store.flicker_show_duplicate ? Store.image_duplicate : Store.image_original;
+            image-fit: contain;
+            width: parent.width * Store.zoom_factor;
+            height: parent.height * Store.zoom_factor;
+            x: parent.width / 2 - self.width / 2 + Store.pan_x;
+            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+        }
+    }
+}

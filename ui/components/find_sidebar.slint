@@ -1,0 +1,613 @@
+// ui/components/find_sidebar.slint
+
+import {
+    ScrollView,
+    ComboBox,
+    LineEdit,
+    Slider,
+    CheckBox,
+    SpinBox,
+} from "std-widgets.slint";
+import { Store } from "../store.slint";
+import { PanelSection, FormRow } from "./common.slint";
+import { CustomButton } from "./buttons.slint";
+
+export component FindSidebar inherits Rectangle {
+    width: Store.sidebar_width;
+    background: #2b2d31;
+    border-color: #1f2023;
+    border-width: 1px;
+    border-radius: 4px;
+
+    // Added: Standard child-to-parent callback propagation
+    callback show_formats_popup();
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 8px;
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalLayout {
+                alignment: start;
+                spacing: 12px;
+
+                PanelSection {
+                    title: "Operation Mode";
+                    ComboBox {
+                        model: [
+                            "Exact Match (xxHash)",
+                            "Simple Duplicates (dHash)",
+                            "AI Semantic/Visual Search",
+                            "Asset Inventory (Detailed Audit)",
+                            "Technical QC Audit"
+                        ];
+                        current-index <=> Store.search_method;
+                        height: 32px;
+                        selected(val) => {
+                            Store.qc_mode = Store.search_method == 4;
+                            Store.save_settings();
+                        }
+                    }
+                }
+
+                PanelSection {
+                    title: "Target Directories";
+                    VerticalLayout {
+                        spacing: 4px;
+                        FormRow {
+                            title: "Folder A:";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    text <=> Store.dir_a;
+                                    height: 32px;
+                                    placeholder-text: "Source folder...";
+                                    edited => { Store.save_settings(); }
+                                }
+
+                                CustomButton {
+                                    text: "...";
+                                    width: 32px;
+                                    height: 32px;
+                                    clicked => { Store.select_folder_a(); }
+                                }
+                            }
+                        }
+
+                        if Store.search_method == 4: FormRow {
+                            title: "Folder B:";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    text <=> Store.dir_b;
+                                    height: 32px;
+                                    placeholder-text: "Comparison folder...";
+                                    edited => { Store.save_settings(); }
+                                }
+
+                                CustomButton {
+                                    text: "...";
+                                    width: 32px;
+                                    height: 32px;
+                                    clicked => { Store.select_folder_b(); }
+                                }
+                            }
+                        }
+                        FormRow {
+                            title: "Exclude:";
+                            LineEdit {
+                                text <=> Store.excluded_folders;
+                                placeholder-text: "e.g. .cache, previews, temp_files";
+                                height: 22px;
+                                edited => { Store.save_settings(); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            padding-top: 4px;
+                            CustomButton {
+                                text: "File Formats";
+                                height: 32px;
+                                clicked => {
+                                    Store.ext_popup_x = self.absolute-position.x;
+                                    Store.ext_popup_y = self.absolute-position.y + self.height;
+                                    root.show_formats_popup(); // Trigger the local UI callback
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if Store.search_method == 0 || Store.search_method == 1: PanelSection {
+                    title: "Duplicates Finder Options";
+                    VerticalLayout {
+                        spacing: 4px;
+                        FormRow {
+                            title: "Similarity:";
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Slider {
+                                    value <=> Store.similarity_threshold;
+                                    minimum: 50;
+                                    maximum: 100;
+                                    height: 32px;
+                                    changed(val) => { Store.save_settings(); }
+                                }
+
+                                Text {
+                                    text: Math.round(Store.similarity_threshold) + "%";
+                                    width: 36px;
+                                    font-size: 12px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        CheckBox {
+                            text: "Save Visual Reports";
+                            checked <=> Store.save_visuals;
+                            height: 20px;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        if Store.save_visuals: VerticalLayout {
+                            spacing: 4px;
+                            padding-left: 8px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Cols:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> Store.visuals_columns;
+                                    minimum: 2;
+                                    maximum: 12;
+                                    height: 32px;
+                                    width: 80px;
+                                    edited(val) => { Store.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Max:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> Store.visuals_max_count;
+                                    minimum: 1;
+                                    maximum: 1000;
+                                    height: 32px;
+                                    width: 90px;
+                                    edited(val) => { Store.save_settings(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Font:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> Store.visuals_font_size;
+                                    minimum: 8;
+                                    maximum: 36;
+                                    height: 32px;
+                                    width: 80px;
+                                    edited(val) => { Store.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Scale:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                Slider {
+                                    value <=> Store.visuals_scale;
+                                    minimum: 1.0;
+                                    maximum: 3.0;
+                                    height: 32px;
+                                    width: 70px;
+                                    changed(val) => { Store.save_settings(); }
+                                }
+
+                                Text {
+                                    text: (Math.round(Store.visuals_scale * 10) / 10) + "x";
+                                    width: 30px;
+                                    font-size: 11px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        if Store.search_method == 1: CheckBox {
+                            text: "Compare by luminance only";
+                            checked <=> Store.prep_luminance;
+                            height: 20px;
+                            toggled => { Store.save_settings(); }
+                        }
+                        if Store.search_method == 1: CheckBox {
+                            text: "Compare by specific channels";
+                            checked <=> Store.prep_channels;
+                            height: 20px;
+                            toggled => { Store.save_settings(); }
+                        }
+                        if Store.search_method == 1 && Store.prep_channels: VerticalLayout {
+                            spacing: 4px;
+                            padding-left: 12px;
+                            HorizontalLayout {
+                                spacing: 12px;
+                                CheckBox {
+                                    text: "R";
+                                    checked <=> Store.prep_r;
+                                    toggled => { Store.save_settings(); }
+                                }
+
+                                CheckBox {
+                                    text: "G";
+                                    checked <=> Store.prep_g;
+                                    toggled => { Store.save_settings(); }
+                                }
+
+                                CheckBox {
+                                    text: "B";
+                                    checked <=> Store.prep_b;
+                                    toggled => { Store.save_settings(); }
+                                }
+
+                                CheckBox {
+                                    text: "A";
+                                    checked <=> Store.prep_a;
+                                    toggled => { Store.save_settings(); }
+                                }
+                            }
+
+                            FormRow {
+                                title: "Tags:";
+                                label-width: 40px;
+                                LineEdit {
+                                    text <=> Store.prep_tags;
+                                    placeholder-text: "_mask, _ddn";
+                                    height: 32px;
+                                    edited => { Store.save_settings(); }
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Ignore solid channels";
+                                checked <=> Store.prep_ignore_solid;
+                                height: 20px;
+                                toggled => { Store.save_settings(); }
+                            }
+                        }
+                    }
+                }
+
+                if Store.search_method == 2: PanelSection {
+                    title: "AI Semantic Search Options";
+                    VerticalLayout {
+                        spacing: 4px;
+                        FormRow {
+                            title: "Query AI:";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    text <=> Store.query_text;
+                                    height: 32px;
+                                    placeholder-text: Store.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                    enabled: Store.ai_model != 4;
+                                    edited => { Store.save_settings(); }
+                                }
+
+                                CustomButton {
+                                    text: "🖼️";
+                                    width: 32px;
+                                    height: 32px;
+                                    enabled: Store.ai_model != 4;
+                                    clicked => { Store.select_reference_image(); }
+                                }
+                            }
+                        }
+
+                        FormRow {
+                            title: "Model:";
+                            ComboBox {
+                                model: [
+                                    "Fastest (CLIP-B/32)",
+                                    "Balanced (CLIP-L/14)",
+                                    "Compact (SigLIP-B)",
+                                    "High Quality (SigLIP-L)",
+                                    "Visual Structure (DINOv2-B)",
+                                    "Custom (Local ONNX)"
+                                ];
+                                current-index <=> Store.ai_model;
+                                height: 32px;
+                                selected(val) => { Store.save_settings(); }
+                            }
+                        }
+
+                        if Store.ai_model == 5: VerticalLayout {
+                            spacing: 4px;
+                            FormRow {
+                                title: "Local Path:";
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    LineEdit {
+                                        text <=> Store.custom_model_path;
+                                        height: 32px;
+                                        edited => { Store.save_settings(); }
+                                    }
+
+                                    CustomButton {
+                                        text: "...";
+                                        width: 32px;
+                                        height: 32px;
+                                        clicked => { Store.select_custom_model(); }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Arch:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 30px;
+                                }
+
+                                ComboBox {
+                                    model: ["CLIP", "SigLIP", "DINOv2"];
+                                    current-index <=> Store.custom_model_arch;
+                                    height: 32px;
+                                    selected(val) => { Store.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Dim:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 30px;
+                                }
+
+                                SpinBox {
+                                    value: Store.custom_model_dim;
+                                    minimum: 64;
+                                    maximum: 4096;
+                                    height: 32px;
+                                    edited(val) => { Store.custom_model_dim = val; Store.save_settings(); }
+                                }
+                            }
+                        }
+                        CheckBox {
+                            text: "Save Visual Reports";
+                            checked <=> Store.save_visuals;
+                            height: 20px;
+                            toggled => { Store.save_settings(); }
+                        }
+                    }
+                }
+
+                if Store.search_method == 4: PanelSection {
+                    title: "QC Criteria List";
+                    VerticalLayout {
+                        spacing: 4px;
+                        CheckBox {
+                            text: "Match by stem";
+                            checked <=> Store.qc_match_by_stem;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Hide same resolution";
+                            checked <=> Store.qc_hide_same_resolution;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check NPOT (Power of 2)";
+                            checked <=> Store.qc_npot;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Mip-Maps";
+                            checked <=> Store.qc_mipmaps;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check BlockAlignment";
+                            checked <=> Store.qc_block_align;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Bit Depth";
+                            checked <=> Store.qc_bit_depth;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Solid Colors";
+                            checked <=> Store.qc_solid_colors;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Validate Normal Maps";
+                            checked <=> Store.qc_normals;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        if Store.qc_normals: LineEdit {
+                            text <=> Store.qc_normals_tags;
+                            placeholder-text: "Tags: _norm, _ddn";
+                            height: 32px;
+                            edited => { Store.save_settings(); }
+                        }
+                        CheckBox {
+                            text: "Check Size Bloat";
+                            checked <=> Store.qc_check_bloat;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Alpha Mismatch";
+                            checked <=> Store.qc_check_alpha;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Color Space";
+                            checked <=> Store.qc_check_colorspace;
+                            toggled => { Store.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Compression Change";
+                            checked <=> Store.qc_check_compression;
+                            toggled => { Store.save_settings(); }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    title: "Advanced System Settings";
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "Show Advanced Settings";
+                                font-size: 11px;
+                                color: #dcddde;
+                                vertical-alignment: center;
+                            }
+
+                            CheckBox {
+                                checked <=> Store.show_advanced;
+                            }
+                        }
+
+                        if Store.show_advanced: VerticalLayout {
+                            spacing: 4px;
+                            padding-top: 6px;
+                            FormRow {
+                                title: "Batch Size:";
+                                SpinBox {
+                                    value <=> Store.batch_size;
+                                    minimum: 16;
+                                    maximum: 1024;
+                                    height: 32px;
+                                    edited(val) => { Store.save_settings(); }
+                                }
+                            }
+
+                            if Store.search_method == 2: FormRow {
+                                title: "LanceDB Prec:";
+                                ComboBox {
+                                    model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
+                                    current-index <=> Store.search_precision;
+                                    height: 32px;
+                                    selected(val) => { Store.save_settings(); }
+                                }
+                            }
+                            FormRow {
+                                title: "Provider:";
+                                ComboBox {
+                                    model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
+                                    current-index <=> Store.execution_provider;
+                                    height: 32px;
+                                    selected(val) => { Store.save_settings(); }
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Enable Previews Window";
+                                checked <=> Store.enable_previews;
+                                toggled => { Store.save_settings(); }
+                            }
+
+                            if Store.enable_previews: FormRow {
+                                title: "Preview Quality:";
+                                ComboBox {
+                                    model: ["Fast (64px)", "Balanced (128px)", "High Quality (256px)"];
+                                    current-index <=> Store.preview_quality;
+                                    height: 32px;
+                                    selected(val) => { Store.save_settings(); }
+                                }
+                            }
+                            CheckBox {
+                                text: "Enable HDR Tonemapping";
+                                checked <=> Store.tonemap_enabled;
+                                toggled => { Store.tonemap_toggled(); }
+                            }
+
+                            if Store.tonemap_enabled: ComboBox {
+                                model: ["ACES Filmic", "ICtCp Perceptual", "Khronos PBR Neutral"];
+                                current-index <=> Store.tonemap_operator;
+                                height: 32px;
+                                selected(val) => { Store.tonemap_toggled(); }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                padding-top: 4px;
+                                CustomButton {
+                                    text: "Clear Caches";
+                                    height: 32px;
+                                    clicked => { Store.clear_cache(); }
+                                }
+
+                                CustomButton {
+                                    text: "Clear Models";
+                                    height: 32px;
+                                    clicked => { Store.clear_models(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // --- FIXED BOTTOM RUN SCANNER BUTTON ---
+        Rectangle {
+            height: 40px;
+            background: #1e1f22;
+            border-radius: 4px;
+            VerticalLayout {
+                padding: 4px;
+                CustomButton {
+                    text: Store.is_scanning ? "STOP SCAN" : "RUN SCANNER";
+                    primary-color: Store.is_scanning ? #f23f43 : #23a55a;
+                    height: 32px;
+                    clicked => {
+                        if (Store.is_scanning) { Store.cancel_scan(); }
+                        else { Store.run_scan(); }
+                    }
+                }
+            }
+        }
+    }
+}

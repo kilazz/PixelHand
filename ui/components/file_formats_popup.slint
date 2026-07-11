@@ -1,0 +1,142 @@
+// ui/components/file_formats_popup.slint
+
+import { CheckBox } from "std-widgets.slint";
+import { CustomButton } from "./buttons.slint";
+import { Store } from "../store.slint";
+
+export component FileFormatsPopup inherits PopupWindow {
+    width: 480px;
+    height: 180px;
+    close-policy: close-on-click;
+
+    Rectangle {
+        background: #2b2d31;
+        border-color: #1f2023;
+        border-width: 1px;
+        border-radius: 4px;
+
+        VerticalLayout {
+            padding: 10px;
+            spacing: 8px;
+
+            Text {
+                text: "File Formats Selector";
+                font-weight: 700;
+                color: #ffffff;
+            }
+
+            HorizontalLayout {
+                spacing: 12px;
+
+                VerticalLayout {
+                    spacing: 4px;
+                    CheckBox {
+                        text: ".png";
+                        checked <=> Store.ext_png;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".jpg / .jpeg";
+                        checked <=> Store.ext_jpg;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".tga";
+                        checked <=> Store.ext_tga;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".dds";
+                        checked <=> Store.ext_dds;
+                        toggled => { Store.save_settings(); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 4px;
+                    CheckBox {
+                        text: ".bmp";
+                        checked <=> Store.ext_bmp;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".exr";
+                        checked <=> Store.ext_exr;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".hdr";
+                        checked <=> Store.ext_hdr;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".tif / .tiff";
+                        checked <=> Store.ext_tif;
+                        toggled => { Store.save_settings(); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 4px;
+                    CheckBox {
+                        text: ".webp";
+                        checked <=> Store.ext_webp;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".gif";
+                        checked <=> Store.ext_gif;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".psd";
+                        checked <=> Store.ext_psd;
+                        toggled => { Store.save_settings(); }
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 4px;
+                    CheckBox {
+                        text: ".jxl";
+                        checked <=> Store.ext_jxl;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".heic / .heif";
+                        checked <=> Store.ext_heic;
+                        toggled => { Store.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".avif";
+                        checked <=> Store.ext_avif;
+                        toggled => { Store.save_settings(); }
+                    }
+                }
+            }
+
+            Rectangle {
+                vertical-stretch: 1;
+            }
+
+            HorizontalLayout {
+                alignment: end;
+
+                CustomButton {
+                    text: "Close";
+                    clicked => { root.close(); }
+                }
+            }
+        }
+    }
+}
