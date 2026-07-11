@@ -330,8 +330,10 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
                 let file_meta = SelectedFile {
                     name: slint::SharedString::from(name.as_ref()),
-                    size_str: slint::SharedString::from(crate::utils::helpers::format_size(
-                        meta.file_size,
+                    size_str: slint::SharedString::from(format!(
+                        "{} (VRAM: {})",
+                        crate::utils::helpers::format_size(meta.file_size),
+                        crate::utils::helpers::format_size(meta.estimated_vram)
                     )),
                     format: slint::SharedString::from(&meta.compression_format),
                     resolution: slint::SharedString::from(format!(
@@ -462,7 +464,16 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             let cached_img = {
                 let cache = scanners::THUMBNAIL_MEMORY_CACHE
                     .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
-                cache.lock().unwrap().get(&normalized_path).cloned()
+                if let Ok(mut lock) = cache.lock() {
+                    if let Some(entry) = lock.get_mut(&normalized_path) {
+                        entry.1 = std::time::Instant::now(); // Update access time (LRU)
+                        Some(entry.0.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             };
 
             if let Some(cached_thumb) = cached_img {

@@ -23,6 +23,7 @@ pub struct QcImageMetadata {
     pub bit_depth: u32,
     pub mipmap_count: u32,
     pub is_cubemap: bool,
+    pub estimated_vram: u64,
 }
 
 /// Safely reads a little-endian u32 integer from a byte slice at the given offset with bounds checking.
@@ -66,6 +67,76 @@ fn map_dxgi_format_to_string(dxgi_format: u32) -> String {
     }
 }
 
+/// Calculates estimated GPU VRAM usage based on width, height, compression format, mipmap count, and cubemap flag.
+pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cubemap: bool) -> u64 {
+    let format_upper = format.to_uppercase();
+
+    // Determine if it's a block compression format and its block size in bytes
+    let block_compressed =
+        format_upper.contains("BC") || format_upper.contains("DXT") || format_upper.contains("ATI");
+    let bytes_per_block = match format_upper.as_str() {
+        cf if cf.contains("BC1")
+            || cf.contains("DXT1")
+            || cf.contains("BC4")
+            || cf.contains("ATI1") =>
+        {
+            8
+        }
+        cf if cf.contains("BC2")
+            || cf.contains("DXT3")
+            || cf.contains("BC3")
+            || cf.contains("DXT5")
+            || cf.contains("BC5")
+            || cf.contains("ATI2")
+            || cf.contains("BC6")
+            || cf.contains("BC7") =>
+        {
+            16
+        }
+        _ => 0,
+    };
+
+    let bpp = if !block_compressed {
+        match format_upper.as_str() {
+            cf if cf.contains("RGBA8")
+                || cf.contains("BGRA8")
+                || (cf.contains("UNCOMPRESSED") && cf.contains("ALPHA")) =>
+            {
+                32.0
+            }
+            cf if cf.contains("RGB8") || cf.contains("BGR8") || cf.contains("UNCOMPRESSED") => 24.0,
+            _ => 32.0, // Fallback
+        }
+    } else {
+        0.0
+    };
+
+    let mut total_bytes = 0;
+    let mips = mipmaps.max(1);
+
+    for i in 0..mips {
+        let w = (width >> i).max(1);
+        let h = (height >> i).max(1);
+
+        let mip_bytes = if block_compressed {
+            // Number of 4x4 blocks (rounded up) * bytes per block
+            let blocks_w = w.div_ceil(4) as u64;
+            let blocks_h = h.div_ceil(4) as u64;
+            blocks_w * blocks_h * bytes_per_block
+        } else {
+            (w as f64 * h as f64 * (bpp / 8.0)) as u64
+        };
+
+        total_bytes += mip_bytes;
+    }
+
+    if is_cubemap {
+        total_bytes * 6
+    } else {
+        total_bytes
+    }
+}
+
 /// Extracts technical image specifications, format metrics, and metadata layout from target path.
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
     let ext = path
@@ -93,6 +164,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
             h = safe_read_u32_le(&bytes, 12);
             w = safe_read_u32_le(&bytes, 16);
 
+            // Читаем количество мип-мапов напрямую из заголовка dwMipMapCount без привязки к флагам
             let mips = safe_read_u32_le(&bytes, 28);
             mipmap_count = if mips > 0 { mips } else { 1 };
 
@@ -161,6 +233,8 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
         }
     }
 
+    let estimated_vram = estimate_vram(w, h, &compression_format, mipmap_count, is_cubemap);
+
     Ok(QcImageMetadata {
         width: w,
         height: h,
@@ -172,6 +246,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
         bit_depth,
         mipmap_count,
         is_cubemap,
+        estimated_vram,
     })
 }
 
@@ -269,6 +344,108 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
             first[0], first[1], first[2], first[3]
         ),
     ))
+}
+
+/// Analyzes RMA/ORM pack channels sequentially to detect if an individual channel (R, G, B, or A) is entirely black/white.
+pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
+    let img =
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
+    let has_alpha = img.color().has_alpha();
+
+    let processed_img = if img.width() > 128 || img.height() > 128 {
+        img.resize(128, 128, image::imageops::FilterType::Nearest)
+    } else {
+        img
+    };
+
+    let rgba_img = processed_img.to_rgba8();
+    if rgba_img.pixels().len() == 0 {
+        return None;
+    }
+
+    let mut min_val = [255u8; 4];
+    let mut max_val = [0u8; 4];
+
+    for p in rgba_img.pixels() {
+        for i in 0..4 {
+            min_val[i] = min_val[i].min(p[i]);
+            max_val[i] = max_val[i].max(p[i]);
+        }
+    }
+
+    let channel_names = [
+        "Red (AO/Smoothness)",
+        "Green (Roughness)",
+        "Blue (Metalness)",
+        "Alpha (Glossiness)",
+    ];
+    let threshold = 5; // A channel with variance < 5 is treated as flat/empty
+
+    for i in 0..4 {
+        if i == 3 && !has_alpha {
+            continue; // Skip alpha if texture has no alpha channel
+        }
+        if max_val[i] - min_val[i] < threshold {
+            return Some((
+                "Empty Channel (Flat Mask)".to_string(),
+                format!(
+                    "Channel {} is empty/solid color (Min: {}, Max: {}). Check your packing exports.",
+                    channel_names[i], min_val[i], max_val[i]
+                ),
+            ));
+        }
+    }
+    None
+}
+
+/// Analyzes standard normal map shading directions in G channel to warn of potential Y-axis inversion (DirectX vs OpenGL).
+pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
+    let img =
+        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(256)).ok()?;
+    let rgb = img.to_rgb8();
+
+    let mut top_lights = 0u64;
+    let mut bottom_lights = 0u64;
+    let w = rgb.width();
+    let h = rgb.height();
+
+    if w < 4 || h < 4 {
+        return None;
+    }
+
+    // Sample pixels in the inner grid to estimate shading orientation
+    for y in 1..(h - 1) {
+        for x in 1..(w - 1) {
+            let cur_g = rgb.get_pixel(x, y)[1] as f32;
+            let prev_g = rgb.get_pixel(x, y - 1)[1] as f32;
+            let next_g = rgb.get_pixel(x, y + 1)[1] as f32;
+
+            if (next_g - prev_g).abs() > 30.0 {
+                if cur_g > 128.0 {
+                    top_lights += 1;
+                } else {
+                    bottom_lights += 1;
+                }
+            }
+        }
+    }
+
+    if top_lights > 0 && bottom_lights > 0 {
+        let total = top_lights + bottom_lights;
+        let ratio = top_lights as f32 / total as f32;
+        if ratio > 0.65 {
+            return Some((
+                "Normal Map Y-Axis Orientation".to_string(),
+                "OpenGL layout detected (+Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string(),
+            ));
+        } else if ratio < 0.35 {
+            return Some((
+                "Normal Map Y-Axis Orientation".to_string(),
+                "DirectX layout detected (-Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string(),
+            ));
+        }
+    }
+    None
 }
 
 /// Computes normal map vector bounds, verifies normalize properties, and screens for invalid normal length directions.

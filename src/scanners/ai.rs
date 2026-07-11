@@ -416,6 +416,7 @@ pub async fn run_ai_duplicate_scan(
                     bit_depth: 8,
                     mipmap_count: 1,
                     is_cubemap: false,
+                    estimated_vram: 0,
                 }
             });
             file_summaries.push(DuplicateFileSummary {

@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use crate::core::qc::{
-    check_absolute, check_normal_map_integrity, check_relative, check_solid_texture,
-    extract_qc_metadata,
+    check_absolute, check_empty_channels, check_normal_map_integrity, check_normal_map_orientation,
+    check_relative, check_solid_texture, extract_qc_metadata,
 };
 use crate::state::QcIssueSummary;
 use crate::utils::helpers::discover_files;
@@ -66,6 +66,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     bit_depth: 8,
                     mipmap_count: 1,
                     is_cubemap: false,
+                    estimated_vram: 0,
                 });
 
             // 1. Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
@@ -84,18 +85,25 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 });
             }
 
-            // 2. Perform optional solid flat color checking
-            if params.qc_solid_colors
-                && let Some((issue, details)) = check_solid_texture(p)
-            {
-                file_issues.push(QcIssueSummary {
-                    path: p.to_string_lossy().to_string(),
-                    issue,
-                    details,
-                });
+            // 2. Perform optional solid flat color checking and empty channel packing checks
+            if params.qc_solid_colors {
+                if let Some((issue, details)) = check_solid_texture(p) {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
+                }
+                if let Some((issue, details)) = check_empty_channels(p) {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
+                }
             }
 
-            // 3. Perform optional normal maps vector integrity audits
+            // 3. Perform optional normal maps vector integrity and DirectX vs OpenGL Y-axis audits
             if params.qc_normals {
                 let path_str = p.to_string_lossy().to_lowercase();
                 let should_check = if params.qc_normals_tags.is_empty() {
@@ -115,15 +123,23 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     crate::core::qc::NormalMapFormat::TangentSpaceRgb
                 };
 
-                if should_check
-                    && let Some((issue, details)) =
+                if should_check {
+                    if let Some((issue, details)) =
                         check_normal_map_integrity(p, 0.15, normal_format)
-                {
-                    file_issues.push(QcIssueSummary {
-                        path: p.to_string_lossy().to_string(),
-                        issue,
-                        details,
-                    });
+                    {
+                        file_issues.push(QcIssueSummary {
+                            path: p.to_string_lossy().to_string(),
+                            issue,
+                            details,
+                        });
+                    }
+                    if let Some((issue, details)) = check_normal_map_orientation(p) {
+                        file_issues.push(QcIssueSummary {
+                            path: p.to_string_lossy().to_string(),
+                            issue,
+                            details,
+                        });
+                    }
                 }
             }
 
@@ -227,6 +243,7 @@ pub async fn run_folder_compare(
                     bit_depth: 8,
                     mipmap_count: 1,
                     is_cubemap: false,
+                    estimated_vram: 0,
                 });
             let meta_b =
                 extract_qc_metadata(p_b).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
@@ -240,6 +257,7 @@ pub async fn run_folder_compare(
                     bit_depth: 8,
                     mipmap_count: 1,
                     is_cubemap: false,
+                    estimated_vram: 0,
                 });
 
             let rel_issues = check_relative(
@@ -331,6 +349,7 @@ pub async fn run_asset_audit(
                     bit_depth: 8,
                     mipmap_count: 1,
                     is_cubemap: false,
+                    estimated_vram: 0,
                 });
 
             let thumbnail_data = super::load_thumbnail_for_path(&p.to_string_lossy());

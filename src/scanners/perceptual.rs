@@ -139,6 +139,7 @@ pub async fn run_perceptual_scan_internal(
                     bit_depth: 8,
                     mipmap_count: 1,
                     is_cubemap: false,
+                    estimated_vram: 0,
                 }
             });
 

@@ -312,9 +312,23 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
         format!("{:.1}%", file.similarity)
     };
 
+    let vram = crate::core::qc::estimate_vram(
+        file.width as u32,
+        file.height as u32,
+        &file.compression_format,
+        file.mipmap_count,
+        file.is_cubemap,
+    );
+
+    let vram_formatted = crate::utils::helpers::format_size(vram);
+    let file_size_formatted = crate::utils::helpers::format_size(file.size);
+
     SelectedFile {
         name: slint::SharedString::from(name.as_ref()),
-        size_str: slint::SharedString::from(crate::utils::helpers::format_size(file.size)),
+        size_str: slint::SharedString::from(format!(
+            "{} (VRAM: {})",
+            file_size_formatted, vram_formatted
+        )),
         format: slint::SharedString::from(&file.compression_format),
         resolution: slint::SharedString::from(format!("{}x{}", file.width, file.height)),
         bit_depth: slint::SharedString::from(format!("{}-bit", file.bit_depth)),

@@ -120,6 +120,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
                         bit_depth: 8,
                         mipmap_count: 1,
                         is_cubemap: false,
+                        estimated_vram: 0,
                     }
                 });
                 DuplicateFileSummary {

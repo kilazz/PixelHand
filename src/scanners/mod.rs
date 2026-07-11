@@ -85,8 +85,9 @@ impl CachedThumbnail {
 }
 
 /// Fast in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
-pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Mutex<HashMap<String, CachedThumbnail>>> =
-    OnceLock::new();
+pub static THUMBNAIL_MEMORY_CACHE: OnceLock<
+    Mutex<HashMap<String, (CachedThumbnail, std::time::Instant)>>,
+> = OnceLock::new();
 
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
 pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
@@ -96,17 +97,25 @@ pub fn normalize_path_key(path_str: &str) -> String {
     path_str.replace('/', "\\").to_lowercase()
 }
 
-/// Stores an image buffer in the memory cache, evicting the oldest key if size exceeds 200 entries.
+/// Stores an image buffer in the memory cache, evicting the oldest key if size exceeds 200 entries (LRU).
 fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(mut lock) = cache.lock() {
-        if lock.len() >= 200
-            && let Some(key_to_remove) = lock.keys().next().cloned()
-        {
-            lock.remove(&key_to_remove);
+        if lock.len() >= 200 {
+            // Find the least recently accessed key to evict
+            let oldest_key = lock
+                .iter()
+                .min_by_key(|(_, entry)| entry.1)
+                .map(|(k, _)| k.clone());
+            if let Some(key_to_remove) = oldest_key {
+                lock.remove(&key_to_remove);
+            }
         }
         let normalized_key = normalize_path_key(path);
-        lock.insert(normalized_key, CachedThumbnail::new(img));
+        lock.insert(
+            normalized_key,
+            (CachedThumbnail::new(img), std::time::Instant::now()),
+        );
     }
 }
 
