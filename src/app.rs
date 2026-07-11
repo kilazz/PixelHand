@@ -196,24 +196,31 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // Spawn async background loop to toggle flicker mode (read dynamic slider value)
+    // Spawn async background loop to toggle flicker mode (highly responsive)
     let app_weak_flicker = app.as_weak();
     tokio::spawn(async move {
+        let mut elapsed_ms: u64 = 0;
+        let tick_rate_ms: u64 = 10; // Check slider value every 10ms
+
         loop {
-            let duration = if let Some(ui) = app_weak_flicker.upgrade() {
-                ui.get_flicker_interval_val() as u64
-            } else {
-                333
-            };
-            tokio::time::sleep(std::time::Duration::from_millis(duration.max(50))).await;
+            tokio::time::sleep(std::time::Duration::from_millis(tick_rate_ms)).await;
+            elapsed_ms += tick_rate_ms;
 
             if let Some(ui) = app_weak_flicker.upgrade() {
-                if ui.get_compare_mode() == 4 {
-                    let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
-                        ui.set_flicker_show_duplicate(!ui.get_flicker_show_duplicate());
-                    });
+                let target_duration = ui.get_flicker_interval_val() as u64;
+
+                // If elapsed time exceeds the current slider value
+                if elapsed_ms >= target_duration.max(50) {
+                    elapsed_ms = 0; // Reset timer
+
+                    if ui.get_compare_mode() == 4 {
+                        let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
+                            ui.set_flicker_show_duplicate(!ui.get_flicker_show_duplicate());
+                        });
+                    }
                 }
             } else {
+                // If UI is dropped (app closed), exit the loop
                 break;
             }
         }

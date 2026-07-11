@@ -214,6 +214,10 @@ export component AppWindow inherits Window {
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
 
+    // --- SORT INDICATOR PROPERTIES ---
+    in-out property <string> active_sort_column: "";
+    in-out property <bool> sort_ascending: true;
+
     // --- PREVIEW & SMART FILTER PROPERTIES ---
     in-out property <bool> enable_previews: true;
     in-out property <int> preview_quality: 1;
@@ -1258,7 +1262,7 @@ export component AppWindow inherits Window {
 
                     sidebar-splitter-ta := TouchArea {
                         mouse-cursor: MouseCursor.col-resize;
-                        moved => { if (self.pressed) { root.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); root.save_settings(); } }
+                        moved => { if (self.pressed) { root.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); } }
                     }
                 }
 
@@ -1336,7 +1340,7 @@ export component AppWindow inherits Window {
                                         text: "Expand All";
                                         height: 24px;
                                         primary-color: #5865f2;
-                                        clicked => { root.export_csv(); }
+                                        clicked => { root.expand_all_groups(); }
                                     }
                                     if root.search_method != 3: CustomButton {
                                         text: "Collapse All";
@@ -1460,7 +1464,7 @@ export component AppWindow inherits Window {
                                                     mouse-cursor: pointer;
                                                     clicked => { root.sort_by_column("name"); }
                                                     Text {
-                                                        text: "FILE";
+                                                        text: "FILE" + (root.active_sort_column == "name" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                         color: #949ba4;
                                                         font-size: 11px;
                                                         font-weight: 700;
@@ -1488,7 +1492,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("score"); }
                                                         Text {
-                                                            text: "SCORE";
+                                                            text: "SCORE" + (root.active_sort_column == "score" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1516,7 +1520,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("path"); }
                                                         Text {
-                                                            text: "PATH";
+                                                            text: "PATH" + (root.active_sort_column == "path" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1556,7 +1560,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("format"); }
                                                         Text {
-                                                            text: "FORMAT";
+                                                            text: "FORMAT" + (root.active_sort_column == "format" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1582,7 +1586,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("dimensions"); }
                                                         Text {
-                                                            text: "DIMENSIONS";
+                                                            text: "DIMENSIONS" + (root.active_sort_column == "dimensions" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1608,7 +1612,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("mipmaps"); }
                                                         Text {
-                                                            text: "MIPMAPS";
+                                                            text: "MIPMAPS" + (root.active_sort_column == "mipmaps" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1636,7 +1640,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("cubemap"); }
                                                         Text {
-                                                            text: "CUBEMAP";
+                                                            text: "CUBEMAP" + (root.active_sort_column == "cubemap" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1664,7 +1668,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("size"); }
                                                         Text {
-                                                            text: "SIZE";
+                                                            text: "SIZE" + (root.active_sort_column == "size" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -1690,7 +1694,7 @@ export component AppWindow inherits Window {
                                                         mouse-cursor: pointer;
                                                         clicked => { root.sort_by_column("path"); }
                                                         Text {
-                                                            text: "PATH";
+                                                            text: "PATH" + (root.active_sort_column == "path" ? (root.sort_ascending ? " ▲" : " ▼") : "");
                                                             color: #949ba4;
                                                             font-size: 11px;
                                                             font-weight: 700;
@@ -2416,7 +2420,7 @@ export component AppWindow inherits Window {
 
                     compare-splitter-ta := TouchArea {
                         mouse-cursor: MouseCursor.col-resize;
-                        moved => { if (self.pressed) { root.compare_sidebar_width = (root.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); root.save_settings(); } }
+                        moved => { if (self.pressed) { root.compare_sidebar_width = (root.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); } }
                     }
                 }
 
