@@ -348,6 +348,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
                 ui.set_original_meta(file_meta.clone());
                 ui.set_duplicate_meta(file_meta);
+                ui.set_max_available_mips(meta.mipmap_count as i32);
+                ui.set_active_mip_level(0);
             }
 
             ui.set_selected_group_files(ModelRc::from(std::rc::Rc::new(
@@ -374,6 +376,8 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
         ui.set_original_meta(utils::ui::build_selected_file_meta(original, true));
         ui.set_duplicate_meta(utils::ui::build_selected_file_meta(duplicate, false));
+        ui.set_max_available_mips(original.mipmap_count as i32);
+        ui.set_active_mip_level(0);
 
         let mut group_files = Vec::new();
         for row in &lock.results {

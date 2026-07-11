@@ -34,6 +34,38 @@ fn safe_read_u32_le(bytes: &[u8], offset: usize) -> u32 {
         .unwrap_or(0)
 }
 
+/// Maps DXGI format integers to user-friendly block compression or uncompressed names.
+fn map_dxgi_format_to_string(dxgi_format: u32) -> String {
+    match dxgi_format {
+        2 => "RGBA32 Float".to_string(),
+        10 => "RGBA16 Float".to_string(),
+        11 => "RGBA16 UNORM".to_string(),
+        24 => "RGB10A2 UNORM".to_string(),
+        28 => "RGBA8 UNORM".to_string(),
+        29 => "RGBA8 sRGB".to_string(),
+        54 => "R16 Float".to_string(),
+        56 => "R16 UNORM".to_string(),
+        61 => "R8 UNORM".to_string(),
+        70 | 71 => "BC1 (DXT1)".to_string(),
+        72 => "BC1 sRGB (DXT1)".to_string(),
+        73 | 74 => "BC2 (DXT3)".to_string(),
+        75 => "BC2 sRGB (DXT3)".to_string(),
+        76 | 77 => "BC3 (DXT5)".to_string(),
+        78 => "BC3 sRGB (DXT5)".to_string(),
+        79 | 80 => "BC4 (ATI1)".to_string(),
+        81 => "BC4 SNORM".to_string(),
+        82 | 83 => "BC5 (ATI2)".to_string(),
+        84 => "BC5 SNORM".to_string(),
+        87 => "BGRA8 UNORM".to_string(),
+        91 => "BGRA8 sRGB".to_string(),
+        94 | 95 => "BC6H (UF16)".to_string(),
+        96 => "BC6H (SF16)".to_string(),
+        97 | 98 => "BC7".to_string(),
+        99 => "BC7 sRGB".to_string(),
+        _ => format!("DX10 (DXGI {})", dxgi_format),
+    }
+}
+
 /// Extracts technical image specifications, format metrics, and metadata layout from target path.
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
     let ext = path
@@ -84,7 +116,7 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
 
                 if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
                     let dxgi_format = safe_read_u32_le(&bytes, 128);
-                    compression_format = format!("DX10 (DXGI {})", dxgi_format);
+                    compression_format = map_dxgi_format_to_string(dxgi_format);
                     if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
                         has_alpha = true;
                     }
