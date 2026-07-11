@@ -230,9 +230,15 @@ async fn scan_and_index_directory(
                         None
                     };
 
+                    // Select closest mip level dynamically based on AI model architecture
+                    let target_size = match params.ai_model {
+                        2 | 3 => 384, // SigLIP models run at 384x384
+                        _ => 256,     // CLIP and DINOv2 run at 224x224
+                    };
+
                     let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(
                         p,
-                        Some(512),
+                        Some(target_size),
                     )
                     .ok()?;
 

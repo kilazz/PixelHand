@@ -43,6 +43,69 @@ pub fn convert_to_slint_image(rgba_img: &image::RgbaImage) -> slint::Image {
     slint::Image::from_rgba8(buffer)
 }
 
+/// Computes overlapping Grayscale/Luminance histograms of both original and duplicate textures,
+/// rendering them on a dark background with semi-transparent overlapping areas.
+pub fn generate_histogram_image(
+    orig: &image::RgbaImage,
+    dup: &image::RgbaImage,
+) -> image::RgbaImage {
+    let w = 256;
+    let h = 100;
+    let mut hist_orig = [0u32; 256];
+    let mut hist_dup = [0u32; 256];
+
+    // Calculate luminance bins sequentially using Rec. 709 luma coefficients
+    for p in orig.pixels() {
+        let r = p[0] as f32;
+        let g = p[1] as f32;
+        let b = p[2] as f32;
+        let luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).round() as usize;
+        if luma < 256 {
+            hist_orig[luma] += 1;
+        }
+    }
+
+    for p in dup.pixels() {
+        let r = p[0] as f32;
+        let g = p[1] as f32;
+        let b = p[2] as f32;
+        let luma = (0.2126 * r + 0.7152 * g + 0.0722 * b).round() as usize;
+        if luma < 256 {
+            hist_dup[luma] += 1;
+        }
+    }
+
+    // Determine peaks for normalization
+    let max_orig = *hist_orig.iter().max().unwrap_or(&1).max(&1) as f32;
+    let max_dup = *hist_dup.iter().max().unwrap_or(&1).max(&1) as f32;
+
+    // Dark Slate canvas background
+    let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([20, 20, 21, 255]));
+
+    for x in 0..256 {
+        let val_orig = (hist_orig[x] as f32 / max_orig * (h - 5) as f32).round() as u32;
+        let val_dup = (hist_dup[x] as f32 / max_dup * (h - 5) as f32).round() as u32;
+
+        for y in 0..h {
+            let inv_y = h - 1 - y;
+            let is_orig = y < val_orig;
+            let is_dup = y < val_dup;
+
+            if is_orig && is_dup {
+                // Overlap: Blended Slate-purple
+                img.put_pixel(x as u32, inv_y, image::Rgba([140, 140, 180, 255]));
+            } else if is_orig {
+                // Original: Cornflower Blue
+                img.put_pixel(x as u32, inv_y, image::Rgba([100, 149, 237, 255]));
+            } else if is_dup {
+                // Duplicate: Golden Orange
+                img.put_pixel(x as u32, inv_y, image::Rgba([240, 177, 50, 255]));
+            }
+        }
+    }
+    img
+}
+
 /// Maps a thread-safe `ResultsRowData` struct into a UI-bound Slint `ResultsRow` instance.
 pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
     let thumbnail = match &rd.thumbnail_data {
@@ -91,13 +154,13 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
     let search_query = ui.get_results_search_query().to_string().to_lowercase();
     let min_sim = ui.get_results_min_similarity();
 
-    let filter_npot = ui.get_filter_only_npot();
+    let filter_only_npot = ui.get_filter_only_npot();
     let filter_uncompressed = ui.get_filter_only_uncompressed();
     let filter_missing_mips = ui.get_filter_only_missing_mips();
     let filter_cubemaps = ui.get_filter_only_cubemaps();
 
     let has_filter = !search_query.is_empty()
-        || filter_npot
+        || filter_only_npot
         || filter_uncompressed
         || filter_missing_mips
         || filter_cubemaps;
@@ -106,7 +169,7 @@ pub fn update_results_ui(ui: &AppWindow, state: &AppState) {
     let matches_filters = |row: &ResultsRowData| -> bool {
         let matches_query =
             search_query.is_empty() || row.name.to_lowercase().contains(&search_query);
-        let matches_npot = !filter_npot || row.is_npot;
+        let matches_npot = !filter_only_npot || row.is_npot;
         let matches_uncompressed = !filter_uncompressed || row.is_uncompressed;
         let matches_missing_mips = !filter_missing_mips || row.is_missing_mips;
         let matches_cubemaps = !filter_cubemaps || row.is_cubemap_bool;

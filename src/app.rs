@@ -104,6 +104,7 @@ pub fn run_gui() -> Result<()> {
         }
     }
 
+    // Mute DirectML hardware execution logs
     tracing_subscriber::fmt()
         .with_writer(UiLogWriter)
         .with_env_filter("info,ort=warn")
@@ -192,6 +193,29 @@ pub fn run_gui() -> Result<()> {
 
                 ui.set_console_log(lines.join("\n").into());
             });
+        }
+    });
+
+    // Spawn async background loop to toggle flicker mode (read dynamic slider value)
+    let app_weak_flicker = app.as_weak();
+    tokio::spawn(async move {
+        loop {
+            let duration = if let Some(ui) = app_weak_flicker.upgrade() {
+                ui.get_flicker_interval_val() as u64
+            } else {
+                333
+            };
+            tokio::time::sleep(std::time::Duration::from_millis(duration.max(50))).await;
+
+            if let Some(ui) = app_weak_flicker.upgrade() {
+                if ui.get_compare_mode() == 4 {
+                    let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
+                        ui.set_flicker_show_duplicate(!ui.get_flicker_show_duplicate());
+                    });
+                }
+            } else {
+                break;
+            }
         }
     });
 
@@ -356,6 +380,12 @@ pub fn trigger_viewport_update(
             None
         };
 
+        let hist_img = if let (Some(orig), Some(dup)) = (&raw_orig, &raw_dup) {
+            Some(utils::ui::generate_histogram_image(orig, dup))
+        } else {
+            None
+        };
+
         if let Some(img) = raw_orig {
             let app_weak_orig = app_weak_clone.clone();
             let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
@@ -373,6 +403,13 @@ pub fn trigger_viewport_update(
             let app_weak_diff = app_weak_clone.clone();
             let _ = app_weak_diff.upgrade_in_event_loop(move |ui| {
                 ui.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
+            });
+        }
+
+        if let Some(hist) = hist_img {
+            let app_weak_hist = app_weak_clone.clone();
+            let _ = app_weak_hist.upgrade_in_event_loop(move |ui| {
+                ui.set_histogram_image(utils::ui::convert_to_slint_image(&hist));
             });
         }
     });
