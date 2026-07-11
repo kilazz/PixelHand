@@ -185,6 +185,9 @@ export component AppWindow inherits Window {
     // Tracking the active mip level selected in the UI
     in-out property <int> active_mip_level: 0;
 
+    // Tracking the maximum available mipmaps for the selected file dynamically
+    in-out property <int> max_available_mips: 1;
+
     in-out property <bool> qc_mode: false;
     in-out property <bool> qc_npot: true;
     in-out property <bool> qc_mipmaps: true;
@@ -233,6 +236,7 @@ export component AppWindow inherits Window {
     callback row_checkbox_toggled(int);
     callback channel_toggled();
     callback mip_level_changed();
+    callback compare_mode_changed();
     callback trigger_selection_rule(string);
     callback save_settings();
     callback tonemap_toggled();
@@ -1992,6 +1996,7 @@ export component AppWindow inherits Window {
                             current-index <=> root.compare_mode;
                             width: 160px;
                             height: 24px;
+                            selected(val) => { root.compare_mode_changed(); }
                         }
 
                         HorizontalLayout {
@@ -2011,7 +2016,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // Added option to select specific Mipmap level
+                        // Added option to select specific Mipmap level with custom padding and spacing
                         HorizontalLayout {
                             spacing: 8px;
                             width: 180px;
@@ -2019,15 +2024,16 @@ export component AppWindow inherits Window {
                                 text: "Mip Level:";
                                 vertical-alignment: center;
                                 font-size: 12px;
-                                color: #dcddde;
+                                color: root.max_available_mips > 1 ? #dcddde : #555555;
                             }
 
                             SpinBox {
                                 value: root.active_mip_level;
                                 minimum: 0;
-                                maximum: 16;
+                                maximum: root.max_available_mips > 1 ? root.max_available_mips - 1 : 0;
                                 height: 24px;
                                 width: 100px;
+                                enabled: root.max_available_mips > 1;
                                 edited(val) => { root.active_mip_level = val; root.mip_level_changed(); }
                             }
                         }

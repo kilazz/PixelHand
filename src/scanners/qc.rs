@@ -13,8 +13,6 @@ use crate::core::qc::{
 use crate::state::QcIssueSummary;
 use crate::utils::helpers::discover_files;
 
-pub use crate::core::qc::calculate_diff_map;
-
 /// Executes an absolute local directory Quality Control audit.
 pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
     let path = PathBuf::from(&params.dir_a);

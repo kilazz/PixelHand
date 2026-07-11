@@ -542,10 +542,16 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
 /// Binds UI utility parameters, tonemapping options, sorting/filtering engines, and column resizers.
 fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
-    let app_weak_save = app.as_weak();
-    app.on_save_settings(move || {
-        if let Some(ui) = app_weak_save.upgrade() {
-            utils::settings::save_settings(&ui);
+    let app_weak_comp = app.as_weak();
+    app.on_compare_mode_changed(move || {
+        let app_copy = app_weak_comp.clone();
+        if let Some(ui) = app_copy.upgrade() {
+            let orig_path = ui.get_original_meta().path.to_string();
+            let dup_path = ui.get_duplicate_meta().path.to_string();
+
+            if !orig_path.is_empty() && !dup_path.is_empty() {
+                crate::app::trigger_viewport_update(app_weak_comp.clone(), orig_path, dup_path);
+            }
         }
     });
 

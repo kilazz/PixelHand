@@ -61,13 +61,8 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
             h = safe_read_u32_le(&bytes, 12);
             w = safe_read_u32_le(&bytes, 16);
 
-            let dw_flags = safe_read_u32_le(&bytes, 8);
             let mips = safe_read_u32_le(&bytes, 28);
-            mipmap_count = if (dw_flags & 0x20000) != 0 && mips > 0 {
-                mips
-            } else {
-                1
-            };
+            mipmap_count = if mips > 0 { mips } else { 1 };
 
             // dwCaps2 is located at offset 112. The flag 0x0000FE00 indicates a Cubemap.
             let dw_caps2 = safe_read_u32_le(&bytes, 112);
@@ -351,19 +346,4 @@ pub fn check_normal_map_integrity(
         }
     }
     None
-}
-
-/// Generates visual difference maps between two original resolution image buffers and saves the diagnostic output.
-pub async fn calculate_diff_map(file1: &str, file2: &str) -> Result<String> {
-    let img1 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file1, None)?;
-    let img2 = crate::format_loaders::dds_loader::open_image_with_dds_fallback(file2, None)?;
-
-    let diff =
-        super::tonemapper::calculate_difference_map(&img1.to_rgba8(), &img2.to_rgba8(), true)?;
-    let temp_dir = crate::utils::settings::get_portable_app_data_dir()?.join("temp");
-    fs::create_dir_all(&temp_dir)?;
-    let out_path = temp_dir.join("diff_output.png");
-    diff.save(&out_path)?;
-
-    Ok(out_path.to_string_lossy().to_string())
 }

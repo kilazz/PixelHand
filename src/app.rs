@@ -342,32 +342,37 @@ pub fn trigger_viewport_update(
         .store(ui.get_tonemap_operator() as usize, Ordering::Relaxed);
 
     tokio::spawn(async move {
-        if let Some(raw_orig) =
-            utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await
-        {
+        let raw_orig =
+            utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await;
+        let raw_dup = utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await;
+
+        let raw_diff = if compare_mode == 3 {
+            if let (Some(orig), Some(dup)) = (&raw_orig, &raw_dup) {
+                crate::core::tonemapper::calculate_difference_map(orig, dup, true).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(img) = raw_orig {
             let app_weak_orig = app_weak_clone.clone();
             let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
-                ui.set_image_original(utils::ui::convert_to_slint_image(&raw_orig));
+                ui.set_image_original(utils::ui::convert_to_slint_image(&img));
             });
         }
-        if let Some(raw_dup) =
-            utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await
-        {
+        if let Some(img) = raw_dup {
             let app_weak_dup = app_weak_clone.clone();
             let _ = app_weak_dup.upgrade_in_event_loop(move |ui| {
-                ui.set_image_duplicate(utils::ui::convert_to_slint_image(&raw_dup));
+                ui.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
             });
         }
 
-        if compare_mode == 3
-            && let Ok(diff_path) =
-                crate::scanners::qc::calculate_diff_map(&orig_path, &dup_path).await
-            && let Ok(diff_img) = image::open(&diff_path)
-        {
-            let raw_diff = diff_img.to_rgba8();
+        if let Some(diff) = raw_diff {
             let app_weak_diff = app_weak_clone.clone();
             let _ = app_weak_diff.upgrade_in_event_loop(move |ui| {
-                ui.set_image_heatmap(utils::ui::convert_to_slint_image(&raw_diff));
+                ui.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
             });
         }
     });
