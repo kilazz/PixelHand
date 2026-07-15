@@ -6,6 +6,8 @@ import { Store } from "../store.slint";
 export component ContextMenuPopup inherits PopupWindow {
     width: 160px;
     close-policy: close-on-click;
+    x: Store.menu_x;
+    y: Store.menu_y;
 
     Rectangle {
         background: #2b2d31;
