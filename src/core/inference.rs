@@ -131,10 +131,17 @@ impl InferenceEngine {
         let text_path = model_dir.join("text.onnx");
         let tokenizer_path = model_dir.join("tokenizer.json");
 
-        // Use decoupled helper to resolve hardware-accelerated runtime sessions
-        let visual_session = create_session(&visual_path, threads, execution_provider)?;
+        // Self-healing: If compilation fails, automatically delete the corrupted file via inspect_err to trigger a clean re-download next time
+        let visual_session = create_session(&visual_path, threads, execution_provider)
+            .inspect_err(|e| {
+                tracing::warn!(
+                    "Corrupted visual model detected. Auto-deleting '{}' to heal. Error: {:?}",
+                    visual_path.display(),
+                    e
+                );
+                let _ = std::fs::remove_file(&visual_path);
+            })?;
 
-        // Inspect output nodes dynamically to define our tensor extraction strategy
         let output_names: Vec<String> = visual_session
             .outputs()
             .iter()
@@ -163,11 +170,16 @@ impl InferenceEngine {
         );
 
         let text_session = if text_path.exists() {
-            Some(Mutex::new(create_session(
-                &text_path,
-                threads,
-                execution_provider,
-            )?))
+            let session =
+                create_session(&text_path, threads, execution_provider).inspect_err(|e| {
+                    tracing::warn!(
+                        "Corrupted text model detected. Auto-deleting '{}' to heal. Error: {:?}",
+                        text_path.display(),
+                        e
+                    );
+                    let _ = std::fs::remove_file(&text_path);
+                })?;
+            Some(Mutex::new(session))
         } else {
             None
         };
