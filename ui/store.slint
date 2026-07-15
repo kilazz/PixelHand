@@ -115,6 +115,7 @@ export global Store {
     // --- RUNTIME STATE & DATA MODELS ----------
     // ==========================================
     in-out property <int> active_tab: 0; // 0: Find, 1: Compare, 2: Log
+    in-out property <int> grid_columns: 4; // Tracks adaptive UI width constraint dynamically
     in-out property <bool> is_scanning: false;
     in-out property <float> progress: 0.0;
     in-out property <string> status_text: "System Ready. Drop images or write path.";
@@ -234,4 +235,5 @@ export global Store {
     callback thumbnail_channel_hovered(string, string);
     callback select_reference_image();
     callback show_formats_popup();
+    callback grid_columns_changed();
 }

@@ -58,6 +58,13 @@ export component AppWindow inherits Window {
     min-height: 700px;
     background: #1e1f22;
 
+    // --- ADAPTIVE GRID BEHAVIOR ---
+    property <int> calc_cols: Math.max(1, Math.round(Math.floor((self.width - Store.sidebar_width - 40px) / (Store.grid_card_size + 12px))));
+    changed calc_cols => {
+        Store.grid_columns = self.calc_cols;
+        Store.grid_columns_changed();
+    }
+
     // --- ALIAS ALL PROPERTIES & STATE (Keeps Rust Backend 100% Unchanged) ---
     in-out property <int> active_tab <=> Store.active_tab;
     in-out property <bool> tonemap_enabled <=> Store.tonemap_enabled;
@@ -307,7 +314,7 @@ export component AppWindow inherits Window {
                                     selected(val) => { Store.results_sort_changed(Store.results_sort_index); }
                                 }
 
-                                // Conditionally render expand/collapse only when in List Mode and when results exist [1]
+                                // Conditionally render expand/collapse only when in List Mode and when results exist
                                 if !Store.results_grid_mode && Store.has_results: CustomButton {
                                     text: "Expand All";
                                     height: 24px;
@@ -337,7 +344,7 @@ export component AppWindow inherits Window {
                                     clicked => { Store.reset_size_columns(); }
                                 }
 
-                                // Integrated missing Export CSV Button [2]
+                                // Integrated Export CSV Button
                                 if Store.has_results: CustomButton {
                                     text: "Export CSV";
                                     height: 24px;
@@ -390,7 +397,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        // SMART FILTER CHECKS - Bound to has_results, keeping filters persistently visible [1]
+                        // SMART FILTER CHECKS - Bound to has_results, keeping filters persistently visible
                         if Store.has_results: HorizontalLayout {
                             spacing: 12px;
                             padding-left: 4px;
@@ -453,22 +460,15 @@ export component AppWindow inherits Window {
                                         spacing: 12px;
                                         padding: 10px;
                                         alignment: start;
-                                        if row.has-col1: GridCard {
-                                            row-data: row.col1;
+
+                                        // Dynamically iterate over rubber-band allocated elements per row
+                                        for item in row.items: GridCard {
+                                            row-data: item;
                                             checkerboard: Store.checkerboard_pattern;
                                             width: Store.grid_card_size;
                                             height: Store.grid_card_size + 45px;
-                                            clicked => { Store.row_clicked(-1, false, row.col1.group_index, row.col1.path); Store.active_tab = 1; }
-                                            right_clicked(mx, my) => { Store.context_hovered_path = row.col1.path; Store.menu_x = mx; Store.menu_y = my; context_popup.show(); }
-                                            channel_hovered(path, chan) => { Store.thumbnail_channel_hovered(path, chan); }
-                                        }
-                                        if row.has-col2: GridCard {
-                                            row-data: row.col2;
-                                            checkerboard: Store.checkerboard_pattern;
-                                            width: Store.grid_card_size;
-                                            height: Store.grid_card_size + 45px;
-                                            clicked => { Store.row_clicked(-1, false, row.col2.group_index, row.col2.path); Store.active_tab = 1; }
-                                            right_clicked(mx, my) => { Store.context_hovered_path = row.col2.path; Store.menu_x = mx; Store.menu_y = my; context_popup.show(); }
+                                            clicked => { Store.row_clicked(-1, false, item.group_index, item.path); Store.active_tab = 1; }
+                                            right_clicked(mx, my) => { Store.context_hovered_path = item.path; Store.menu_x = mx; Store.menu_y = my; context_popup.show(); }
                                             channel_hovered(path, chan) => { Store.thumbnail_channel_hovered(path, chan); }
                                         }
                                     }
@@ -487,7 +487,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Scenario 2: Active scan exists, but user filters completely cleared the view [1]
+                                // Scenario 2: Active scan exists, but user filters completely cleared the view
                                 if Store.has_results && Store.results.length == 0: VerticalLayout {
                                     alignment: center;
                                     spacing: 12px;
@@ -881,10 +881,10 @@ export component AppWindow inherits Window {
                                 padding: 10px;
                                 spacing: 4px;
                                 HorizontalLayout {
-                                    spacing: 8px; // Added spacing [1]
+                                    spacing: 8px;
                                     Text {
                                         text: "Specification";
-                                        width: 130px; // Proportional column alignment [1]
+                                        width: 130px;
                                         font-weight: 700;
                                         color: #949ba4;
                                         font-size: 12px;
@@ -892,7 +892,7 @@ export component AppWindow inherits Window {
 
                                     Rectangle {
                                         width: 1px;
-                                        background: transparent; // Header spacer matching row divider [2]
+                                        background: transparent;
                                     }
 
                                     Text {
@@ -900,12 +900,12 @@ export component AppWindow inherits Window {
                                         font-weight: 700;
                                         color: #f0b132;
                                         font-size: 12px;
-                                        horizontal-stretch: 1; // Elastic stretch [1]
+                                        horizontal-stretch: 1;
                                     }
 
                                     Rectangle {
                                         width: 1px;
-                                        background: transparent; // Header spacer matching row divider [2]
+                                        background: transparent;
                                     }
 
                                     Text {
@@ -913,7 +913,7 @@ export component AppWindow inherits Window {
                                         font-weight: 700;
                                         color: #dcddde;
                                         font-size: 12px;
-                                        horizontal-stretch: 1; // Elastic stretch [1]
+                                        horizontal-stretch: 1;
                                     }
                                 }
 

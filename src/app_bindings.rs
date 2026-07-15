@@ -474,7 +474,7 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         store.set_results(ModelRc::from(std::rc::Rc::new(VecModel::from(
                             Vec::new(),
                         ))));
-                        store.set_has_results(false); // Reset persistence flag on clear [1]
+                        store.set_has_results(false); // Reset persistence flag on clear
                         let mut lock = state_copy_inner.safe_lock();
                         lock.results.clear();
                         lock.groups.clear();
@@ -554,29 +554,20 @@ fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                     let grid_model = store.get_grid_row_results();
                     for i in 0..grid_model.row_count() {
                         if let Some(mut r) = grid_model.row_data(i) {
-                            if r.has_col1
-                                && scanners::normalize_path_key(r.col1.path.as_str())
+                            let mut changed = false;
+                            let mut items: Vec<_> = r.items.iter().collect();
+
+                            for item in items.iter_mut() {
+                                if scanners::normalize_path_key(item.path.as_str())
                                     == normalized_path
-                            {
-                                r.col1.thumbnail = slint_img.clone();
-                                grid_model.set_row_data(i, r);
-                            } else if r.has_col2
-                                && scanners::normalize_path_key(r.col2.path.as_str())
-                                    == normalized_path
-                            {
-                                r.col2.thumbnail = slint_img.clone();
-                                grid_model.set_row_data(i, r);
-                            } else if r.has_col3
-                                && scanners::normalize_path_key(r.col3.path.as_str())
-                                    == normalized_path
-                            {
-                                r.col3.thumbnail = slint_img.clone();
-                                grid_model.set_row_data(i, r);
-                            } else if r.has_col4
-                                && scanners::normalize_path_key(r.col4.path.as_str())
-                                    == normalized_path
-                            {
-                                r.col4.thumbnail = slint_img.clone();
+                                {
+                                    item.thumbnail = slint_img.clone();
+                                    changed = true;
+                                }
+                            }
+
+                            if changed {
+                                r.items = ModelRc::from(std::rc::Rc::new(VecModel::from(items)));
                                 grid_model.set_row_data(i, r);
                             }
                         }
@@ -954,7 +945,7 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 
     let app_weak_auto = app.as_weak();
-    let state_auto = state;
+    let state_auto = state.clone();
     let store = app.global::<Store>();
     store.on_auto_size_columns(move || {
         if let Some(ui) = app_weak_auto.upgrade() {
@@ -993,7 +984,6 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         }
     });
 
-    // Reset columns callback implementation
     let app_weak_reset = app.as_weak();
     let store = app.global::<Store>();
     store.on_reset_size_columns(move || {
@@ -1008,6 +998,18 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             store.set_col_cubemap_w(75.0);
             store.set_col_size_w(85.0);
             tracing::info!("Column sizes reset to defaults.");
+        }
+    });
+
+    // Subscribes to layout changes to rebuild grid UI chunkings gracefully dynamically
+    let app_weak_grid = app.as_weak();
+    let state_grid = state.clone();
+    let store = app.global::<Store>();
+    store.on_grid_columns_changed(move || {
+        if let Some(ui) = app_weak_grid.upgrade() {
+            let lock = state_grid.safe_lock();
+            let store = ui.global::<Store>();
+            utils::ui::update_results_ui(&store, &lock);
         }
     });
 }

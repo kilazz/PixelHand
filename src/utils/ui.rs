@@ -227,18 +227,15 @@ pub fn update_results_ui(store: &Store, state: &AppState) {
         }
     }
 
-    // Chunk the flat grid_items list into rows of 4 columns to leverage native Slint ListView virtualization
-    let mut grid_row_results = Vec::with_capacity(grid_items.len().div_ceil(4));
-    for chunk in grid_items.chunks(4) {
+    // --- ADAPTIVE GRID COLUMNS ---
+    // Extract calculated responsive columns count from Slint Store property
+    let cols = store.get_grid_columns().max(1) as usize;
+
+    // Chunk the flat grid_items list into rows dynamically to leverage native Slint ListView virtualization
+    let mut grid_row_results = Vec::with_capacity(grid_items.len().div_ceil(cols));
+    for chunk in grid_items.chunks(cols) {
         let row = GridRow {
-            col1: chunk.first().cloned().unwrap_or_default(),
-            col2: chunk.get(1).cloned().unwrap_or_default(),
-            col3: chunk.get(2).cloned().unwrap_or_default(),
-            col4: chunk.get(3).cloned().unwrap_or_default(),
-            has_col1: !chunk.is_empty(),
-            has_col2: chunk.get(1).is_some(),
-            has_col3: chunk.get(2).is_some(),
-            has_col4: chunk.get(3).is_some(),
+            items: ModelRc::from(Rc::new(VecModel::from(chunk.to_vec()))),
         };
         grid_row_results.push(row);
     }

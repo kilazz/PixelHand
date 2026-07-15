@@ -33,14 +33,7 @@ export struct SelectedFile {
     path: string,
 }
 
-// Added to group results in batches of 4 on the Rust side to support native Slint ListView virtualization
+// Dynamically sized row chunk for the grid view
 export struct GridRow {
-    col1: ResultsRow,
-    col2: ResultsRow,
-    col3: ResultsRow,
-    col4: ResultsRow,
-    has_col1: bool,
-    has_col2: bool,
-    has_col3: bool,
-    has_col4: bool,
+    items: [ResultsRow],
 }
