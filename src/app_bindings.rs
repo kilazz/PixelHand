@@ -734,14 +734,51 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         if lock.sort_column == col_str {
             lock.sort_ascending = !lock.sort_ascending;
         } else {
-            lock.sort_column = col_str;
+            lock.sort_column = col_str.clone();
             lock.sort_ascending = true;
         }
 
         let asc = lock.sort_ascending;
 
         if !lock.groups.is_empty() {
-            match lock.sort_column.as_str() {
+            for group in &mut lock.groups {
+                if group.files.len() > 1 {
+                    let (_, duplicates) = group.files.split_at_mut(1);
+                    match col_str.as_str() {
+                        "name" => duplicates.sort_by(|a, b| {
+                            if asc {
+                                a.path.to_lowercase().cmp(&b.path.to_lowercase())
+                            } else {
+                                b.path.to_lowercase().cmp(&a.path.to_lowercase())
+                            }
+                        }),
+                        "size" => duplicates.sort_by(|a, b| {
+                            if asc {
+                                a.size.cmp(&b.size)
+                            } else {
+                                b.size.cmp(&a.size)
+                            }
+                        }),
+                        "score" => duplicates.sort_by(|a, b| {
+                            let res = a
+                                .similarity
+                                .partial_cmp(&b.similarity)
+                                .unwrap_or(std::cmp::Ordering::Equal);
+                            if asc { res } else { res.reverse() }
+                        }),
+                        "path" => duplicates.sort_by(|a, b| {
+                            if asc {
+                                a.path.to_lowercase().cmp(&b.path.to_lowercase())
+                            } else {
+                                b.path.to_lowercase().cmp(&a.path.to_lowercase())
+                            }
+                        }),
+                        _ => {}
+                    }
+                }
+            }
+
+            match col_str.as_str() {
                 "name" => {
                     lock.groups.sort_by(|a, b| {
                         let n_a = a
@@ -776,58 +813,85 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         if asc { res } else { res.reverse() }
                     });
                 }
+                "path" => {
+                    lock.groups.sort_by(|a, b| {
+                        let p_a = a
+                            .files
+                            .first()
+                            .map(|f| f.path.to_lowercase())
+                            .unwrap_or_default();
+                        let p_b = b
+                            .files
+                            .first()
+                            .map(|f| f.path.to_lowercase())
+                            .unwrap_or_default();
+                        let res = p_a.cmp(&p_b);
+                        if asc { res } else { res.reverse() }
+                    });
+                }
                 _ => {}
             }
             lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
         } else if !lock.results.is_empty() {
-            match lock.sort_column.as_str() {
-                "name" => {
-                    lock.results.sort_by(|a, b| {
-                        let res = a.name.to_lowercase().cmp(&b.name.to_lowercase());
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "format" => {
-                    lock.results.sort_by(|a, b| {
-                        let res = a
-                            .format_str
+            match col_str.as_str() {
+                "name" => lock.results.sort_by(|a, b| {
+                    if asc {
+                        a.name.to_lowercase().cmp(&b.name.to_lowercase())
+                    } else {
+                        b.name.to_lowercase().cmp(&a.name.to_lowercase())
+                    }
+                }),
+                "format" => lock.results.sort_by(|a, b| {
+                    if asc {
+                        a.format_str
                             .to_lowercase()
-                            .cmp(&b.format_str.to_lowercase());
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "dimensions" => {
-                    lock.results.sort_by(|a, b| {
-                        let res = a.pixels_count.cmp(&b.pixels_count);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "mipmaps" => {
-                    lock.results.sort_by(|a, b| {
-                        let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
-                        let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
-                        let res = m_a.cmp(&m_b);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "cubemap" => {
-                    lock.results.sort_by(|a, b| {
-                        let res = a.cubemap_str.cmp(&b.cubemap_str);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "size" => {
-                    lock.results.sort_by(|a, b| {
-                        let res = a.size_bytes.cmp(&b.size_bytes);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "path" => {
-                    lock.results.sort_by(|a, b| {
-                        let res = a.path.to_lowercase().cmp(&b.path.to_lowercase());
-                        if asc { res } else { res.reverse() }
-                    });
-                }
+                            .cmp(&b.format_str.to_lowercase())
+                    } else {
+                        b.format_str
+                            .to_lowercase()
+                            .cmp(&a.format_str.to_lowercase())
+                    }
+                }),
+                "dimensions" => lock.results.sort_by(|a, b| {
+                    if asc {
+                        a.pixels_count.cmp(&b.pixels_count)
+                    } else {
+                        b.pixels_count.cmp(&a.pixels_count)
+                    }
+                }),
+                "mipmaps" => lock.results.sort_by(|a, b| {
+                    let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
+                    let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
+                    if asc { m_a.cmp(&m_b) } else { m_b.cmp(&m_a) }
+                }),
+                "cubemap" => lock.results.sort_by(|a, b| {
+                    if asc {
+                        a.cubemap_str.cmp(&b.cubemap_str)
+                    } else {
+                        b.cubemap_str.cmp(&a.cubemap_str)
+                    }
+                }),
+                "size" => lock.results.sort_by(|a, b| {
+                    if asc {
+                        a.size_bytes.cmp(&b.size_bytes)
+                    } else {
+                        b.size_bytes.cmp(&a.size_bytes)
+                    }
+                }),
+                "path" => lock.results.sort_by(|a, b| {
+                    if asc {
+                        a.path.to_lowercase().cmp(&b.path.to_lowercase())
+                    } else {
+                        b.path.to_lowercase().cmp(&a.path.to_lowercase())
+                    }
+                }),
+                "score" => lock.results.sort_by(|a, b| {
+                    let res = a
+                        .similarity
+                        .partial_cmp(&b.similarity)
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    if asc { res } else { res.reverse() }
+                }),
                 _ => {}
             }
         }
@@ -938,7 +1002,6 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
         }
         if let Some(ui) = app_weak_sort.upgrade() {
-            let lock = state_clone_sort.safe_lock();
             let store = ui.global::<Store>();
             utils::ui::update_results_ui(&store, &lock);
         }
