@@ -236,7 +236,10 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo> {
             if matches!(dxgi, 71 | 72 | 80 | 81) {
                 is_compressed = true;
                 block_bytes = 8;
-            } else if matches!(dxgi, 74 | 75 | 77 | 78 | 83 | 84) {
+            } else if matches!(
+                dxgi,
+                74 | 75 | 77 | 78 | 83 | 84 | 94 | 95 | 96 | 97 | 98 | 99
+            ) {
                 is_compressed = true;
                 block_bytes = 16;
             }
