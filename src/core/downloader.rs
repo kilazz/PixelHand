@@ -189,10 +189,9 @@ pub async fn verify_and_download_models(
                     "tokenizer.json",
                     "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
                 ),
-                // The ONNX model is unmerged on the main branch, so we download it from PR #3 (refs/pr/3) branch
                 (
                     "text.onnx",
-                    "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/refs/pr/3/onnx/model.onnx",
+                    "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/7a66a9239794caa50824f8c737366abc34d328aa/onnx/model.onnx",
                 ),
             ],
         ),
