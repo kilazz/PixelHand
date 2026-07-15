@@ -91,7 +91,7 @@ pub fn append_to_console_log(msg: &str) {
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    // Run database vector cache garbage collection asynchronously to prevent blocking the startup thread
+    // Run database vector cache garbage collection asynchronously using drop to avoid clippy warnings
     drop(tokio::task::spawn_blocking(|| {
         utils::cache::run_vector_cache_garbage_collector();
     }));
@@ -234,8 +234,6 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    trigger_startup_model_download(app.as_weak());
-
     // Delegate callback hooks registration to app_bindings module
     crate::app_bindings::register_callbacks(&app, state, cancel_token);
 
@@ -331,43 +329,6 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
 
     crate::scanners::ENABLE_PREVIEWS.store(settings.enable_previews, Ordering::Relaxed);
     crate::scanners::PREVIEW_QUALITY.store(settings.preview_quality, Ordering::Relaxed);
-}
-
-/// Triggers background download tasks for default ONNX model weights on startup if missing.
-fn trigger_startup_model_download(app_weak: slint::Weak<AppWindow>) {
-    let app = match app_weak.upgrade() {
-        Some(ui) => ui,
-        None => return,
-    };
-    let active_model = app.get_ai_model();
-
-    tokio::spawn(async move {
-        let app_weak_clone = app_weak.clone();
-        match crate::core::downloader::verify_and_download_models(app_weak_clone, active_model)
-            .await
-        {
-            Ok(_) => {
-                let _ = app_weak.upgrade_in_event_loop(|ui| {
-                    let store = ui.global::<crate::app::Store>();
-                    store.set_status_text("AI models verified. System ready.".into());
-                    store.set_progress(1.0);
-                    store.set_is_scanning(false);
-                });
-            }
-            Err(e) => {
-                let err_msg = e.to_string();
-                tracing::error!("Model download failed: {}", err_msg);
-                let err_msg_clone = err_msg.clone();
-                let _ = app_weak.upgrade_in_event_loop(move |ui| {
-                    let store = ui.global::<crate::app::Store>();
-                    store.set_is_scanning(false);
-                    store.set_status_text(
-                        format!("Model verification failed: {}", err_msg_clone).into(),
-                    );
-                });
-            }
-        }
-    });
 }
 
 /// Helper function to push decoded graphics buffers to Slint preview targets.

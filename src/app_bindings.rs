@@ -154,6 +154,7 @@ fn bind_scan_execution(
                 && let Err(e) = crate::core::downloader::verify_and_download_models(
                     app_weak_download.clone(),
                     params_for_task.ai_model,
+                    params_for_task.cancel_token.clone(),
                 )
                 .await
             {
@@ -741,6 +742,7 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         let asc = lock.sort_ascending;
 
         if !lock.groups.is_empty() {
+            // 1. Sort duplicates INSIDE each group (keeping index 0 intact)
             for group in &mut lock.groups {
                 if group.files.len() > 1 {
                     let (_, duplicates) = group.files.split_at_mut(1);
@@ -778,6 +780,7 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 }
             }
 
+            // 2. Sort the groups themselves
             match col_str.as_str() {
                 "name" => {
                     lock.groups.sort_by(|a, b| {
@@ -833,6 +836,7 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
             lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
         } else if !lock.results.is_empty() {
+            // Flat list sorting
             match col_str.as_str() {
                 "name" => lock.results.sort_by(|a, b| {
                     if asc {
