@@ -269,7 +269,34 @@ impl InferenceEngine {
             .lock()
             .map_err(|_| anyhow::anyhow!("Session lock poisoned"))?;
 
-        let outputs = session.run(inputs!["pixel_values" => &input_tensor])?;
+        // Retrieve input names to detect whether this is a unified model expecting text inputs
+        let inputs_names: std::collections::HashSet<String> = session
+            .inputs()
+            .iter()
+            .map(|i| i.name().to_string())
+            .collect();
+
+        // Provide dummy input tensors if the model expects text inputs alongside images (e.g. LLM2CLIP)
+        let outputs = if inputs_names.contains("input_ids") {
+            let dummy_input_ids =
+                Value::from_array(Array::<i64, _>::zeros((batch_size, 1)).into_dyn())?;
+            if inputs_names.contains("attention_mask") {
+                let dummy_attention_mask =
+                    Value::from_array(Array::<i64, _>::ones((batch_size, 1)).into_dyn())?;
+                session.run(inputs![
+                    "pixel_values" => &input_tensor,
+                    "input_ids" => &dummy_input_ids,
+                    "attention_mask" => &dummy_attention_mask
+                ])?
+            } else {
+                session.run(inputs![
+                    "pixel_values" => &input_tensor,
+                    "input_ids" => &dummy_input_ids
+                ])?
+            }
+        } else {
+            session.run(inputs!["pixel_values" => &input_tensor])?
+        };
 
         let (shape, raw_slice): (Vec<i64>, std::borrow::Cow<'_, [f32]>) = match self
             .visual_output_mode
