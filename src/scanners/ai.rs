@@ -14,9 +14,6 @@ use crate::scanners::AnalysisItem;
 use crate::state::{AiSearchResultSummary, DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::discover_files;
 
-/// A thread-safe blocking semaphore implemented via Mutex and Condvar to limit
-/// concurrent decoding of high-resolution textures. Throttling concurrent image
-/// parsing protects against memory exhaustion (OOM) under heavy parallel workloads.
 struct DecoupledSemaphore {
     count: Mutex<usize>,
     condvar: Condvar,
@@ -54,12 +51,10 @@ impl<'a> Drop for DecoupledSemaphoreGuard<'a> {
 
 static DECODE_SEMAPHORE: OnceLock<DecoupledSemaphore> = OnceLock::new();
 
-/// Restricts heavy image decoding workers to avoid parallel memory spikes.
 fn get_decode_semaphore() -> &'static DecoupledSemaphore {
     DECODE_SEMAPHORE.get_or_init(|| DecoupledSemaphore::new(2))
 }
 
-/// Translates UI precision indexes into LanceDB IVF-PQ lookup parameters.
 fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
     match precision_idx {
         0 => (8, 1),
@@ -70,8 +65,6 @@ fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
     }
 }
 
-/// Discovers folder assets, handles DB synchronization, resolves cached embeddings,
-/// and executes model pipeline runs to populate database records.
 async fn scan_and_index_directory(
     params: &super::ScanParams,
 ) -> Result<(DatabaseService, InferenceEngine, Vec<DbRecord>)> {
@@ -97,7 +90,9 @@ async fn scan_and_index_directory(
         2 => ("siglip_base".to_string(), 768),
         3 => ("siglip_large".to_string(), 1024),
         4 => ("dinov2_base".to_string(), 768),
-        5 => (
+        5 => ("siglip2_base".to_string(), 768),
+        6 => ("llm2clip_base".to_string(), 1280),
+        7 => (
             params.custom_model_path.clone(),
             params.custom_model_dim as usize,
         ),
@@ -111,12 +106,11 @@ async fn scan_and_index_directory(
         hasher.digest()
     };
 
-    // Keep unique schema workspaces divided per target folder to avoid vector dimension clashes.
     let db_dir = app_dir
         .join(".lancedb_cache")
         .join(format!("{}_{:016x}", folder_name, folder_hash));
 
-    let model_dir = if params.ai_model == 5 {
+    let model_dir = if params.ai_model == 7 {
         PathBuf::from(&folder_name)
     } else {
         app_dir.join("models").join(&folder_name)
@@ -124,7 +118,6 @@ async fn scan_and_index_directory(
 
     let mut db = DatabaseService::new();
 
-    // Rebuild the cached database partition automatically if initialization fails.
     if let Err(e) = db.initialize(&db_dir, "images", dim).await {
         crate::app::append_to_console_log(&format!(
             "[Error] LanceDB partition initialization failed: {}. Rebuilding clean state...",
@@ -232,8 +225,8 @@ async fn scan_and_index_directory(
 
                     // Select closest mip level dynamically based on AI model architecture
                     let target_size = match params.ai_model {
-                        2 | 3 => 384, // SigLIP models run at 384x384
-                        _ => 256,     // CLIP and DINOv2 run at 224x224
+                        2 | 3 | 5 => 384,
+                        _ => 256,
                     };
 
                     let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(
@@ -329,7 +322,6 @@ async fn scan_and_index_directory(
     Ok((db, engine, final_records))
 }
 
-/// Launches AI duplicate search utilizing vector proximity groups in LanceDB workspace.
 pub async fn run_ai_duplicate_scan(
     params: super::ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
@@ -484,7 +476,6 @@ pub async fn run_ai_duplicate_scan(
     Ok(results)
 }
 
-/// Executes a text semantic search inside the generated directory vector database.
 pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResultSummary>> {
     let (db, engine, _records) = scan_and_index_directory(&params).await?;
     let (nprobes, refine_factor) = map_precision_presets(params.search_precision);

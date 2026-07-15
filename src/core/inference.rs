@@ -20,7 +20,7 @@ pub struct PreprocessingConfig {
 impl PreprocessingConfig {
     /// Resolves the correct image scaling and normalization parameters based on the chosen AI architecture.
     pub fn for_model(model_idx: i32, custom_arch: i32) -> Self {
-        if model_idx == 5 {
+        if model_idx == 7 {
             match custom_arch {
                 1 => Self {
                     // SigLIP-style symmetric normalization [-1, 1] at 384x384 resolution
@@ -57,6 +57,18 @@ impl PreprocessingConfig {
                     target_size: (224, 224),
                     mean: [0.485, 0.456, 0.406],
                     std: [0.229, 0.224, 0.225],
+                },
+                5 => Self {
+                    // Google SigLIP 2 Base (patch16-224)
+                    target_size: (224, 224),
+                    mean: [0.5, 0.5, 0.5],
+                    std: [0.5, 0.5, 0.5],
+                },
+                6 => Self {
+                    // LLM2CLIP OpenAI-B-16
+                    target_size: (224, 224),
+                    mean: [0.48145466, 0.4578275, 0.40821073],
+                    std: [0.26862954, 0.2613026, 0.2757771],
                 },
                 _ => Self {
                     target_size: (224, 224),

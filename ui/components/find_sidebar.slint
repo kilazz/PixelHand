@@ -370,6 +370,8 @@ export component FindSidebar inherits Rectangle {
                                     "Compact (SigLIP-B)",
                                     "High Quality (SigLIP-L)",
                                     "Visual Structure (DINOv2-B)",
+                                    "Google SigLIP 2 Base",
+                                    "LLM2CLIP OpenAI-B-16",
                                     "Custom (Local ONNX)"
                                 ];
                                 current-index <=> Store.ai_model;
@@ -378,7 +380,7 @@ export component FindSidebar inherits Rectangle {
                             }
                         }
 
-                        if Store.ai_model == 5: VerticalLayout {
+                        if Store.ai_model == 7: VerticalLayout {
                             spacing: 4px;
                             FormRow {
                                 title: "Local Path:";
@@ -701,7 +703,6 @@ export component FindSidebar inherits Rectangle {
                                 toggled => { Store.save_settings(); }
                             }
 
-                            // Dynamic slider for resizing List Preview thumbnails [1]
                             if Store.enable_previews: FormRow {
                                 title: "List Thumb Size:";
                                 HorizontalLayout {
@@ -709,7 +710,7 @@ export component FindSidebar inherits Rectangle {
                                     Slider {
                                         value: Store.list_preview_size / 1px;
                                         minimum: 32;
-                                        maximum: 120; // Allows increasing duplicate thumbnail size up to 120px [1]
+                                        maximum: 120;
                                         height: 32px;
                                         changed(val) => {
                                             Store.list_preview_size = val * 1px;
@@ -727,7 +728,6 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            // Dynamic slider for resizing Grid Mode cards
                             if Store.enable_previews: FormRow {
                                 title: "Grid Card Size:";
                                 HorizontalLayout {
@@ -735,7 +735,7 @@ export component FindSidebar inherits Rectangle {
                                     Slider {
                                         value: Store.grid_card_size / 1px;
                                         minimum: 100;
-                                        maximum: 250; // Allows increasing grid card size up to 250px [1]
+                                        maximum: 250;
                                         height: 32px;
                                         changed(val) => {
                                             Store.grid_card_size = val * 1px;

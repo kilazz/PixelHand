@@ -3,12 +3,16 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use reqwest::Client;
+use slint::ComponentHandle;
 use std::path::Path;
+use std::sync::OnceLock;
 use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex as AsyncMutex;
 
-/// Progress-aware asynchronous HTTP download utility.
-/// Streams bytes directly to disk asynchronously and updates UI percentage indicators safely.
+// Global lock to prevent conflicts between background download and manual scan threads
+static DOWNLOAD_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+
 pub async fn download_file_with_progress<F>(
     progress_callback: F,
     url: &str,
@@ -33,7 +37,6 @@ where
 
     let total_bytes = response.content_length().unwrap_or(0);
 
-    // Use tokio's asynchronous file handler to prevent blocking the async reactor
     let mut file = File::create(dest_path)
         .await
         .context("Failed to create destination model file on disk")?;
@@ -63,20 +66,20 @@ where
     Ok(())
 }
 
-/// Orchestrates the verification and download of the selected AI model weights.
-/// Automatically handles vision-only (DINOv2) vs multimodal (CLIP/SigLIP) layout boundaries.
 pub async fn verify_and_download_models(
     app_weak: slint::Weak<crate::app::AppWindow>,
     model_idx: i32,
 ) -> Result<()> {
-    // If the index corresponds to a Custom Local Model, skip downloading entirely
-    if model_idx == 5 {
+    if model_idx == 7 {
         return Ok(());
     }
 
+    // Acquire lock to avoid concurrent downloads if triggered multiple times
+    let lock = DOWNLOAD_LOCK.get_or_init(|| AsyncMutex::new(()));
+    let _guard = lock.lock().await;
+
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
 
-    // Map selected model indexes to HuggingFace Xenova ONNX repositories
     let (folder_name, files) = match model_idx {
         1 => (
             "clip_vit_l14",
@@ -136,6 +139,40 @@ pub async fn verify_and_download_models(
                 "https://huggingface.co/Xenova/dinov2-base/resolve/main/onnx/model.onnx",
             )],
         ),
+        5 => (
+            "siglip2_base",
+            vec![
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/tokenizer.json",
+                ),
+                (
+                    "text.onnx",
+                    "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/text_model.onnx",
+                ),
+                (
+                    "visual.onnx",
+                    "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/vision_model.onnx",
+                ),
+            ],
+        ),
+        6 => (
+            "llm2clip_base",
+            vec![
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/main/tokenizer.json",
+                ),
+                (
+                    "text.onnx",
+                    "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/main/onnx/model.onnx",
+                ),
+                (
+                    "visual.onnx",
+                    "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/main/onnx/model.onnx",
+                ),
+            ],
+        ),
         _ => (
             "clip_vit_b32",
             vec![
@@ -162,24 +199,46 @@ pub async fn verify_and_download_models(
 
     for (name, url) in files {
         let dest = model_dir.join(name);
-        if !dest.exists() {
+
+        // Checks if the file exists and is not corrupted / empty (< 1KB)
+        let is_valid = match tokio::fs::metadata(&dest).await {
+            Ok(meta) => meta.len() > 1024,
+            Err(_) => false,
+        };
+
+        if !is_valid {
+            // Download to temporary .tmp files first to prevent corruption on interruption
+            let tmp_dest = model_dir.join(format!("{}.tmp", name));
+
             let app_copy = app_weak.clone();
             let file_name = name.to_string();
+
+            // Force scanning banner to show so the user sees progress
+            let _ = app_copy.upgrade_in_event_loop(|ui| {
+                let store = ui.global::<crate::app::Store>();
+                store.set_is_scanning(true);
+            });
 
             download_file_with_progress(
                 move |percentage| {
                     let f_name = file_name.clone();
                     let _ = app_copy.upgrade_in_event_loop(move |ui| {
-                        ui.set_progress(percentage / 100.0);
-                        ui.set_status_text(
+                        let store = ui.global::<crate::app::Store>();
+                        store.set_progress(percentage / 100.0);
+                        store.set_status_text(
                             format!("Downloading {}: {:.1}%", f_name, percentage).into(),
                         );
                     });
                 },
                 url,
-                &dest,
+                &tmp_dest,
             )
             .await?;
+
+            // Atomically finalize downloaded file on success
+            fs::rename(&tmp_dest, &dest)
+                .await
+                .context("Failed to finalize downloaded file")?;
         }
     }
     Ok(())
