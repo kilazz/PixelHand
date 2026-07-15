@@ -95,7 +95,7 @@ export component ListRow inherits Rectangle {
                 height: 100%;
 
                 HorizontalLayout {
-                    width: Store.enable_previews ? (Store.col_file_w - Store.list_preview_size - 16px) : (Store.col_file_w - 32px);
+                    width: Store.enable_previews ? (Store.col_file_w - Store.list_preview_size - 8px) : Store.col_file_w;
                     Text {
                         text: row-data.name;
                         color: #dcddde;
