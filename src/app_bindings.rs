@@ -174,8 +174,6 @@ fn bind_scan_execution(
                     .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
             }
 
-            // Wrap the CPU-heavy Rayon pipelines inside spawn_blocking to prevent
-            // starving the async executor threads, nesting a local block_on for LanceDB's async tasks.
             let params_for_task_clone = params_for_task.clone();
             let scan_result = tokio::task::spawn_blocking(move || {
                 tokio::runtime::Handle::current()

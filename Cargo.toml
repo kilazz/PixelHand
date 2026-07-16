@@ -34,7 +34,7 @@ ab_glyph = "0.2.32"
 heic = "0.1.6"
 
 # Image Hashes and Similarity Metrics
-xxhash-rust = { version = "0.8.16", features = ["xxh64"] }
+xxhash-rust = { version = "0.8.17", features = ["xxh64"] }
 image_hasher = "3.1.1"
 fast_image_resize = "6.0.0"
 
@@ -52,20 +52,21 @@ arrow-schema = "59.1.0"
 # Async and General Utilities
 futures = "0.3.32"
 futures-util = "0.3.32"
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "time"] }
-uuid = { version = "1.23.4", features = ["v4"] }
+tokio = { version = "1.52.4", features = ["rt-multi-thread", "macros", "time"] }
+uuid = { version = "1.24.0", features = ["v4"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "stream"] }
 trash = "5.2.6"
 rfd = "0.17.2"
 base64 = "0.22.1"
 reflink-copy = "0.1.30"
-open = "5.3.6"
+open = "5.4.0"
 
 # Error Diagnostics
 anyhow = "1.0.103"
 thiserror = "2.0.18"
 
 moka = { version = "0.12.15", features = ["sync"] }
+ustr = "1.1.0"
 
 [patch.crates-io]
 # Override for suffix automaton crate compatibility

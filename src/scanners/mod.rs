@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use ustr::Ustr;
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
@@ -84,14 +85,15 @@ impl CachedThumbnail {
 }
 
 /// Fast thread-safe in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
-/// Automatically handles weight-based eviction using LRU policy under the hood.
-pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Cache<String, CachedThumbnail>> = OnceLock::new();
+/// Key type migrated to Ustr to leverage O(1) comparison and pre-calculated pointer hashing.
+pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Cache<Ustr, CachedThumbnail>> = OnceLock::new();
 
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
 pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
 
 /// Normalizes path representations across Windows and Unix platforms to guarantee absolute cache hit consistency.
-pub fn normalize_path_key(path_str: &str) -> String {
+/// Returns an interned Ustr for instant pointer-comparison (==) and zero heap allocations on hot paths.
+pub fn normalize_path_key(path_str: &str) -> Ustr {
     let normalized: String = path_str
         .chars()
         .map(|c| {
@@ -102,7 +104,7 @@ pub fn normalize_path_key(path_str: &str) -> String {
             }
         })
         .collect();
-    normalized.to_lowercase()
+    ustr::ustr(&normalized.to_lowercase())
 }
 
 /// Stores an image buffer in the memory cache, evicting the oldest items if total memory footprint exceeds 500 MB.
@@ -254,7 +256,7 @@ impl ScanParams {
             search_method: store.get_search_method(),
             execution_provider,
 
-            qc_mode: store.get_qc_mode(),
+            qc_mode: store.get_search_method() == 4,
             qc_npot: store.get_qc_npot(),
             qc_mipmaps: store.get_qc_mipmaps(),
             qc_block_align: store.get_qc_block_align(),

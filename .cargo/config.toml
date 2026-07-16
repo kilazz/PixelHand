@@ -8,3 +8,4 @@ git-fetch-with-cli = true
 # instead of the standard Microsoft MSVC linker (link.exe).
 # This significantly accelerates link times, especially during incremental builds.
 linker = "rust-lld.exe"
+rustflags = ["-C", "target-cpu=native"]
