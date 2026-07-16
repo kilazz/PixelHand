@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use slint::ComponentHandle;
 use std::fs;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::state::{AppSettings, AppState};
@@ -17,6 +17,10 @@ pub static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 
 // Fast intermediate thread-safe queue to bypass immediate UI locked calls
 static LOG_MESSAGES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+
+// Thread-safe atomic registers to bridge Slint states to background high-frequency loops safely
+pub static COMPARE_MODE: AtomicUsize = AtomicUsize::new(0);
+pub static FLICKER_INTERVAL: AtomicUsize = AtomicUsize::new(333);
 
 /// Custom tracing subscriber log handler wrapping native console pipes
 struct UiLogWriter;
@@ -202,34 +206,54 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // Spawn async background loop to toggle flicker mode (highly responsive)
+    // background task 1: Low-frequency (100ms) sync that safely polls Slint properties on the UI thread
+    // and stores them into thread-safe atomics, preventing event loop flooding.
+    let app_weak_sync = app.as_weak();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            let success = app_weak_sync
+                .upgrade_in_event_loop(|ui| {
+                    let store = ui.global::<crate::app::Store>();
+                    COMPARE_MODE.store(store.get_compare_mode() as usize, Ordering::Relaxed);
+                    FLICKER_INTERVAL
+                        .store(store.get_flicker_interval_val() as usize, Ordering::Relaxed);
+                })
+                .is_ok();
+            if !success {
+                break;
+            }
+        }
+    });
+
+    // background task 2: High-frequency flicker precision loop executing strictly using
+    // thread-safe atomic registers to prevent cross-thread Slint safety violations.
     let app_weak_flicker = app.as_weak();
     tokio::spawn(async move {
         let mut elapsed_ms: u64 = 0;
-        let tick_rate_ms: u64 = 10; // Check slider value every 10ms
+        let tick_rate_ms: u64 = 10; // Precision tick
 
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(tick_rate_ms)).await;
-            elapsed_ms += tick_rate_ms;
 
-            if let Some(ui) = app_weak_flicker.upgrade() {
-                let store = ui.global::<crate::app::Store>();
-                let target_duration = store.get_flicker_interval_val() as u64;
+            let mode = COMPARE_MODE.load(Ordering::Relaxed);
+            if mode == 4 {
+                elapsed_ms += tick_rate_ms;
+                let target_duration = FLICKER_INTERVAL.load(Ordering::Relaxed) as u64;
 
-                // If elapsed time exceeds the current slider value
                 if elapsed_ms >= target_duration.max(50) {
                     elapsed_ms = 0; // Reset timer
 
-                    if store.get_compare_mode() == 4 {
-                        let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
-                            let store = ui.global::<crate::app::Store>();
+                    let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
+                        let store = ui.global::<crate::app::Store>();
+                        // Double check comparison mode inside the safe context
+                        if store.get_compare_mode() == 4 {
                             store.set_flicker_show_duplicate(!store.get_flicker_show_duplicate());
-                        });
-                    }
+                        }
+                    });
                 }
             } else {
-                // If UI is dropped (app closed), exit the loop
-                break;
+                elapsed_ms = 0;
             }
         }
     });
