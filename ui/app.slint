@@ -41,7 +41,7 @@ import {
     WipeViewport,
 } from "./components/common.slint";
 
-// IMPORT CUSTOM POPUPS (All consolidated in components folder)
+// IMPORT CUSTOM POPUPS
 import { SkippedFilesPopup } from "./components/skipped_popup.slint";
 import { ContextMenuPopup } from "./components/context_menu.slint";
 import { FileFormatsPopup } from "./components/file_formats_popup.slint";
@@ -56,7 +56,7 @@ export component AppWindow inherits Window {
     preferred-height: 880px;
     min-width: 1000px;
     min-height: 700px;
-    background: #1e1f22;
+    background: #1e1e1e;
 
     // --- ADAPTIVE GRID BEHAVIOR ---
     property <int> calc_cols: Math.max(1, Math.round(Math.floor((self.width - Store.sidebar_width - 40px) / (Store.grid_card_size + 12px))));
@@ -65,7 +65,7 @@ export component AppWindow inherits Window {
         Store.grid_columns_changed();
     }
 
-    // --- ALIAS ALL PROPERTIES & STATE (Keeps Rust Backend 100% Unchanged) ---
+    // --- ALIAS ALL PROPERTIES & STATE ---
     in-out property <int> active_tab <=> Store.active_tab;
     in-out property <bool> tonemap_enabled <=> Store.tonemap_enabled;
     in-out property <int> tonemap_operator <=> Store.tonemap_operator;
@@ -199,7 +199,6 @@ export component AppWindow inherits Window {
     in-out property <string> console_log <=> Store.console_log;
     in-out property <string> context_hovered_path <=> Store.context_hovered_path;
 
-    // --- POPUPS INSTANTIATION ---
     skipped_popup := SkippedFilesPopup { }
 
     context_popup := ContextMenuPopup { }
@@ -240,7 +239,7 @@ export component AppWindow inherits Window {
         Rectangle {
             vertical-stretch: 1;
             horizontal-stretch: 1;
-            background: #1e1f22;
+            background: #1e1e1e;
 
             // ================== TAB 0: FIND ==================
             if Store.active_tab == 0: HorizontalLayout {
@@ -250,7 +249,6 @@ export component AppWindow inherits Window {
 
                 // ENCAPSULATED FIND CONFIGURATION SIDEBAR
                 FindSidebar {
-                    // Corrected child-to-parent callback routing
                     show_formats_popup => {
                         ext_popup.show();
                     }
@@ -260,11 +258,11 @@ export component AppWindow inherits Window {
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
-                    background: sidebar-splitter-ta.has-hover ? #4e5058 : #1e1f22;
+                    background: sidebar-splitter-ta.has-hover ? #474747 : #1e1e1e;
                     Rectangle {
                         width: 2px;
                         height: 20px;
-                        background: #6d6f78;
+                        background: #808080;
                         border-radius: 1px;
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
@@ -314,41 +312,38 @@ export component AppWindow inherits Window {
                                     selected(val) => { Store.results_sort_changed(Store.results_sort_index); }
                                 }
 
-                                // Conditionally render expand/collapse only when in List Mode and when results exist
                                 if !Store.results_grid_mode && Store.has_results: CustomButton {
                                     text: "Expand All";
                                     height: 24px;
-                                    primary-color: #4e5058; // Secondary neutral styling
+                                    primary-color: #474747;
                                     clicked => { Store.expand_all_groups(); }
                                 }
 
                                 if !Store.results_grid_mode && Store.has_results: CustomButton {
                                     text: "Collapse All";
                                     height: 24px;
-                                    primary-color: #4e5058; // Secondary neutral styling
+                                    primary-color: #474747;
                                     clicked => { Store.collapse_all_groups(); }
                                 }
 
-                                // Columns resizing utility buttons
                                 if Store.has_results: CustomButton {
                                     text: "Auto Cols";
                                     height: 24px;
-                                    primary-color: #4e5058; // Secondary neutral styling
+                                    primary-color: #474747;
                                     clicked => { Store.auto_size_columns(); }
                                 }
 
                                 if Store.has_results: CustomButton {
                                     text: "Reset Cols";
                                     height: 24px;
-                                    primary-color: #4e5058; // Secondary neutral styling
+                                    primary-color: #474747;
                                     clicked => { Store.reset_size_columns(); }
                                 }
 
-                                // Integrated Export CSV Button
                                 if Store.has_results: CustomButton {
                                     text: "Export CSV";
                                     height: 24px;
-                                    primary-color: #0e639c; // Muted steel blue for exports
+                                    primary-color: #3e6a90;
                                     clicked => { Store.export_csv(); }
                                 }
 
@@ -358,7 +353,7 @@ export component AppWindow inherits Window {
                                         text: "Min Sim:";
                                         vertical-alignment: center;
                                         font-size: 12px;
-                                        color: #dcddde;
+                                        color: #cfcfcf;
                                     }
 
                                     Slider {
@@ -384,20 +379,19 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 if Store.skipped_files_list.length > 0: CustomButton {
                                     text: "⚠️ Skipped Files (" + Store.skipped_files_list.length + ")";
-                                    primary-color: #f23f43;
+                                    primary-color: #aa3838;
                                     height: 24px;
                                     clicked => { Store.skipped_popup_x = self.absolute-position.x - 120px; Store.skipped_popup_y = self.absolute-position.y + self.height; skipped_popup.show(); }
                                 }
                                 CustomButton {
                                     text: Store.results_grid_mode ? "List Mode" : "Grid Mode";
-                                    icon-type: Store.results_grid_mode ? 2 : 3; // Swapped dynamically between Vector List and Grid
+                                    icon-type: Store.results_grid_mode ? 2 : 3;
                                     height: 24px;
                                     clicked => { Store.results_grid_mode = !Store.results_grid_mode; }
                                 }
                             }
                         }
 
-                        // SMART FILTER CHECKS - Bound to has_results, keeping filters persistently visible
                         if Store.has_results: HorizontalLayout {
                             spacing: 12px;
                             padding-left: 4px;
@@ -407,7 +401,7 @@ export component AppWindow inherits Window {
                                 text: "Smart Filters:";
                                 vertical-alignment: center;
                                 font-size: 12px;
-                                color: #949ba4;
+                                color: #808080;
                             }
 
                             CheckBox {
@@ -437,9 +431,9 @@ export component AppWindow inherits Window {
 
                         // VIRTUALIZED SCROLL CONTENT
                         Rectangle {
-                            border-color: #1f2023;
+                            border-color: #353535;
                             border-width: 1px;
-                            background: #2b2d31;
+                            background: #2d2d2d;
                             border-radius: 4px;
                             vertical-stretch: 1;
                             clip: true;
@@ -448,7 +442,7 @@ export component AppWindow inherits Window {
                                 if !Store.results_grid_mode && Store.results.length > 0: TableHeader { }
                                 if !Store.results_grid_mode && Store.results.length > 0: ListView {
                                     for row[idx] in Store.results: ListRow {
-                                        row-data: row; // Cleaned parameter mapping to updated components
+                                        row-data: row;
                                         row_clicked(is_header, grp_idx, pth) => { Store.row_clicked(idx, is_header, grp_idx, pth); if !is_header { Store.active_tab = 1; } }
                                         checkbox_toggled() => { Store.row_checkbox_toggled(idx); }
                                         right_clicked(mx, my) => { Store.context_hovered_path = row.path; Store.menu_x = mx; Store.menu_y = my; context_popup.show(); }
@@ -461,7 +455,6 @@ export component AppWindow inherits Window {
                                         padding: 10px;
                                         alignment: start;
 
-                                        // Dynamically iterate over rubber-band allocated elements per row
                                         for item in row.items: GridCard {
                                             row-data: item;
                                             checkerboard: Store.checkerboard_pattern;
@@ -474,26 +467,24 @@ export component AppWindow inherits Window {
                                     }
                                 }
 
-                                // Scenario 1: Initial state before any scans are performed
                                 if !Store.has_results: VerticalLayout {
                                     alignment: center;
                                     spacing: 12px;
                                     Text {
                                         text: "No duplicate assets loaded. Choose scan parameters in the left pane and begin auditing.";
-                                        color: #7c808a;
+                                        color: #808080;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                         wrap: word-wrap;
                                     }
                                 }
 
-                                // Scenario 2: Active scan exists, but user filters completely cleared the view
                                 if Store.has_results && Store.results.length == 0: VerticalLayout {
                                     alignment: center;
                                     spacing: 12px;
                                     Text {
                                         text: "No results match your active smart filters or search query.";
-                                        color: #7c808a;
+                                        color: #808080;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                         wrap: word-wrap;
@@ -505,8 +496,8 @@ export component AppWindow inherits Window {
 
                     // SELECTION CONTROL PANELS
                     Rectangle {
-                        background: #2b2d31;
-                        border-color: #1f2023;
+                        background: #2d2d2d;
+                        border-color: #353535;
                         border-width: 1px;
                         border-radius: 4px;
                         height: 56px;
@@ -517,7 +508,7 @@ export component AppWindow inherits Window {
                                 text: "Selection Rules";
                                 font-size: 12px;
                                 font-weight: 700;
-                                color: #949ba4;
+                                color: #808080;
                             }
 
                             HorizontalLayout {
@@ -525,25 +516,25 @@ export component AppWindow inherits Window {
                                 alignment: start;
                                 CustomButton {
                                     text: "Select All";
-                                    primary-color: #4e5058;
+                                    primary-color: #474747;
                                     clicked => { Store.trigger_selection_rule("all"); }
                                 }
 
                                 CustomButton {
                                     text: "Deselect All";
-                                    primary-color: #4e5058;
+                                    primary-color: #474747;
                                     clicked => { Store.trigger_selection_rule("none"); }
                                 }
 
                                 CustomButton {
                                     text: "Select All Except Best";
-                                    primary-color: #4e5058;
+                                    primary-color: #474747;
                                     clicked => { Store.trigger_selection_rule("except_best"); }
                                 }
 
                                 CustomButton {
                                     text: "Invert Selection";
-                                    primary-color: #4e5058;
+                                    primary-color: #474747;
                                     clicked => { Store.trigger_selection_rule("invert"); }
                                 }
                             }
@@ -555,13 +546,13 @@ export component AppWindow inherits Window {
                         height: 24px;
                         CustomButton {
                             text: "Replace with Hardlink";
-                            primary-color: #5865f2;
+                            primary-color: #3e6a90;
                             clicked => { Store.trigger_action("hardlink"); }
                         }
 
                         CustomButton {
                             text: "Replace with Reflink";
-                            primary-color: #5865f2;
+                            primary-color: #3e6a90;
                             clicked => { Store.trigger_action("reflink"); }
                         }
 
@@ -571,7 +562,7 @@ export component AppWindow inherits Window {
 
                         CustomButton {
                             text: "Move to Trash";
-                            primary-color: #f23f43;
+                            primary-color: #aa3838;
                             clicked => { Store.trigger_action("trash"); }
                         }
                     }
@@ -616,7 +607,7 @@ export component AppWindow inherits Window {
                                 text: "Wipe Shift:";
                                 vertical-alignment: center;
                                 font-size: 12px;
-                                color: #dcddde;
+                                color: #cfcfcf;
                             }
 
                             Slider {
@@ -632,7 +623,7 @@ export component AppWindow inherits Window {
                                 text: "Flicker Speed:";
                                 vertical-alignment: center;
                                 font-size: 12px;
-                                color: #dcddde;
+                                color: #cfcfcf;
                             }
 
                             Slider {
@@ -657,7 +648,7 @@ export component AppWindow inherits Window {
                                 text: "Mip Level:";
                                 vertical-alignment: center;
                                 font-size: 12px;
-                                color: Store.max_available_mips > 1 ? #dcddde : #555555;
+                                color: Store.max_available_mips > 1 ? #cfcfcf : #555555;
                             }
 
                             SpinBox {
@@ -692,7 +683,7 @@ export component AppWindow inherits Window {
                         CustomButton {
                             text: "Reset Zoom";
                             height: 24px;
-                            primary-color: #4e5058;
+                            primary-color: #474747;
                             clicked => { Store.zoom_factor = 1.0; Store.pan_x = 0px; Store.pan_y = 0px; }
                         }
                     }
@@ -706,21 +697,21 @@ export component AppWindow inherits Window {
                         alignment: center;
                         ChannelButton {
                             text: "R";
-                            active-color: #f23f43;
+                            active-color: #aa3838;
                             active <=> Store.active_r;
                             clicked => { Store.active_r = !Store.active_r; if Store.active_r { Store.active_g = false; Store.active_b = false; Store.active_a = false; } Store.channel_toggled(); }
                         }
 
                         ChannelButton {
                             text: "G";
-                            active-color: #23a55a;
+                            active-color: #3e7a5a;
                             active <=> Store.active_g;
                             clicked => { Store.active_g = !Store.active_g; if Store.active_g { Store.active_r = false; Store.active_b = false; Store.active_a = false; } Store.channel_toggled(); }
                         }
 
                         ChannelButton {
                             text: "B";
-                            active-color: #5865f2;
+                            active-color: #3e6a90;
                             active <=> Store.active_b;
                             clicked => { Store.active_b = !Store.active_b; if Store.active_b { Store.active_r = false; Store.active_g = false; Store.active_a = false; } Store.channel_toggled(); }
                         }
@@ -739,11 +730,11 @@ export component AppWindow inherits Window {
                 Rectangle {
                     width: 8px;
                     horizontal-stretch: 0;
-                    background: compare-splitter-ta.has-hover ? #4e5058 : #1e1f22;
+                    background: compare-splitter-ta.has-hover ? #474747 : #1e1e1e;
                     Rectangle {
                         width: 2px;
                         height: 20px;
-                        background: #6d6f78;
+                        background: #808080;
                         border-radius: 1px;
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
@@ -764,19 +755,19 @@ export component AppWindow inherits Window {
                         text: "Group Duplicates (" + Store.selected_group_files.length + " items)";
                         font-size: 13px;
                         font-weight: 700;
-                        color: #949ba4;
+                        color: #808080;
                     }
 
                     Rectangle {
                         height: Store.duplicates_panel_height;
-                        background: #111214;
-                        border-color: #1f2023;
+                        background: #181818;
+                        border-color: #353535;
                         border-width: 1px;
                         border-radius: 4px;
                         if Store.selected_group_files.length > 0: ListView {
                             for row[idx] in Store.selected_group_files: Rectangle {
                                 height: 38px;
-                                background: (row.path == Store.duplicate_meta.path) ? #2c3e50 : (right_row_ta.has-hover ? #393c41 : #111214);
+                                background: (row.path == Store.duplicate_meta.path) ? #36536d : (right_row_ta.has-hover ? #474747 : #181818);
                                 border-radius: 4px;
                                 right_row_ta := TouchArea {
                                     x: 46px;
@@ -803,7 +794,7 @@ export component AppWindow inherits Window {
 
                                     Text {
                                         text: row.name;
-                                        color: #dcddde;
+                                        color: #cfcfcf;
                                         font-size: 12px;
                                         vertical-alignment: center;
                                         overflow: elide;
@@ -812,7 +803,7 @@ export component AppWindow inherits Window {
 
                                     Text {
                                         text: row.is_best ? "[Best]" : row.score_or_detail;
-                                        color: row.is_best ? #f0b132 : #dcddde;
+                                        color: row.is_best ? #e59535 : #cfcfcf;
                                         font-size: 12px;
                                         vertical-alignment: center;
                                     }
@@ -824,12 +815,12 @@ export component AppWindow inherits Window {
                     Rectangle {
                         height: 8px;
                         vertical-stretch: 0;
-                        background: splitter-ta.has-hover ? #4e5058 : #2b2d31;
+                        background: splitter-ta.has-hover ? #474747 : #2d2d2d;
                         border-radius: 4px;
                         Rectangle {
                             width: 20px;
                             height: 2px;
-                            background: #6d6f78;
+                            background: #808080;
                             border-radius: 1px;
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
@@ -845,13 +836,13 @@ export component AppWindow inherits Window {
                         text: "Luminance Histogram Comparison";
                         font-size: 13px;
                         font-weight: 700;
-                        color: #949ba4;
+                        color: #808080;
                     }
 
                     Rectangle {
                         height: 130px;
-                        background: #111214;
-                        border-color: #1f2023;
+                        background: #181818;
+                        border-color: #353535;
                         border-width: 1px;
                         border-radius: 4px;
                         clip: true;
@@ -867,13 +858,13 @@ export component AppWindow inherits Window {
                         text: "Comparison Specifications Matrix";
                         font-size: 13px;
                         font-weight: 700;
-                        color: #949ba4;
+                        color: #808080;
                     }
 
                     Rectangle {
-                        border-color: #1f2023;
+                        border-color: #353535;
                         border-width: 1px;
-                        background: #111214;
+                        background: #181818;
                         border-radius: 4px;
                         vertical-stretch: 1;
                         ScrollView {
@@ -886,7 +877,7 @@ export component AppWindow inherits Window {
                                         text: "Specification";
                                         width: 130px;
                                         font-weight: 700;
-                                        color: #949ba4;
+                                        color: #808080;
                                         font-size: 12px;
                                     }
 
@@ -898,7 +889,7 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: "Original [Best]";
                                         font-weight: 700;
-                                        color: #f0b132;
+                                        color: #e59535;
                                         font-size: 12px;
                                         horizontal-stretch: 1;
                                     }
@@ -911,7 +902,7 @@ export component AppWindow inherits Window {
                                     Text {
                                         text: "Duplicate";
                                         font-weight: 700;
-                                        color: #dcddde;
+                                        color: #cfcfcf;
                                         font-size: 12px;
                                         horizontal-stretch: 1;
                                     }
@@ -919,7 +910,7 @@ export component AppWindow inherits Window {
 
                                 Rectangle {
                                     height: 1px;
-                                    background: #1f2023;
+                                    background: #353535;
                                     vertical-stretch: 0;
                                 }
 
@@ -979,7 +970,7 @@ export component AppWindow inherits Window {
 
                                 Rectangle {
                                     height: 1px;
-                                    background: #1f2023;
+                                    background: #353535;
                                     vertical-stretch: 0;
                                 }
 
@@ -1024,13 +1015,13 @@ export component AppWindow inherits Window {
                     spacing: 8px;
                     CustomButton {
                         text: "Export Log Output...";
-                        primary-color: #0e639c;
+                        primary-color: #3e6a90;
                         clicked => { Store.export_log(Store.console_log); }
                     }
 
                     CustomButton {
                         text: "Clear Console Buffer";
-                        primary-color: #3a3a3a;
+                        primary-color: #474747;
                         clicked => { Store.console_log = "Buffer cleared."; }
                     }
 
@@ -1043,9 +1034,9 @@ export component AppWindow inherits Window {
 
         // FIXED BOTTOM SCANNING STATUS BANNER
         if Store.is_scanning: Rectangle {
-            background: #2b2d31;
+            background: #2d2d2d;
             border-radius: 4px;
-            border-color: #1f2023;
+            border-color: #353535;
             border-width: 1px;
             height: 48px;
             HorizontalLayout {
@@ -1053,7 +1044,7 @@ export component AppWindow inherits Window {
                 spacing: 12px;
                 Text {
                     text: Store.status_text;
-                    color: #dcddde;
+                    color: #cfcfcf;
                     font-size: 13px;
                     vertical-alignment: center;
                     width: 250px;

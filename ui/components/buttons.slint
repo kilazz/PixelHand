@@ -2,7 +2,7 @@
 
 export component MenuItem {
     in property <string> text;
-    in property <color> text-color: #dcddde;
+    in property <color> text-color: #cfcfcf;
     callback clicked;
 
     height: 24px;
@@ -24,7 +24,7 @@ export component MenuItem {
 
     states [
         hover when ta.has-hover: {
-            rect.background: #4752c4;
+            rect.background: #3e6a90;
             txt.color: #ffffff;
         }
     ]
@@ -39,8 +39,8 @@ export component TabButton {
     height: 26px;
 
     rect := Rectangle {
-        background: active ? #2d2d30 : #1e1f22;
-        border-color: active ? #3e3e42 : #1f2023;
+        background: active ? #3d3d3d : #1d1d1d;
+        border-color: active ? #474747 : #353535;
         border-width: 1px;
         border-radius: 4px;
 
@@ -49,7 +49,7 @@ export component TabButton {
 
         txt := Text {
             text: root.text;
-            color: active ? #ffffff : #858585;
+            color: active ? #ffffff : #808080;
             font-size: 13px;
             font-weight: active ? 600 : 400;
             horizontal-alignment: center;
@@ -64,8 +64,8 @@ export component TabButton {
 
     states [
         hover when ta.has-hover && !active: {
-            rect.background: #252526;
-            rect.border-color: #3e3e42;
+            rect.background: #2b2b2b;
+            rect.border-color: #474747;
             txt.color: #cccccc;
         }
     ]
@@ -81,14 +81,14 @@ export component ChannelButton {
     height: 26px;
 
     rect := Rectangle {
-        background: active ? active-color : #1e1f22;
-        border-color: active ? #ffffff : #1f2023;
+        background: active ? active-color : #1d1d1d;
+        border-color: active ? #ffffff : #353535;
         border-width: active ? 1.5px : 1px;
         border-radius: 4px;
 
         txt := Text {
             text: root.text;
-            color: active ? root.text-color : #dcddde;
+            color: active ? root.text-color : #cfcfcf;
             font-size: 12px;
             font-weight: 700;
             horizontal-alignment: center;
@@ -104,47 +104,47 @@ export component ChannelButton {
 export component CustomButton {
     in property <string> text;
     in property <bool> enabled: true;
-    in property <color> primary-color: #5865f2;
+    in property <color> primary-color: #3e6a90;
     in property <int> icon-type: 0; // 0: None, 1: Vector Image/Frame, 2: Vector List, 3: Vector Grid
     callback clicked;
 
-    height: 26px; // Height adjusted to prevent vertical truncation
-    min-width: root.text == "" ? self.height : 90px; // Automatically scale to a perfect square if no text is specified (Using self.height to resolve build error)
+    height: 26px;
+    min-width: root.text == "" ? self.height : 90px;
 
     rect := Rectangle {
-        background: !enabled ? #2f3136 : primary-color;
+        background: !enabled ? #2d2d2d : primary-color;
         border-radius: 4px;
         border-width: 1px;
-        border-color: !enabled ? #1f2023 : primary-color;
+        border-color: !enabled ? #353535 : primary-color;
         opacity: !enabled ? 0.5 : 1.0;
 
         animate background { duration: 100ms; }
 
         VerticalLayout {
-            alignment: center; // Centers the HorizontalLayout vertically inside the button height
+            alignment: center;
 
             HorizontalLayout {
-                alignment: center; // Centers the elements horizontally
-                spacing: root.text == "" ? 0px : 8px; // Remove spacing when text is absent
-                padding-left: root.text == "" ? 0px : 12px; // Remove padding bias for centering icon-only buttons
-                padding-right: root.text == "" ? 0px : 12px;
+                alignment: center;
+                spacing: root.text == "" ? 0px : 8px;
+                padding-left: (root.text == "" || root.text == "...") ? 0px : 16px;
+                padding-right: (root.text == "" || root.text == "...") ? 0px : 16px;
 
-                if icon-type == 1: Rectangle { // Vector Frame Image (Clean alternative to emoji)
+                if icon-type == 1: Rectangle {
                     width: 12px;
                     height: 12px;
-                    border-color: !enabled ? #7c808a : #ffffff;
+                    border-color: !enabled ? #808080 : #ffffff;
                     border-width: 1px;
                     border-radius: 1px;
                     Path {
                         width: 100%;
                         height: 100%;
-                        stroke: !enabled ? #7c808a : #ffffff;
+                        stroke: !enabled ? #808080 : #ffffff;
                         stroke-width: 1px;
                         commands: "M 1 9 L 3.5 5 L 5.5 7.5 L 7.5 3.5 L 11 10";
                     }
                 }
 
-                if icon-type == 2: Rectangle { // Vector List (Clean alternative to unicode ☰)
+                if icon-type == 2: Rectangle {
                     width: 12px;
                     height: 12px;
                     VerticalLayout {
@@ -152,58 +152,58 @@ export component CustomButton {
                         alignment: center;
                         Rectangle {
                             height: 1.5px;
-                            background: !enabled ? #7c808a : #ffffff;
+                            background: !enabled ? #808080 : #ffffff;
                             border-radius: 0.5px;
                         }
 
                         Rectangle {
                             height: 1.5px;
-                            background: !enabled ? #7c808a : #ffffff;
+                            background: !enabled ? #808080 : #ffffff;
                             border-radius: 0.5px;
                         }
 
                         Rectangle {
                             height: 1.5px;
-                            background: !enabled ? #7c808a : #ffffff;
+                            background: !enabled ? #808080 : #ffffff;
                             border-radius: 0.5px;
                         }
                     }
                 }
 
-                if icon-type == 3: Rectangle { // Vector Grid (Clean alternative to unicode ⊞)
+                if icon-type == 3: Rectangle {
                     width: 12px;
                     height: 12px;
                     GridLayout {
                         spacing: 1.5px;
                         Row {
                             Rectangle {
-                                background: !enabled ? #7c808a : #ffffff;
+                                background: !enabled ? #808080 : #ffffff;
                                 border-radius: 0.5px;
                             }
 
                             Rectangle {
-                                background: !enabled ? #7c808a : #ffffff;
+                                background: !enabled ? #808080 : #ffffff;
                                 border-radius: 0.5px;
                             }
                         }
 
                         Row {
                             Rectangle {
-                                background: !enabled ? #7c808a : #ffffff;
+                                background: !enabled ? #808080 : #ffffff;
                                 border-radius: 0.5px;
                             }
 
                             Rectangle {
-                                background: !enabled ? #7c808a : #ffffff;
+                                background: !enabled ? #808080 : #ffffff;
                                 border-radius: 0.5px;
                             }
                         }
                     }
                 }
 
-                if root.text != "": txt := Text { // Only instantiate text box if text is not empty
+                if root.text != "": txt := Text {
                     text: root.text;
-                    color: !enabled ? #7c808a : #ffffff;
+                    color: !enabled ? #808080 : #ffffff;
                     font-size: 11px;
                     font-weight: 600;
                     vertical-alignment: center;

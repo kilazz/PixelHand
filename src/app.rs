@@ -91,10 +91,10 @@ pub fn append_to_console_log(msg: &str) {
 
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
-    // Run database vector cache garbage collection asynchronously using drop to avoid clippy warnings
-    drop(tokio::task::spawn_blocking(|| {
-        utils::cache::run_vector_cache_garbage_collector();
-    }));
+    // Run database vector cache garbage collection synchronously
+    // at early startup before any database or UI event loop initialization begins.
+    // This prevents race conditions or locking conflicts when the scan database is initialized.
+    utils::cache::run_vector_cache_garbage_collector();
 
     if let Ok(dir) = utils::settings::get_portable_app_data_dir() {
         let log_path = dir.join("PixelHand.log");

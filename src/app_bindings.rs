@@ -117,7 +117,7 @@ fn bind_scan_execution(
 
     store.on_run_scan(move || {
         let app_copy = app_weak_scan.clone();
-        let state_copy = state_clone.clone();
+        let state_clone_inner = state_clone.clone();
 
         let ui = match app_copy.upgrade() {
             Some(ui) => ui,
@@ -159,7 +159,7 @@ fn bind_scan_execution(
                 .await
             {
                 let _ = app_weak_download.upgrade_in_event_loop(move |ui| {
-                    let store = ui.global::<Store>();
+                    let store = ui.global::<crate::app::Store>();
                     store.set_is_scanning(false);
                     store.set_status_text(format!("AI Model download failed: {}", e).into());
                 });
@@ -174,7 +174,20 @@ fn bind_scan_execution(
                     .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
             }
 
-            let scan_result = scanners::execute_scan(params_for_task.clone()).await;
+            // Wrap the CPU-heavy Rayon pipelines inside spawn_blocking to prevent
+            // starving the async executor threads, nesting a local block_on for LanceDB's async tasks.
+            let params_for_task_clone = params_for_task.clone();
+            let scan_result = tokio::task::spawn_blocking(move || {
+                tokio::runtime::Handle::current()
+                    .block_on(async { scanners::execute_scan(params_for_task_clone).await })
+            })
+            .await
+            .unwrap_or_else(|e| {
+                Err(anyhow::anyhow!(
+                    "Background scanning thread panicked: {}",
+                    e
+                ))
+            });
 
             if params_for_task.save_visuals
                 && let Ok((ref groups, _)) = scan_result
@@ -207,7 +220,7 @@ fn bind_scan_execution(
                 store.set_progress(1.0);
                 match scan_result {
                     Ok((groups, rows)) => {
-                        let mut state_lock = state_copy.safe_lock();
+                        let mut state_lock = state_clone_inner.safe_lock();
                         state_lock.collapsed_groups.clear();
                         state_lock.groups = groups;
                         state_lock.results = rows;
