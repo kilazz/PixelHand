@@ -1,5 +1,7 @@
 // ui/components/common.slint
 
+import { Store } from "../store.slint";
+
 export component FormRow {
     in property <string> title;
     in property <length> label-width: 90px;
@@ -27,34 +29,35 @@ export component SpecsRow {
         spacing: 8px;
         Text {
             text: name;
-            width: 130px; // Slightly expanded width to prevent clipping long labels [1]
-            color: #949ba4;
+            width: Store.col_spec_name_w;
+            color: #808080;
             font-size: 12px;
             vertical-alignment: center;
+            overflow: elide;
         }
 
         Rectangle {
             width: 1px;
-            background: #1f2023; // Subtle divider between labels and data [2]
+            background: #353535;
         }
 
         Text {
             text: val1;
-            color: #f0b132; // Color-coded to match the gold "Original [Best]" header [1, 2]
+            width: Store.col_spec_val1_w;
+            color: #e59535;
             font-size: 12px;
             vertical-alignment: center;
             overflow: elide;
-            horizontal-stretch: 1;
         }
 
         Rectangle {
             width: 1px;
-            background: #1f2023; // Subtle visual vertical separator between columns [2]
+            background: #353535;
         }
 
         Text {
             text: val2;
-            color: #dcddde;
+            color: #cfcfcf;
             font-size: 12px;
             vertical-alignment: center;
             overflow: elide;
@@ -71,12 +74,12 @@ export component SectionTitle {
             text: root.text;
             font-size: 12px;
             font-weight: 700;
-            color: #949ba4;
+            color: #808080;
         }
 
         Rectangle {
             height: 1px;
-            background: #1f2023;
+            background: #353535;
         }
     }
 }
@@ -100,7 +103,7 @@ export component WipeViewport {
     in property <image> checkerboard;
 
     viewport-root := Rectangle {
-        background: #111214;
+        background: #181818;
         clip: true;
 
         Image {
@@ -148,7 +151,7 @@ export component WipeViewport {
                 y: 0px;
                 width: 2px;
                 height: parent.height;
-                background: #f0b132;
+                background: #e59535;
             }
 
             TouchArea {

@@ -212,6 +212,7 @@ export component AppWindow inherits Window {
         // TOP NAVIGATION TABS
         HorizontalLayout {
             spacing: 4px;
+            alignment: start;
             height: 32px;
             TabButton {
                 text: "Find";
@@ -875,28 +876,50 @@ export component AppWindow inherits Window {
                                     spacing: 8px;
                                     Text {
                                         text: "Specification";
-                                        width: 130px;
+                                        width: Store.col_spec_name_w;
                                         font-weight: 700;
                                         color: #808080;
                                         font-size: 12px;
                                     }
 
+                                    // Draggable Splitter 1 with clean 9px hoverable hitbox
                                     Rectangle {
                                         width: 1px;
-                                        background: transparent;
+                                        background: spec_split1.has-hover ? #e59535 : #353535;
+                                        spec_split1 := TouchArea {
+                                            x: -4px;
+                                            width: 9px;
+                                            mouse-cursor: col-resize;
+                                            moved => {
+                                                if (self.pressed) {
+                                                    Store.col_spec_name_w = (Store.col_spec_name_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
+                                                }
+                                            }
+                                        }
                                     }
 
                                     Text {
                                         text: "Original [Best]";
+                                        width: Store.col_spec_val1_w;
                                         font-weight: 700;
                                         color: #e59535;
                                         font-size: 12px;
-                                        horizontal-stretch: 1;
                                     }
 
+                                    // Draggable Splitter 2 with clean 9px hoverable hitbox
                                     Rectangle {
                                         width: 1px;
-                                        background: transparent;
+                                        background: spec_split2.has-hover ? #e59535 : #353535;
+                                        spec_split2 := TouchArea {
+                                            x: -4px;
+                                            width: 9px;
+                                            mouse-cursor: col-resize;
+                                            moved => {
+                                                if (self.pressed) {
+                                                    Store.col_spec_val1_w = (Store.col_spec_val1_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
+                                                }
+                                            }
+                                        }
                                     }
 
                                     Text {
