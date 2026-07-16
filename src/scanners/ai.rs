@@ -476,11 +476,36 @@ pub async fn run_ai_duplicate_scan(
     Ok(results)
 }
 
+/// Executes image-to-image or text-to-image semantic search dynamically.
 pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResultSummary>> {
     let (db, engine, _records) = scan_and_index_directory(&params).await?;
     let (nprobes, refine_factor) = map_precision_presets(params.search_precision);
 
-    let query_vector = engine.encode_text(&params.query_text)?;
+    let query_path = std::path::Path::new(&params.query_text);
+
+    // Check if the query is a physical file path on disk.
+    // If true, load and run it through the Vision Encoder. Otherwise, fall back to Text Tokenization.
+    let query_vector = if query_path.is_file() {
+        tracing::info!("Query target detected as a file. Loading and running visual encoder...");
+
+        let img = crate::format_loaders::dds_loader::open_image_with_dds_fallback(
+            query_path,
+            Some(256), // Use standard downscale size for rapid embedding calculations
+        )
+        .map_err(|e| anyhow!("Failed to load reference image for visual query: {}", e))?;
+
+        let config = PreprocessingConfig::for_model(params.ai_model, params.custom_model_arch);
+
+        // Encode the single image and pop the first returned vector embedding
+        let mut vectors = engine.encode_images_batch(&[img], &config)?;
+        vectors
+            .pop()
+            .ok_or_else(|| anyhow!("Failed to generate visual embedding for query target"))?
+    } else {
+        tracing::info!("Query target is a text string. Running text tokenizer pipeline...");
+        engine.encode_text(&params.query_text)?
+    };
+
     let search_results = db
         .search_similarity(&query_vector, 20, Some(nprobes), Some(refine_factor))
         .await?;
