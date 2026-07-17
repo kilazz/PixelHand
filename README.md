@@ -22,7 +22,7 @@ A local, hardware-accelerated desktop tool written in Rust and Slint for visual 
 *   **GUI**: [Slint UI](https://slint.dev/)
 *   **AI Inference**: [ONNX Runtime](https://onnxruntime.ai/)
 *   **Vector DB**: [LanceDB](https://lancedb.com/)
-*   **Supported Formats**: `.dds`, `.exr`, `.hdr`, `.psd`, `.jxl`, `.heic`/`.heif`, `.png`, `.jpg`/`.jpeg`, `.tga`, `.bmp`, `.tiff`, `.webp`
+*   **Supported Formats**: `.dds`, `.exr`, `.hdr`, `.psd`, `.jxl`, `.heic/heif`, `.png`, `.jpg/jpeg`, `.tga`, `.bmp`, `.tiff`, `.webp`
 
 ## Development
 ```

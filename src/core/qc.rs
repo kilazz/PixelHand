@@ -68,13 +68,15 @@ fn map_dxgi_format_to_string(dxgi_format: u32) -> String {
 }
 
 /// Calculates estimated GPU VRAM usage based on width, height, compression format, mipmap count, and cubemap flag.
+/// Incorporates hardware Row Pitch alignment (256 bytes) for a realistic memory footprint calculation.
 pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cubemap: bool) -> u64 {
     let format_upper = format.to_uppercase();
 
     // Determine if it's a block compression format and its block size in bytes
     let block_compressed =
         format_upper.contains("BC") || format_upper.contains("DXT") || format_upper.contains("ATI");
-    let bytes_per_block = match format_upper.as_str() {
+
+    let bytes_per_block: u64 = match format_upper.as_str() {
         cf if cf.contains("BC1")
             || cf.contains("DXT1")
             || cf.contains("BC4")
@@ -96,35 +98,55 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
         _ => 0,
     };
 
-    let bpp = if !block_compressed {
+    // Calculate bytes per pixel for uncompressed formats
+    let bytes_per_pixel: u64 = if !block_compressed {
         match format_upper.as_str() {
             cf if cf.contains("RGBA8")
                 || cf.contains("BGRA8")
                 || (cf.contains("UNCOMPRESSED") && cf.contains("ALPHA")) =>
             {
-                32.0
+                4
             }
-            cf if cf.contains("RGB8") || cf.contains("BGR8") || cf.contains("UNCOMPRESSED") => 24.0,
-            _ => 32.0, // Fallback
+            cf if cf.contains("RGB8") || cf.contains("BGR8") || cf.contains("UNCOMPRESSED") => 3,
+            cf if cf.contains("RGBA16") => 8,
+            cf if cf.contains("RGBA32") => 16,
+            _ => 4, // Standard 32-bit fallback
         }
     } else {
-        0.0
+        0
     };
 
     let mut total_bytes = 0;
     let mips = mipmaps.max(1);
 
+    // Modern GPUs map memory in blocks. A standard hardware row pitch alignment is 256 bytes.
+    // E.g., D3D12_TEXTURE_DATA_PITCH_ALIGNMENT is exactly 256.
+    let pitch_alignment: u64 = 256;
+
     for i in 0..mips {
-        let w = (width >> i).max(1);
-        let h = (height >> i).max(1);
+        let w = (width >> i).max(1) as u64;
+        let h = (height >> i).max(1) as u64;
 
         let mip_bytes = if block_compressed {
-            // Number of 4x4 blocks (rounded up) * bytes per block
-            let blocks_w = w.div_ceil(4) as u64;
-            let blocks_h = h.div_ceil(4) as u64;
-            blocks_w * blocks_h * bytes_per_block
+            // Number of 4x4 blocks (rounded up)
+            let blocks_w = w.div_ceil(4);
+            let blocks_h = h.div_ceil(4);
+
+            // Raw bytes per row of blocks
+            let raw_row_pitch = blocks_w * bytes_per_block;
+
+            // Hardware aligns the row pitch to the nearest multiple of 256
+            let aligned_row_pitch = (raw_row_pitch + pitch_alignment - 1) & !(pitch_alignment - 1);
+
+            aligned_row_pitch * blocks_h
         } else {
-            (w as f64 * h as f64 * (bpp / 8.0)) as u64
+            // Raw bytes per pixel row
+            let raw_row_pitch = w * bytes_per_pixel;
+
+            // Hardware aligns the row pitch to the nearest multiple of 256
+            let aligned_row_pitch = (raw_row_pitch + pitch_alignment - 1) & !(pitch_alignment - 1);
+
+            aligned_row_pitch * h
         };
 
         total_bytes += mip_bytes;
