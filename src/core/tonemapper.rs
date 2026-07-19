@@ -202,7 +202,9 @@ fn aces2_tone_scale_fwd(y: f32) -> f32 {
 /// Operates in the ICtCp perceptual space to isolate luminance scaling from color.
 #[inline]
 fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
-    let color_2020 = rec709_to_rec2020(color);
+    // Scale input linear Rec.709 from 0..1 to 0..100 nits domain to match PQ absolute scale
+    let color_scaled = [color[0] * 100.0, color[1] * 100.0, color[2] * 100.0];
+    let color_2020 = rec709_to_rec2020(color_scaled);
     let mut ictcp = rgb_to_ictcp(color_2020);
 
     // Map PQ Intensity to equivalent Linear domain (0 to 100 nits scale)
@@ -223,7 +225,8 @@ fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
     let rgb_2020 = ictcp_to_rgb(ictcp);
     let rgb_709 = rec2020_to_rec709(rgb_2020);
 
-    [rgb_709[0], rgb_709[1], rgb_709[2]]
+    // Scale output from 0..100 nits back to standard linear 0..1 range
+    [rgb_709[0] / 100.0, rgb_709[1] / 100.0, rgb_709[2] / 100.0]
 }
 
 /// Khronos PBR Neutral Tonemapper.
