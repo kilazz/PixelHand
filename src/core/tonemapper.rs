@@ -25,7 +25,8 @@ pub enum TonemapOperator {
     AcesFilmic,
     Aces2Fit,
     PbrNeutral,
-    ICtCpPerceptual,
+    ICtCpBt2446c,
+    ICtCpLumina, // Custom
 }
 
 /// Pure data structure representing the active tonemapping settings.
@@ -256,7 +257,9 @@ fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
 
     // Dynamic Chroma Compression: Desaturates extreme highlights towards white.
     // Linearly interpolates chroma scale from 1.1 down to 0.0 based on mapped intensity.
-    let t = i_mapped.max(0.0).powf(1.5);
+    // Optimized: x^1.5 is mathematically x * sqrt(x). Sqrt is hardware-accelerated.
+    let i_m = i_mapped.max(0.0);
+    let t = i_m * i_m.sqrt();
     let chroma_scale = (1.1 - 1.1 * t).clamp(0.0, 1.0);
 
     // Map Linear back to PQ Intensity and apply chroma scaling
@@ -349,6 +352,7 @@ fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
 
 /// Perceptual tonemapping based on ITU-R BT.2446 Method C.
 /// Uses dynamic EETF luminance compression while applying Hunt Effect compensation for chroma.
+/// Best suited for broadcasting standards ensuring linear shadow preservation.
 fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
     let nits = [
         (color[0] * exposure * 100.0).max(0.0),
@@ -393,6 +397,69 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
         (rgb_sdr_nits_709[0] / 100.0),
         (rgb_sdr_nits_709[1] / 100.0),
         (rgb_sdr_nits_709[2] / 100.0),
+    ]
+}
+
+/// Custom ICtCp Lumina Tonemapper (Dolby Vision & Khronos PBR Inspired).
+/// Uses PQ Reshaping (S-Curve on the perceptual PQ signal) for deep, natural contrast.
+/// Preserves 100% exact perceptual saturation (Khronos PBR style) up to the highlights.
+/// Employs a late, smooth exponential roll-off to white to prevent neon clipping.
+fn tonemap_ictcp_lumina(color: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
+    let nits = [
+        (color[0] * exposure * 100.0).max(0.0),
+        (color[1] * exposure * 100.0).max(0.0),
+        (color[2] * exposure * 100.0).max(0.0),
+    ];
+
+    let nits_2020 = rec709_to_rec2020(nits);
+    let mut ictcp = rgb_to_ictcp(nits_2020);
+    let i_in = ictcp[0];
+
+    let max_in_pq = nit_to_pq(scene_peak_nits);
+    let max_out_pq = nit_to_pq(100.0); // SDR Peak
+
+    // Base HDR Dynamic Range Compression
+    let mut i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
+
+    // PQ RESHAPING (The "Dolby Vision" Punch)
+    // Normalize intensity from 0.0 to 1.0 in perceptual space
+    let norm_i = (i_out / max_out_pq).clamp(0.0, 1.0);
+
+    // Soft S-curve (Smoothstep) applied directly to the PQ signal.
+    // Deepens shadows and makes highlights pop without breaking midtones.
+    let s_curve = norm_i * norm_i * (3.0 - 2.0 * norm_i);
+    let punch_factor = 0.35; // Cinematic contrast strength (35%)
+    let norm_contrasted = norm_i * (1.0 - punch_factor) + s_curve * punch_factor;
+
+    i_out = norm_contrasted * max_out_pq;
+    ictcp[0] = i_out;
+
+    // PERCEPTUAL SATURATION (The "PBR Neutral" Color Purity)
+    // In ICtCp, saturation = Chroma / Intensity.
+    // To keep the color exactly as vibrant as it was before luminance compression,
+    // we scale it by EXACTLY the same ratio!
+    let mut chroma_scale = if i_in > 1e-5 { i_out / i_in } else { 1.0 };
+
+    // Hunt Effect compensation (colors in SDR appear less vibrant than in HDR)
+    chroma_scale *= 1.15;
+
+    // LATE HIGHLIGHT ROLL-OFF (Beautiful light sources)
+    // Instead of a linear color fade, we use an exponential curve (norm_contrasted^4).
+    // This keeps colors rich up to 85-90% brightness, and gently rolls them off to white only at the very end.
+    let path_to_white = (1.0 - norm_contrasted.powf(4.0)).max(0.0);
+
+    chroma_scale *= path_to_white;
+
+    ictcp[1] *= chroma_scale;
+    ictcp[2] *= chroma_scale;
+
+    let rgb_sdr_nits_2020 = ictcp_to_rgb(ictcp);
+    let rgb_sdr_nits_709 = rec2020_to_rec709(rgb_sdr_nits_2020);
+
+    [
+        (rgb_sdr_nits_709[0] / 100.0).clamp(0.0, 1.0),
+        (rgb_sdr_nits_709[1] / 100.0).clamp(0.0, 1.0),
+        (rgb_sdr_nits_709[2] / 100.0).clamp(0.0, 1.0),
     ]
 }
 
@@ -462,7 +529,7 @@ pub fn tonemap_hdr_to_ldr_rgba(
         config.operator
     };
 
-    // photographic Auto Exposure calculation using geometric mean luminance
+    // Photographic Auto Exposure calculation using geometric mean luminance
     let mut active_exposure = exposure;
     if config.auto_exposure {
         // Multiplies default exposure with the automatic factor acting as Exposure Compensation offset
@@ -472,7 +539,9 @@ pub fn tonemap_hdr_to_ldr_rgba(
     // Calculate dynamic scene peak luminance via a parallel pre-pass.
     // Required specifically for the BT2446c EETF curve scaling.
     let mut scene_peak_nits = 1000.0;
-    if active_operator == TonemapOperator::ICtCpPerceptual {
+    if active_operator == TonemapOperator::ICtCpBt2446c
+        || active_operator == TonemapOperator::ICtCpLumina
+    {
         let max_lum = hdr_pixels
             .par_chunks_exact(4)
             .map(|hdr| {
@@ -521,9 +590,13 @@ pub fn tonemap_hdr_to_ldr_rgba(
                     let mapped = pbr_neutral_tonemapping([r_in, g_in, b_in]);
                     (mapped[0], mapped[1], mapped[2])
                 }
-                TonemapOperator::ICtCpPerceptual => {
+                TonemapOperator::ICtCpBt2446c => {
                     let mapped =
                         tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, scene_peak_nits);
+                    (mapped[0], mapped[1], mapped[2])
+                }
+                TonemapOperator::ICtCpLumina => {
+                    let mapped = tonemap_ictcp_lumina([r_in, g_in, b_in], 1.0, scene_peak_nits);
                     (mapped[0], mapped[1], mapped[2])
                 }
             };

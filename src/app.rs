@@ -109,7 +109,8 @@ pub fn get_active_tonemap_config() -> crate::core::tonemapper::TonemapConfig {
             2 => crate::core::tonemapper::TonemapOperator::AcesFilmic,
             3 => crate::core::tonemapper::TonemapOperator::Aces2Fit,
             4 => crate::core::tonemapper::TonemapOperator::PbrNeutral,
-            5 => crate::core::tonemapper::TonemapOperator::ICtCpPerceptual,
+            5 => crate::core::tonemapper::TonemapOperator::ICtCpBt2446c,
+            6 => crate::core::tonemapper::TonemapOperator::ICtCpLumina,
             _ => crate::core::tonemapper::TonemapOperator::AcesFilmic,
         },
     }
