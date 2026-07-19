@@ -68,6 +68,7 @@ export component AppWindow inherits Window {
     // --- ALIAS ALL PROPERTIES & STATE ---
     in-out property <int> active_tab <=> Store.active_tab;
     in-out property <bool> tonemap_enabled <=> Store.tonemap_enabled;
+    in-out property <bool> tonemap_auto_exposure <=> Store.tonemap_auto_exposure;
     in-out property <int> tonemap_operator <=> Store.tonemap_operator;
     in-out property <string> dir_a <=> Store.dir_a;
     in-out property <string> dir_b <=> Store.dir_b;
@@ -666,6 +667,13 @@ export component AppWindow inherits Window {
                         CheckBox {
                             text: "HDR";
                             checked <=> Store.tonemap_enabled;
+                            height: 24px;
+                            toggled => { Store.tonemap_toggled(); }
+                        }
+
+                        if Store.tonemap_enabled: CheckBox {
+                            text: "Auto Exp";
+                            checked <=> Store.tonemap_auto_exposure;
                             height: 24px;
                             toggled => { Store.tonemap_toggled(); }
                         }

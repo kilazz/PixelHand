@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 /// Global toggle to enable or disable tonemapping entirely across the application.
 pub static TONEMAP_ENABLED: AtomicBool = AtomicBool::new(true);
 
+/// Global toggle to enable or disable photographic Auto Exposure.
+pub static AUTO_EXPOSURE_ENABLED: AtomicBool = AtomicBool::new(true);
+
 /// Global state tracking the currently selected tonemap operator.
 /// 0: None, 1: FalseColor, 2: AcesFilmic, 3: ACES 2.0 Fit, 4: Khronos PBR Neutral, 5: ICtCp Perceptual
 pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(2); // Defaults to AcesFilmic
@@ -53,6 +56,38 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 #[inline]
 fn get_luma(color: [f32; 3]) -> f32 {
     color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722
+}
+
+/// Calculates the automatic exposure scaling factor based on the photographic middle-gray standard (18% Gray).
+/// Uses a high-performance parallel logarithmic reduction to compute the geometric mean luminance.
+pub fn calculate_auto_exposure(hdr_pixels: &[f32]) -> f32 {
+    let total_pixels = hdr_pixels.len() / 4;
+    if total_pixels == 0 {
+        return 1.0;
+    }
+
+    // Sum log-luminance in parallel across multiple CPU cores
+    let sum_log_lum = hdr_pixels
+        .par_chunks_exact(4)
+        .map(|hdr| {
+            let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
+            // Add a tiny delta of 1e-5 to prevent log2(0) evaluation for black pixels
+            (y + 1e-5).log2()
+        })
+        .sum::<f32>();
+
+    let avg_log_lum = sum_log_lum / total_pixels as f32;
+    let geometric_mean = avg_log_lum.exp2();
+
+    // Standard photographic key value representing middle grey (18%)
+    let key_value = 0.18;
+
+    if geometric_mean > 1e-5 {
+        // Clamp the final factor to prevent extreme blowing out of dark textures or over-crushing bright ones
+        (key_value / geometric_mean).clamp(0.01, 100.0)
+    } else {
+        1.0
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -416,6 +451,13 @@ pub fn tonemap_hdr_to_ldr_rgba(
         }
     };
 
+    // photographic Auto Exposure calculation using geometric mean luminance
+    let mut active_exposure = exposure;
+    if AUTO_EXPOSURE_ENABLED.load(Ordering::Relaxed) {
+        // Multiplies default exposure with the automatic factor acting as Exposure Compensation offset
+        active_exposure *= calculate_auto_exposure(hdr_pixels);
+    }
+
     // Calculate dynamic scene peak luminance via a parallel pre-pass.
     // Required specifically for the BT2446c EETF curve scaling.
     let mut scene_peak_nits = 1000.0;
@@ -425,7 +467,7 @@ pub fn tonemap_hdr_to_ldr_rgba(
             .map(|hdr| {
                 // Approximate relative luminance
                 let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
-                y * exposure
+                y * active_exposure
             })
             .reduce(|| 0.0_f32, f32::max);
 
@@ -441,9 +483,9 @@ pub fn tonemap_hdr_to_ldr_rgba(
         .par_chunks_exact_mut(4)
         .zip(hdr_pixels.par_chunks_exact(4))
         .for_each(|(ldr, hdr)| {
-            let r_in = hdr[0] * exposure;
-            let g_in = hdr[1] * exposure;
-            let b_in = hdr[2] * exposure;
+            let r_in = hdr[0] * active_exposure;
+            let g_in = hdr[1] * active_exposure;
+            let b_in = hdr[2] * active_exposure;
 
             // Apply selected Tonemap Operator
             let (mut r, mut g, mut b) = match active_operator {

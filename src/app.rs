@@ -131,8 +131,11 @@ pub fn run_gui() -> Result<()> {
     let checkerboard = utils::ui::generate_checkerboard();
     store.set_checkerboard_pattern(checkerboard);
 
+    // Initialize atomic variables from AppSettings
     crate::core::tonemapper::TONEMAP_ENABLED
         .store(loaded_settings.tonemap_enabled, Ordering::Relaxed);
+    crate::core::tonemapper::AUTO_EXPOSURE_ENABLED
+        .store(loaded_settings.tonemap_auto_exposure, Ordering::Relaxed);
     crate::core::tonemapper::TONEMAP_OPERATOR
         .store(loaded_settings.tonemap_operator as usize, Ordering::Relaxed);
 
@@ -214,7 +217,7 @@ pub fn run_gui() -> Result<()> {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let success = app_weak_sync
                 .upgrade_in_event_loop(|ui| {
-                    let store = ui.global::<crate::app::Store>();
+                    let store = ui.global::<Store>();
                     COMPARE_MODE.store(store.get_compare_mode() as usize, Ordering::Relaxed);
                     FLICKER_INTERVAL
                         .store(store.get_flicker_interval_val() as usize, Ordering::Relaxed);
@@ -245,7 +248,7 @@ pub fn run_gui() -> Result<()> {
                     elapsed_ms = 0; // Reset timer
 
                     let _ = app_weak_flicker.upgrade_in_event_loop(|ui| {
-                        let store = ui.global::<crate::app::Store>();
+                        let store = ui.global::<Store>();
                         // Double check comparison mode inside the safe context
                         if store.get_compare_mode() == 4 {
                             store.set_flicker_show_duplicate(!store.get_flicker_show_duplicate());
@@ -342,6 +345,7 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     app.set_custom_model_dim(settings.custom_model_dim);
 
     app.set_tonemap_enabled(settings.tonemap_enabled);
+    app.set_tonemap_auto_exposure(settings.tonemap_auto_exposure);
     app.set_tonemap_operator(settings.tonemap_operator);
 
     app.set_enable_previews(settings.enable_previews);
@@ -371,7 +375,10 @@ pub fn trigger_viewport_update(
     let mip_level = store.get_active_mip_level() as u32;
     let app_weak_clone = app_weak.clone();
 
+    // Store state before asynchronous execution
     crate::core::tonemapper::TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
+    crate::core::tonemapper::AUTO_EXPOSURE_ENABLED
+        .store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
     crate::core::tonemapper::TONEMAP_OPERATOR
         .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
 

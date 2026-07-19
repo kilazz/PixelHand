@@ -170,6 +170,8 @@ fn bind_scan_execution(
                 let store = ref_ui.global::<Store>();
                 crate::core::tonemapper::TONEMAP_ENABLED
                     .store(store.get_tonemap_enabled(), Ordering::Relaxed);
+                crate::core::tonemapper::AUTO_EXPOSURE_ENABLED
+                    .store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
                 crate::core::tonemapper::TONEMAP_OPERATOR
                     .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
             }
@@ -631,6 +633,8 @@ fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
             crate::core::tonemapper::TONEMAP_ENABLED
                 .store(store.get_tonemap_enabled(), Ordering::Relaxed);
+            crate::core::tonemapper::AUTO_EXPOSURE_ENABLED
+                .store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
             crate::core::tonemapper::TONEMAP_OPERATOR
                 .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
 

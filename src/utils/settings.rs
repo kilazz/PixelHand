@@ -105,6 +105,7 @@ pub fn save_settings(store: &crate::app::Store) {
 
         // HDR Tonemapping Options
         tonemap_enabled: store.get_tonemap_enabled(),
+        tonemap_auto_exposure: store.get_tonemap_auto_exposure(),
         tonemap_operator: store.get_tonemap_operator(),
 
         // Preview & Smart Filter settings

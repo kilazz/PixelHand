@@ -768,6 +768,12 @@ export component FindSidebar inherits Rectangle {
                                 toggled => { Store.tonemap_toggled(); }
                             }
 
+                            if Store.tonemap_enabled: CheckBox {
+                                text: "Enable Auto Exposure";
+                                checked <=> Store.tonemap_auto_exposure;
+                                toggled => { Store.tonemap_toggled(); }
+                            }
+
                             if Store.tonemap_enabled: ComboBox {
                                 model: [
                                     "None",
