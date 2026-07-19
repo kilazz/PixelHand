@@ -26,7 +26,7 @@ pub enum TonemapOperator {
     Aces2Fit,
     PbrNeutral,
     ICtCpBt2446c,
-    ICtCpLumina, // Custom
+    ICtCpLumina, // Test
 }
 
 /// Pure data structure representing the active tonemapping settings.
@@ -400,66 +400,73 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
     ]
 }
 
-/// Custom ICtCp Lumina Tonemapper (Dolby Vision & Khronos PBR Inspired).
-/// Uses PQ Reshaping (S-Curve on the perceptual PQ signal) for deep, natural contrast.
-/// Preserves 100% exact perceptual saturation (Khronos PBR style) up to the highlights.
-/// Employs a late, smooth exponential roll-off to white to prevent neon clipping.
-fn tonemap_ictcp_lumina(color: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
-    let nits = [
-        (color[0] * exposure * 100.0).max(0.0),
-        (color[1] * exposure * 100.0).max(0.0),
-        (color[2] * exposure * 100.0).max(0.0),
-    ];
+/// Custom ICtCp Lumina
+fn tonemap_ictcp_lumina(color_in: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
+    let mut r = (color_in[0] * exposure).max(0.0);
+    let mut g = (color_in[1] * exposure).max(0.0);
+    let mut b = (color_in[2] * exposure).max(0.0);
 
+    // Shadow Contrast (PBR Neutral shadow offset)
+    let x = r.min(g).min(b);
+    let offset = if x < 0.08 { x - 6.25 * x * x } else { 0.04 };
+    r = (r - offset).max(0.0);
+    g = (g - offset).max(0.0);
+    b = (b - offset).max(0.0);
+
+    // Convert to ICtCp space
+    let nits = [r * 100.0, g * 100.0, b * 100.0];
     let nits_2020 = rec709_to_rec2020(nits);
     let mut ictcp = rgb_to_ictcp(nits_2020);
     let i_in = ictcp[0];
 
     let max_in_pq = nit_to_pq(scene_peak_nits);
-    let max_out_pq = nit_to_pq(100.0); // SDR Peak
+    let max_out_pq = nit_to_pq(100.0);
 
-    // Base HDR Dynamic Range Compression
-    let mut i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
+    // Base luminance compression via BT.2390 EETF
+    let i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
 
-    // PQ RESHAPING (The "Dolby Vision" Punch)
-    // Normalize intensity from 0.0 to 1.0 in perceptual space
-    let norm_i = (i_out / max_out_pq).clamp(0.0, 1.0);
+    // ==================================================
+    // PUNCH EFFECT: BALANCED CONTRAST (S-CURVE)
+    // ==================================================
+    // Normalize luminance to 0..1 range to apply the S-curve
+    let normalized_i = (i_out / max_out_pq).clamp(0.0, 1.0);
 
-    // Soft S-curve (Smoothstep) applied directly to the PQ signal.
-    // Deepens shadows and makes highlights pop without breaking midtones.
-    let s_curve = norm_i * norm_i * (3.0 - 2.0 * norm_i);
-    let punch_factor = 0.35; // Cinematic contrast strength (35%)
-    let norm_contrasted = norm_i * (1.0 - punch_factor) + s_curve * punch_factor;
+    // Moderate contrast (0.5). Deepens mid-shadows and lifts bright regions,
+    // preserving the extreme boundaries (0.0 -> 0.0, 1.0 -> 1.0) without clipping.
+    let contrast_strength = 0.5_f32;
+    let punched_i = normalized_i
+        + contrast_strength * (normalized_i - 0.5) * normalized_i * (1.0 - normalized_i);
 
-    i_out = norm_contrasted * max_out_pq;
-    ictcp[0] = i_out;
+    // Map intensity back to the PQ domain
+    let i_out_punched = punched_i * max_out_pq;
+    ictcp[0] = i_out_punched;
 
-    // PERCEPTUAL SATURATION (The "PBR Neutral" Color Purity)
-    // In ICtCp, saturation = Chroma / Intensity.
-    // To keep the color exactly as vibrant as it was before luminance compression,
-    // we scale it by EXACTLY the same ratio!
-    let mut chroma_scale = if i_in > 1e-5 { i_out / i_in } else { 1.0 };
+    // Calculate chroma with the updated contrast
+    // Compression ratio in the PQ domain
+    let compression_ratio = if i_in > 1e-5 {
+        i_out_punched / i_in
+    } else {
+        1.0
+    };
 
-    // Hunt Effect compensation (colors in SDR appear less vibrant than in HDR)
-    chroma_scale *= 1.15;
+    // Desaturation based on intensity delta in PQ space
+    let diff = (i_in - i_out_punched).max(0.0);
+    let desaturation_factor = 0.15;
+    let desat_amount = 1.0 - 1.0 / (desaturation_factor * diff + 1.0);
 
-    // LATE HIGHLIGHT ROLL-OFF (Beautiful light sources)
-    // Instead of a linear color fade, we use an exponential curve (norm_contrasted^4).
-    // This keeps colors rich up to 85-90% brightness, and gently rolls them off to white only at the very end.
-    let path_to_white = (1.0 - norm_contrasted.powf(4.0)).max(0.0);
+    // Scale chroma based on compression and highlight desaturation
+    let final_chroma_scale = compression_ratio * (1.0 - desat_amount);
+    ictcp[1] *= final_chroma_scale;
+    ictcp[2] *= final_chroma_scale;
 
-    chroma_scale *= path_to_white;
-
-    ictcp[1] *= chroma_scale;
-    ictcp[2] *= chroma_scale;
-
-    let rgb_sdr_nits_2020 = ictcp_to_rgb(ictcp);
-    let rgb_sdr_nits_709 = rec2020_to_rec709(rgb_sdr_nits_2020);
+    // Convert back to linear RGB
+    let rgb_2020 = ictcp_to_rgb(ictcp);
+    let rgb_709 = rec2020_to_rec709(rgb_2020);
 
     [
-        (rgb_sdr_nits_709[0] / 100.0).clamp(0.0, 1.0),
-        (rgb_sdr_nits_709[1] / 100.0).clamp(0.0, 1.0),
-        (rgb_sdr_nits_709[2] / 100.0).clamp(0.0, 1.0),
+        (rgb_709[0] / 100.0).clamp(0.0, 1.0),
+        (rgb_709[1] / 100.0).clamp(0.0, 1.0),
+        (rgb_709[2] / 100.0).clamp(0.0, 1.0),
     ]
 }
 
