@@ -64,6 +64,37 @@ fn st2084_to_linear(pq: [f32; 3]) -> [f32; 3] {
     [pq_to_nit(pq[0]), pq_to_nit(pq[1]), pq_to_nit(pq[2])]
 }
 
+/// Linear to sRGB OETF (Gamma correction)
+#[inline]
+fn linear_to_srgb(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    if x <= 0.0031308 {
+        12.92 * x
+    } else {
+        1.055 * x.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/// Rec.709 (sRGB Linear) to Rec.2020 color space matrix
+#[inline]
+fn rec709_to_rec2020(col: [f32; 3]) -> [f32; 3] {
+    [
+        col[0] * 0.627404 + col[1] * 0.329282 + col[2] * 0.0433136,
+        col[0] * 0.069097 + col[1] * 0.91954 + col[2] * 0.0113612,
+        col[0] * 0.0163916 + col[1] * 0.0880132 + col[2] * 0.895595,
+    ]
+}
+
+/// Rec.2020 to Rec.709 (sRGB Linear) color space matrix
+#[inline]
+fn rec2020_to_rec709(col: [f32; 3]) -> [f32; 3] {
+    [
+        col[0] * 1.660491 + col[1] * -0.587641 + col[2] * -0.0728499,
+        col[0] * -0.12455 + col[1] * 1.1329 + col[2] * -0.0083494,
+        col[0] * -0.0181508 + col[1] * -0.100579 + col[2] * 1.11873,
+    ]
+}
+
 /// Converts linear Rec.2020 RGB values to ICtCp color space (using SMPTE ST 2084 transfer function internally).
 fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
     // LMS transformation matrix (Rec. 2020 to LMS)
@@ -180,7 +211,10 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
         (color[2] * exposure * 100.0).max(0.0),
     ];
 
-    let mut ictcp = rgb_to_ictcp(nits);
+    // BT.2446c is formulated around Rec.2020. Transform Rec.709 linear into Rec.2020 linear.
+    let nits_2020 = rec709_to_rec2020(nits);
+
+    let mut ictcp = rgb_to_ictcp(nits_2020);
     let i_in = ictcp[0];
 
     let max_in_pq = nit_to_pq(scene_peak_nits);
@@ -203,12 +237,15 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
     ictcp[1] *= final_chroma_scale;
     ictcp[2] *= final_chroma_scale;
 
-    let rgb_sdr_nits = ictcp_to_rgb(ictcp);
+    let rgb_sdr_nits_2020 = ictcp_to_rgb(ictcp);
+
+    // Transform back to Rec.709 linear
+    let rgb_sdr_nits_709 = rec2020_to_rec709(rgb_sdr_nits_2020);
 
     [
-        (rgb_sdr_nits[0] / 100.0),
-        (rgb_sdr_nits[1] / 100.0),
-        (rgb_sdr_nits[2] / 100.0),
+        (rgb_sdr_nits_709[0] / 100.0),
+        (rgb_sdr_nits_709[1] / 100.0),
+        (rgb_sdr_nits_709[2] / 100.0),
     ]
 }
 
@@ -254,6 +291,7 @@ pub fn tonemap_hdr_to_ldr_rgba(
         return Err(anyhow::anyhow!("Buffer size mismatch"));
     }
 
+    // Resolve global tonemap overrides
     if !TONEMAP_ENABLED.load(Ordering::Relaxed) {
         operator = TonemapOperator::None;
     } else {
@@ -267,6 +305,23 @@ pub fn tonemap_hdr_to_ldr_rgba(
         }
     }
 
+    // Calculate dynamic scene peak luminance for BT2446c EETF curve scaling
+    let mut scene_peak_nits = 1000.0;
+    if operator == TonemapOperator::ICtCpLumina {
+        let max_lum = hdr_pixels
+            .par_chunks_exact(4)
+            .map(|hdr| {
+                // Rec.709 Relative Luminance
+                let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
+                y * exposure
+            })
+            .reduce(|| 0.0_f32, f32::max);
+
+        if max_lum > 0.0 {
+            scene_peak_nits = (max_lum * 100.0).max(100.0); // Clamp minimum to 100 nits
+        }
+    }
+
     let mut ldr_pixels = vec![0u8; total_pixels * 4];
 
     ldr_pixels
@@ -277,34 +332,34 @@ pub fn tonemap_hdr_to_ldr_rgba(
             let g_in = hdr[1] * exposure;
             let b_in = hdr[2] * exposure;
 
-            let (r, g, b) = match operator {
+            let (mut r, mut g, mut b) = match operator {
                 TonemapOperator::AcesFilmic => (
                     aces_tonemap_raw(r_in),
                     aces_tonemap_raw(g_in),
                     aces_tonemap_raw(b_in),
                 ),
                 TonemapOperator::ICtCpLumina => {
-                    let mapped = tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, 4000.0);
-                    (
-                        mapped[0].clamp(0.0, 1.0),
-                        mapped[1].clamp(0.0, 1.0),
-                        mapped[2].clamp(0.0, 1.0),
-                    )
+                    let mapped =
+                        tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, scene_peak_nits);
+                    (mapped[0], mapped[1], mapped[2])
                 }
                 TonemapOperator::PbrNeutral => {
                     let mapped = pbr_neutral_tonemapping([r_in, g_in, b_in]);
-                    (
-                        mapped[0].clamp(0.0, 1.0),
-                        mapped[1].clamp(0.0, 1.0),
-                        mapped[2].clamp(0.0, 1.0),
-                    )
+                    (mapped[0], mapped[1], mapped[2])
                 }
-                TonemapOperator::None => (
-                    r_in.clamp(0.0, 1.0),
-                    g_in.clamp(0.0, 1.0),
-                    b_in.clamp(0.0, 1.0),
-                ),
+                TonemapOperator::None => (r_in, g_in, b_in),
             };
+
+            // ACES formula intrinsically mimics an sRGB curve, so we only apply OETF to others
+            if operator != TonemapOperator::AcesFilmic {
+                r = linear_to_srgb(r);
+                g = linear_to_srgb(g);
+                b = linear_to_srgb(b);
+            } else {
+                r = r.clamp(0.0, 1.0);
+                g = g.clamp(0.0, 1.0);
+                b = b.clamp(0.0, 1.0);
+            }
 
             ldr[0] = (r * 255.0) as u8;
             ldr[1] = (g * 255.0) as u8;
