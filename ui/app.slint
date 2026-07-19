@@ -671,7 +671,14 @@ export component AppWindow inherits Window {
                         }
 
                         if Store.tonemap_enabled: ComboBox {
-                            model: ["ACES Filmic", "ICtCp Perceptual", "Khronos PBR Neutral"];
+                            model: [
+                                "None",
+                                "False Color",
+                                "ACES Filmic",
+                                "ACES 2.0 Fit",
+                                "Khronos PBR Neutral",
+                                "ICtCp Perceptual"
+                            ];
                             current-index <=> Store.tonemap_operator;
                             height: 24px;
                             width: 165px;

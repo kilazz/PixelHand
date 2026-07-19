@@ -78,7 +78,8 @@ export global Store {
 
     // HDR Tonemapping Options
     in-out property <bool> tonemap_enabled: true;
-    in-out property <int> tonemap_operator: 0; // 0: AcesFilmic, 1: ICtCp Perceptual, 2: Khronos PBR Neutral
+    // 0: None, 1: False Color, 2: AcesFilmic, 3: Aces2Fit, 4: PbrNeutral, 5: ICtCpPerceptual
+    in-out property <int> tonemap_operator: 2;
 
     // Previews & Quality Configurations
     in-out property <bool> enable_previews: true;
