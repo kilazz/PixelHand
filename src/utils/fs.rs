@@ -25,7 +25,7 @@ pub fn extract_selected_files(lock: &AppState) -> (Vec<String>, Vec<(String, Str
 }
 
 /// Routes filesystem deduplication or deletion operations to the appropriate handler.
-/// Offloads synchronous blocking IO operations to a dedicated blocking thread pool [1].
+/// Offloads synchronous blocking IO operations to a dedicated blocking thread pool.
 pub async fn execute_file_action(
     action: &str,
     files: Vec<String>,
@@ -33,7 +33,7 @@ pub async fn execute_file_action(
 ) -> anyhow::Result<()> {
     let action_owned = action.to_string();
 
-    // Safety check: run blocking filesystem operations inside the dedicated Tokio blocking pool [1]
+    // Safety check: run blocking filesystem operations inside the dedicated Tokio blocking pool
     tokio::task::spawn_blocking(move || match action_owned.as_str() {
         "trash" => delete_files_sync(files),
         "hardlink" => create_hardlinks_sync(pairs),
@@ -58,6 +58,8 @@ fn delete_files_sync(paths: Vec<String>) -> anyhow::Result<()> {
 
 /// Transforms duplicates into hard links pointing to the master source file (Synchronous blocking runner).
 fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
+    let mut error_count = 0;
+
     for (source_str, target_str) in pairs {
         let source = PathBuf::from(source_str);
         let target = PathBuf::from(target_str);
@@ -75,6 +77,7 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
                 target.display(),
                 e
             );
+            error_count += 1;
             continue;
         }
 
@@ -85,14 +88,25 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
                 target.display(),
                 e
             );
+            error_count += 1;
         }
     }
-    Ok(())
+
+    if error_count > 0 {
+        Err(anyhow::anyhow!(
+            "Failed to create {} hard links. Ensure source and target are on the same disk drive.",
+            error_count
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 /// Transforms duplicates into reflinks pointing to the master source file (Synchronous blocking runner).
 /// Falls back to deep copies if the underlying filesystem does not support reflinking.
 fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
+    let mut error_count = 0;
+
     for (source_str, target_str) in pairs {
         let source = PathBuf::from(source_str);
         let target = PathBuf::from(target_str);
@@ -110,6 +124,7 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
                 target.display(),
                 e
             );
+            error_count += 1;
             continue;
         }
 
@@ -121,7 +136,16 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
                 target.display(),
                 e
             );
+            error_count += 1;
         }
     }
-    Ok(())
+
+    if error_count > 0 {
+        Err(anyhow::anyhow!(
+            "Failed to process {} reflink/copy operations. Check file permissions or disk space.",
+            error_count
+        ))
+    } else {
+        Ok(())
+    }
 }

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use slint::ComponentHandle;
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::state::{AppSettings, AppState};
@@ -21,6 +21,11 @@ static LOG_MESSAGES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 // Thread-safe atomic registers to bridge Slint states to background high-frequency loops safely
 pub static COMPARE_MODE: AtomicUsize = AtomicUsize::new(0);
 pub static FLICKER_INTERVAL: AtomicUsize = AtomicUsize::new(333);
+
+// App-level atomics to bridge UI tonemapping states to pure core encoders
+pub static TONEMAP_ENABLED: AtomicBool = AtomicBool::new(true);
+pub static AUTO_EXPOSURE_ENABLED: AtomicBool = AtomicBool::new(true);
+pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(2);
 
 /// Custom tracing subscriber log handler wrapping native console pipes
 struct UiLogWriter;
@@ -93,6 +98,23 @@ pub fn append_to_console_log(msg: &str) {
     }
 }
 
+/// Dynamic state mapper producing a pure config instance for loaders on demand.
+pub fn get_active_tonemap_config() -> crate::core::tonemapper::TonemapConfig {
+    crate::core::tonemapper::TonemapConfig {
+        enabled: TONEMAP_ENABLED.load(Ordering::Relaxed),
+        auto_exposure: AUTO_EXPOSURE_ENABLED.load(Ordering::Relaxed),
+        operator: match TONEMAP_OPERATOR.load(Ordering::Relaxed) {
+            0 => crate::core::tonemapper::TonemapOperator::None,
+            1 => crate::core::tonemapper::TonemapOperator::FalseColor,
+            2 => crate::core::tonemapper::TonemapOperator::AcesFilmic,
+            3 => crate::core::tonemapper::TonemapOperator::Aces2Fit,
+            4 => crate::core::tonemapper::TonemapOperator::PbrNeutral,
+            5 => crate::core::tonemapper::TonemapOperator::ICtCpPerceptual,
+            _ => crate::core::tonemapper::TonemapOperator::AcesFilmic,
+        },
+    }
+}
+
 /// Main entry point for the GUI application
 pub fn run_gui() -> Result<()> {
     // Run database vector cache garbage collection synchronously
@@ -132,12 +154,9 @@ pub fn run_gui() -> Result<()> {
     store.set_checkerboard_pattern(checkerboard);
 
     // Initialize atomic variables from AppSettings
-    crate::core::tonemapper::TONEMAP_ENABLED
-        .store(loaded_settings.tonemap_enabled, Ordering::Relaxed);
-    crate::core::tonemapper::AUTO_EXPOSURE_ENABLED
-        .store(loaded_settings.tonemap_auto_exposure, Ordering::Relaxed);
-    crate::core::tonemapper::TONEMAP_OPERATOR
-        .store(loaded_settings.tonemap_operator as usize, Ordering::Relaxed);
+    TONEMAP_ENABLED.store(loaded_settings.tonemap_enabled, Ordering::Relaxed);
+    AUTO_EXPOSURE_ENABLED.store(loaded_settings.tonemap_auto_exposure, Ordering::Relaxed);
+    TONEMAP_OPERATOR.store(loaded_settings.tonemap_operator as usize, Ordering::Relaxed);
 
     // Flush initial startup logs queued before UI loop initialization
     if let Some(queue_mutex) = LOG_MESSAGES.get()
@@ -261,8 +280,8 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // Delegate callback hooks registration to app_bindings module
-    crate::app_bindings::register_callbacks(&app, state, cancel_token);
+    // Delegate callback hooks registration to handlers module
+    crate::handlers::register_callbacks(&app, state, cancel_token);
 
     app.run()
         .context("Slint event loop terminated with an error")?;
@@ -376,11 +395,9 @@ pub fn trigger_viewport_update(
     let app_weak_clone = app_weak.clone();
 
     // Store state before asynchronous execution
-    crate::core::tonemapper::TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
-    crate::core::tonemapper::AUTO_EXPOSURE_ENABLED
-        .store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
-    crate::core::tonemapper::TONEMAP_OPERATOR
-        .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
+    TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
+    AUTO_EXPOSURE_ENABLED.store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
+    TONEMAP_OPERATOR.store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
 
     tokio::spawn(async move {
         let raw_orig =

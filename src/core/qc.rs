@@ -1,8 +1,19 @@
 // src/core/qc.rs
 
-use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
+use thiserror::Error;
+
+/// Strongly typed errors for Quality Control operations.
+#[derive(Error, Debug)]
+pub enum QcError {
+    #[error("Failed to read DDS file structure: {0}")]
+    DdsReadFailed(String),
+    #[error("File metadata access failed: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Image dimensions could not be read: {0}")]
+    ImageSizeError(#[from] imagesize::ImageError),
+}
 
 /// Represents the texture normal map encoding format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -160,17 +171,15 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
 }
 
 /// Extracts technical image specifications, format metrics, and metadata layout from target path.
-pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
+pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, QcError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let size = fs::metadata(path)?.len();
 
-    let (mut w, mut h) = match imagesize::size(path) {
-        Ok(dim) => (dim.width as u32, dim.height as u32),
-        Err(_) => (0, 0),
-    };
+    let dim = imagesize::size(path)?;
+    let (mut w, mut h) = (dim.width as u32, dim.height as u32);
 
     let format_str = ext.clone();
     let mut compression_format = ext.to_uppercase();
@@ -181,52 +190,75 @@ pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata> {
     let mut is_cubemap = false;
 
     if ext == "dds" {
-        let bytes = fs::read(path).context("Failed to read DDS bytes")?;
-        if bytes.len() >= 128 {
-            h = safe_read_u32_le(&bytes, 12);
-            w = safe_read_u32_le(&bytes, 16);
+        let bytes = fs::read(path)?;
 
-            // Read the mipmap count directly from dwMipMapCount header field
-            let mips = safe_read_u32_le(&bytes, 28);
-            mipmap_count = if mips > 0 { mips } else { 1 };
+        // Explicitly validate minimum required DDS file size
+        if bytes.len() < 128 {
+            return Err(QcError::DdsReadFailed(format!(
+                "File size is {} bytes, which is too small to contain a valid 128-byte DDS header",
+                bytes.len()
+            )));
+        }
 
-            // dwCaps2 is located at offset 112. The flag 0x0000FE00 indicates a Cubemap.
-            let dw_caps2 = safe_read_u32_le(&bytes, 112);
-            is_cubemap = (dw_caps2 & 0x0000FE00) != 0;
+        // Explicitly validate the mandatory "DDS " magic bytes
+        if bytes.get(0..4) != Some(b"DDS ") {
+            return Err(QcError::DdsReadFailed(
+                "Missing or invalid DDS magic bytes (expected 'DDS ')".to_string(),
+            ));
+        }
 
-            let pf_flags = safe_read_u32_le(&bytes, 80);
-            if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
+        // Explicitly validate standard DDS header size field (offset 4, dwSize must be 124)
+        let dw_size = safe_read_u32_le(&bytes, 4);
+        if dw_size != 124 {
+            return Err(QcError::DdsReadFailed(format!(
+                "Invalid standard DDS header size field (dwSize is {}, expected 124)",
+                dw_size
+            )));
+        }
+
+        h = safe_read_u32_le(&bytes, 12);
+        w = safe_read_u32_le(&bytes, 16);
+
+        // Read the mipmap count directly from dwMipMapCount header field
+        let mips = safe_read_u32_le(&bytes, 28);
+        mipmap_count = if mips > 0 { mips } else { 1 };
+
+        // dwCaps2 is located at offset 112. The flag 0x0000FE00 indicates a Cubemap.
+        let dw_caps2 = safe_read_u32_le(&bytes, 112);
+        is_cubemap = (dw_caps2 & 0x0000FE00) != 0;
+
+        let pf_flags = safe_read_u32_le(&bytes, 80);
+        if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
+            has_alpha = true;
+        }
+
+        let pf_fourcc = safe_read_u32_le(&bytes, 84);
+        if pf_fourcc != 0 {
+            if let Some(fourcc_slice) = bytes.get(84..88) {
+                compression_format = String::from_utf8_lossy(fourcc_slice).trim().to_string();
+            }
+            if compression_format == "DXT3" || compression_format == "DXT5" {
                 has_alpha = true;
             }
 
-            let pf_fourcc = safe_read_u32_le(&bytes, 84);
-            if pf_fourcc != 0 {
-                if let Some(fourcc_slice) = bytes.get(84..88) {
-                    compression_format = String::from_utf8_lossy(fourcc_slice).trim().to_string();
-                }
-                if compression_format == "DXT3" || compression_format == "DXT5" {
+            if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
+                let dxgi_format = safe_read_u32_le(&bytes, 128);
+                compression_format = map_dxgi_format_to_string(dxgi_format);
+                if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
                     has_alpha = true;
                 }
-
-                if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
-                    let dxgi_format = safe_read_u32_le(&bytes, 128);
-                    compression_format = map_dxgi_format_to_string(dxgi_format);
-                    if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
-                        has_alpha = true;
-                    }
-                    if matches!(dxgi_format, 71 | 74 | 77 | 80 | 83 | 98) {
-                        color_space = "Linear".to_string();
-                    }
+                if matches!(dxgi_format, 71 | 74 | 77 | 80 | 83 | 98) {
+                    color_space = "Linear".to_string();
                 }
-            } else {
-                compression_format = "Uncompressed".to_string();
-                let rgb_bit_count = safe_read_u32_le(&bytes, 88);
-                bit_depth = if rgb_bit_count / 4 == 0 {
-                    8
-                } else {
-                    rgb_bit_count / 4
-                };
             }
+        } else {
+            compression_format = "Uncompressed".to_string();
+            let rgb_bit_count = safe_read_u32_le(&bytes, 88);
+            bit_depth = if rgb_bit_count / 4 == 0 {
+                8
+            } else {
+                rgb_bit_count / 4
+            };
         }
     } else if ext == "exr" {
         if let Ok(meta) = exr::prelude::MetaData::read_from_file(path, false)
@@ -421,7 +453,6 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
 }
 
 /// Analyzes standard normal map shading directions in G channel to warn of potential Y-axis inversion (DirectX vs OpenGL).
-/// Optimized using raw slice direct index calculation to eliminate bounds-check overhead [1].
 pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
     let img =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(256)).ok()?;
@@ -446,14 +477,12 @@ pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
         let next_y_idx = (y + 1) as usize * stride;
 
         for x in 1..(w - 1) {
-            let x_offset = x as usize * 3 + 1; // Green channel offset [1]
+            let x_offset = x as usize * 3 + 1; // Green channel offset
 
-            // SAFETY: Since y < h - 1 and x < w - 1, and the total vector length is strictly h * w * 3,
-            // we guarantee that all computed index references are strictly less than raw.len() [1].
-            // This eliminates array boundaries assertion checks and optimizes performance [1].
-            let cur_g = unsafe { *raw.get_unchecked(y_idx + x_offset) } as f32;
-            let prev_g = unsafe { *raw.get_unchecked(prev_y_idx + x_offset) } as f32;
-            let next_g = unsafe { *raw.get_unchecked(next_y_idx + x_offset) } as f32;
+            // Standard boundary references. LLVM will safely optimize bounds checks away in release mode.
+            let cur_g = raw[y_idx + x_offset] as f32;
+            let prev_g = raw[prev_y_idx + x_offset] as f32;
+            let next_g = raw[next_y_idx + x_offset] as f32;
 
             if (next_g - prev_g).abs() > 30.0 {
                 if cur_g > 128.0 {

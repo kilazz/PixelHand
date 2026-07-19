@@ -107,13 +107,16 @@ pub fn normalize_path_key(path_str: &str) -> Ustr {
     ustr::ustr(&normalized.to_lowercase())
 }
 
-/// Stores an image buffer in the memory cache, evicting the oldest items if total memory footprint exceeds 500 MB.
+/// Stores an image buffer in the memory cache, evicting the oldest items if total memory footprint exceeds limits.
 fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| {
         Cache::builder()
-            // Limit to approximately 500 MB for thumbnail caches to prevent system memory bloat
-            .max_capacity(500 * 1024 * 1024)
-            // Weigh each item according to its actual decompressed pixel payload (Width * Height * 4 channels)
+            // Reduced max capacity from 500 MB to 150 MB.
+            // Since channel layers (R, G, B, A) are allocated dynamically behind a OnceLock,
+            // the cache weigher does not automatically track their expanded memory footprint.
+            // A conservative 150 MB base limit prevents total RAM from silently bloating up to 1+ GB.
+            .max_capacity(150 * 1024 * 1024)
+            // Weigh each item according to its base decompressed pixel payload (Width * Height * 4 channels)
             .weigher(|_k, v: &CachedThumbnail| {
                 let bytes = v.composite.width() as u64 * v.composite.height() as u64 * 4;
                 bytes.min(u32::MAX as u64) as u32

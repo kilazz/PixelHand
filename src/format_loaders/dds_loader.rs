@@ -449,11 +449,13 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
         let (hdr_pixels, width, height) = crate::core::tonemapper::load_exr_rgba(path_ref)
             .context("Failed to load EXR float pixels")?;
 
+        let active_config = crate::app::get_active_tonemap_config();
+
         let ldr_img = crate::core::tonemapper::tonemap_hdr_to_ldr_rgba(
             &hdr_pixels,
             width,
             height,
-            crate::core::tonemapper::TonemapOperator::AcesFilmic,
+            active_config,
             1.0,
         )
         .context("Failed to apply tonemapping to EXR")?;
@@ -503,11 +505,13 @@ pub fn open_image_with_dds_fallback<P: AsRef<Path>>(
                 let height = float_img.height();
                 let hdr_pixels = float_img.into_raw();
 
+                let active_config = crate::app::get_active_tonemap_config();
+
                 let ldr_img = crate::core::tonemapper::tonemap_hdr_to_ldr_rgba(
                     &hdr_pixels,
                     width,
                     height,
-                    crate::core::tonemapper::TonemapOperator::AcesFilmic,
+                    active_config,
                     1.0,
                 )
                 .context("Failed to apply HDR tonemapping to floating-point texture")?;

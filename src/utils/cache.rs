@@ -52,21 +52,23 @@ pub async fn get_channel_preview_image(
         cache.invalidate(&cache_key);
     }
 
-    if !cache.contains_key(&cache_key) {
-        // Call our new dds fallback loader capable of extracting specific mip levels
-        let img =
-            crate::format_loaders::dds_loader::open_image_with_specific_mip(&p, mip_level).ok()?;
+    // Atomically load and cache the image, preventing Cache Stampede.
+    // If another thread is already loading this exact file, the current thread will wait for it to finish.
+    let cached_item_res =
+        cache.try_get_with(cache_key.clone(), || -> Result<DecodedCacheItem, String> {
+            if let Ok(img) =
+                crate::format_loaders::dds_loader::open_image_with_specific_mip(&p, mip_level)
+            {
+                Ok(DecodedCacheItem {
+                    mtime: current_mtime,
+                    image: Arc::new(img.into_rgba8()),
+                })
+            } else {
+                Err("Failed to decode image".to_string())
+            }
+        });
 
-        cache.insert(
-            cache_key.clone(),
-            DecodedCacheItem {
-                mtime: current_mtime,
-                image: Arc::new(img.into_rgba8()),
-            },
-        );
-    }
-
-    let cached_item = cache.get(&cache_key)?;
+    let cached_item = cached_item_res.ok()?;
     let rgba = &*cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {

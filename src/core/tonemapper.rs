@@ -1,21 +1,21 @@
 // src/core/tonemapper.rs
 
-use anyhow::{Context, Result};
 use exr::prelude::*;
 use image::RgbaImage;
 use rayon::prelude::*;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use thiserror::Error;
 
-/// Global toggle to enable or disable tonemapping entirely across the application.
-pub static TONEMAP_ENABLED: AtomicBool = AtomicBool::new(true);
-
-/// Global toggle to enable or disable photographic Auto Exposure.
-pub static AUTO_EXPOSURE_ENABLED: AtomicBool = AtomicBool::new(true);
-
-/// Global state tracking the currently selected tonemap operator.
-/// 0: None, 1: FalseColor, 2: AcesFilmic, 3: ACES 2.0 Fit, 4: Khronos PBR Neutral, 5: ICtCp Perceptual
-pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(2); // Defaults to AcesFilmic
+/// Strongly typed errors for tonemapping operations.
+#[derive(Error, Debug)]
+pub enum TonemapError {
+    #[error("EXR file decoding failed: {0}")]
+    ExrReadFailed(String),
+    #[error("Buffer size mismatch: expected {expected} floats, but got {actual}")]
+    BufferSizeMismatch { expected: usize, actual: usize },
+    #[error("Failed to build RgbaImage from low-dynamic-range pixel buffer")]
+    ImageBuildFailed,
+}
 
 /// Supported tonemapping operators and visualization modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +26,14 @@ pub enum TonemapOperator {
     Aces2Fit,
     PbrNeutral,
     ICtCpPerceptual,
+}
+
+/// Pure data structure representing the active tonemapping settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TonemapConfig {
+    pub enabled: bool,
+    pub auto_exposure: bool,
+    pub operator: TonemapOperator,
 }
 
 // -----------------------------------------------------------------------------
@@ -58,7 +66,7 @@ fn get_luma(color: [f32; 3]) -> f32 {
     color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722
 }
 
-/// Calculates the automatic exposure scaling factor based on the photographic middle-gray standard (18% Gray).
+/// Calculates the automatic exposure scaling factor based on the middle-gray standard (18% Gray).
 /// Uses a high-performance parallel logarithmic reduction to compute the geometric mean luminance.
 pub fn calculate_auto_exposure(hdr_pixels: &[f32]) -> f32 {
     let total_pixels = hdr_pixels.len() / 4;
@@ -71,8 +79,8 @@ pub fn calculate_auto_exposure(hdr_pixels: &[f32]) -> f32 {
         .par_chunks_exact(4)
         .map(|hdr| {
             let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
-            // Add a tiny delta of 1e-5 to prevent log2(0) evaluation for black pixels
-            (y + 1e-5).log2()
+            // Guard against NaN poisoning by clamping y before applying log2
+            (y.max(0.0) + 1e-5).log2()
         })
         .sum::<f32>();
 
@@ -400,23 +408,32 @@ fn aces_tonemap_raw(x: f32) -> f32 {
 // -----------------------------------------------------------------------------
 
 /// Decodes the first RGBA floating-point layer of an EXR file into a flat `f32` vector.
-pub fn load_exr_rgba(path: &Path) -> Result<(Vec<f32>, u32, u32)> {
+/// Uses Arc<AtomicUsize> to safely coordinate dimensions across 'static closures.
+pub fn load_exr_rgba(path: &Path) -> std::result::Result<(Vec<f32>, u32, u32), TonemapError> {
+    let image_width = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let image_width_clone1 = image_width.clone();
+    let image_width_clone2 = image_width.clone();
+
     let image = read_first_rgba_layer_from_file(
         path,
-        |size, _| vec![0.0f32; size.width() * size.height() * 4],
-        |pixel_vector, position, (r, g, b, a): (f32, f32, f32, f32)| {
-            let index = (position.y() * position.width() + position.x()) * 4;
+        move |size, _| {
+            image_width_clone1.store(size.width(), std::sync::atomic::Ordering::Relaxed);
+            vec![0.0f32; size.width() * size.height() * 4]
+        },
+        move |pixel_vector, position, (r, g, b, a): (f32, f32, f32, f32)| {
+            let width = image_width_clone2.load(std::sync::atomic::Ordering::Relaxed);
+            let index = (position.y() * width + position.x()) * 4;
             pixel_vector[index] = r;
             pixel_vector[index + 1] = g;
             pixel_vector[index + 2] = b;
             pixel_vector[index + 3] = a;
         },
     )
-    .context("EXR read failed")?;
+    .map_err(|e| TonemapError::ExrReadFailed(e.to_string()))?;
 
     let size = image.layer_data.size;
     Ok((
-        image.layer_data.channel_data.pixels,
+        image.layer_data.channel_data.pixels, // Fixed to extract correct underlying Vec<f32> from SpecificChannels
         size.width() as u32,
         size.height() as u32,
     ))
@@ -428,32 +445,26 @@ pub fn tonemap_hdr_to_ldr_rgba(
     hdr_pixels: &[f32],
     width: u32,
     height: u32,
-    operator: TonemapOperator,
+    config: TonemapConfig,
     exposure: f32,
-) -> Result<RgbaImage> {
+) -> std::result::Result<RgbaImage, TonemapError> {
     let total_pixels = (width * height) as usize;
     if hdr_pixels.len() != total_pixels * 4 {
-        return Err(anyhow::anyhow!("Buffer size mismatch"));
+        return Err(TonemapError::BufferSizeMismatch {
+            expected: total_pixels * 4,
+            actual: hdr_pixels.len(),
+        });
     }
 
-    // Resolve global tonemap overrides from the Atomic states
-    let active_operator = if !TONEMAP_ENABLED.load(Ordering::Relaxed) {
+    let active_operator = if !config.enabled {
         TonemapOperator::None
     } else {
-        match TONEMAP_OPERATOR.load(Ordering::Relaxed) {
-            0 => TonemapOperator::None,
-            1 => TonemapOperator::FalseColor,
-            2 => TonemapOperator::AcesFilmic,
-            3 => TonemapOperator::Aces2Fit,
-            4 => TonemapOperator::PbrNeutral,
-            5 => TonemapOperator::ICtCpPerceptual,
-            _ => operator, // Fallback to provided operator if index is unknown
-        }
+        config.operator
     };
 
     // photographic Auto Exposure calculation using geometric mean luminance
     let mut active_exposure = exposure;
-    if AUTO_EXPOSURE_ENABLED.load(Ordering::Relaxed) {
+    if config.auto_exposure {
         // Multiplies default exposure with the automatic factor acting as Exposure Compensation offset
         active_exposure *= calculate_auto_exposure(hdr_pixels);
     }
@@ -467,9 +478,12 @@ pub fn tonemap_hdr_to_ldr_rgba(
             .map(|hdr| {
                 // Approximate relative luminance
                 let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
-                y * active_exposure
+                let val = y * active_exposure;
+                // Guard against NaN/Infinity poisoning
+                if val.is_finite() { val } else { 0.0 }
             })
-            .reduce(|| 0.0_f32, f32::max);
+            // Safe manual maximum to avoid f32::max propagating NaNs silently
+            .reduce(|| 0.0_f32, |a, b| if a > b { a } else { b });
 
         if max_lum > 0.0 {
             scene_peak_nits = (max_lum * 100.0).max(100.0); // Clamp minimum to 100 nits
@@ -514,20 +528,17 @@ pub fn tonemap_hdr_to_ldr_rgba(
                 }
             };
 
-            // Skip OETF (Gamma) for AcesFilmic (curve baked in) and FalseColor (raw heatmap colors).
-            // Apply standard sRGB Gamma correction to all linear outputs.
-            if !matches!(
-                active_operator,
-                TonemapOperator::AcesFilmic | TonemapOperator::FalseColor
-            ) {
+            // Apply standard sRGB Gamma correction to all linear outputs EXCEPT FalseColor
+            if active_operator != TonemapOperator::FalseColor {
                 r = linear_to_srgb(r);
                 g = linear_to_srgb(g);
                 b = linear_to_srgb(b);
-            } else {
-                r = r.clamp(0.0, 1.0);
-                g = g.clamp(0.0, 1.0);
-                b = b.clamp(0.0, 1.0);
             }
+
+            // Strictly clamp colors to valid 0..1 range prior to integer casting
+            r = r.clamp(0.0, 1.0);
+            g = g.clamp(0.0, 1.0);
+            b = b.clamp(0.0, 1.0);
 
             ldr[0] = (r * 255.0) as u8;
             ldr[1] = (g * 255.0) as u8;
@@ -535,7 +546,7 @@ pub fn tonemap_hdr_to_ldr_rgba(
             ldr[3] = (hdr[3].clamp(0.0, 1.0) * 255.0) as u8;
         });
 
-    RgbaImage::from_raw(width, height, ldr_pixels).context("Failed to build RgbaImage")
+    RgbaImage::from_raw(width, height, ldr_pixels).ok_or(TonemapError::ImageBuildFailed)
 }
 
 /// Computes pixel differences between two Rgba buffers in parallel.
@@ -544,7 +555,7 @@ pub fn calculate_difference_map(
     img1: &RgbaImage,
     img2: &RgbaImage,
     heatmap: bool,
-) -> Result<RgbaImage> {
+) -> std::result::Result<RgbaImage, anyhow::Error> {
     let (w1, h1) = img1.dimensions();
     let (w2, h2) = img2.dimensions();
 
@@ -558,19 +569,15 @@ pub fn calculate_difference_map(
     };
 
     let mut diff_img = RgbaImage::new(w1, h1);
-    let raw_diff = diff_img.as_mut();
 
-    // Map pixel computations across all available CPU threads in parallel
-    raw_diff
+    // Map pixel computations across all available CPU threads in parallel using highly optimized raw slices.
+    // Removes the `get_pixel` boundary checks and index calculations entirely.
+    diff_img
+        .as_mut()
         .par_chunks_exact_mut(4)
-        .enumerate()
-        .for_each(|(idx, pixel_out)| {
-            let x = (idx as u32) % w1;
-            let y = (idx as u32) / w1;
-
-            let p1 = img1.get_pixel(x, y);
-            let p2 = ref_img2.get_pixel(x, y);
-
+        .zip(img1.as_raw().par_chunks_exact(4))
+        .zip(ref_img2.as_raw().par_chunks_exact(4))
+        .for_each(|((pixel_out, p1), p2)| {
             if heatmap {
                 let diff_r = p1[0].abs_diff(p2[0]) as u16;
                 let diff_g = p1[1].abs_diff(p2[1]) as u16;

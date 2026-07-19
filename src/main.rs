@@ -1,10 +1,10 @@
 // src/main.rs
 
 mod app;
-mod app_bindings;
 mod cli;
 mod core;
 mod format_loaders;
+mod handlers;
 mod scanners;
 mod state;
 mod utils;

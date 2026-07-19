@@ -84,7 +84,11 @@ pub fn format_size(bytes: u64) -> String {
 pub fn calculate_xxhash(path: &Path) -> std::io::Result<String> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Xxh64::new(0);
-    let mut buffer = vec![0; 8 * 1024 * 1024]; // Standard 8MB page chunk to streamline sequential disk reads
+
+    // Configured to a 1 MB buffer chunk instead of 8 MB to protect CPU cache levels
+    // and minimize system RAM footprint during parallel runs inside Rayon thread pools.
+    let mut buffer = vec![0; 1024 * 1024];
+
     loop {
         let bytes_read = file.read(&mut buffer)?;
         if bytes_read == 0 {
