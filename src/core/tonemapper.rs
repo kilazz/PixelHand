@@ -7,32 +7,59 @@ use rayon::prelude::*;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+/// Global toggle to enable or disable tonemapping entirely across the application.
 pub static TONEMAP_ENABLED: AtomicBool = AtomicBool::new(true);
-// 0: AcesFilmic, 1: ICtCp Perceptual, 2: Khronos PBR Neutral
+
+/// Global state tracking the currently selected tonemap operator.
+/// 0: AcesFilmic, 1: ICtCp Perceptual, 2: Khronos PBR Neutral, 3: ACES 2.0 Fit, 4: False Color
 pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(0);
 
+/// Supported tonemapping operators and visualization modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TonemapOperator {
     None,
+    FalseColor,
     AcesFilmic,
+    Aces2Fit,
     ICtCpLumina,
     PbrNeutral,
 }
 
-// PQ constants defined by SMPTE ST 2084 / ITU-R BT.2100
+// -----------------------------------------------------------------------------
+// CONSTANTS: Perceptual Quantizer (PQ) ST 2084 / ITU-R BT.2100
+// -----------------------------------------------------------------------------
+// These constants are mathematically defined to map linear light (nits)
+// to a non-linear perceptual curve that mimics human vision.
 const PQ_N: f32 = 2610.0 / 4096.0 / 4.0;
 const PQ_M: f32 = 2523.0 / 4096.0 * 128.0;
 const PQ_C1: f32 = 3424.0 / 4096.0;
 const PQ_C2: f32 = 2413.0 / 4096.0 * 32.0;
 const PQ_C3: f32 = 2392.0 / 4096.0 * 32.0;
+/// The absolute maximum luminance (in nits) that the PQ curve can represent.
 const PQ_MAX_NITS: f32 = 10000.0;
 
+// -----------------------------------------------------------------------------
+// MATH UTILITIES
+// -----------------------------------------------------------------------------
+
+/// Performs smooth Hermite interpolation between 0 and 1.
 #[inline]
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
 }
 
+/// Calculates Rec.709 relative luminance from a linear RGB color.
+#[inline]
+fn get_luma(color: [f32; 3]) -> f32 {
+    color[0] * 0.2126 + color[1] * 0.7152 + color[2] * 0.0722
+}
+
+// -----------------------------------------------------------------------------
+// COLOR SPACE & TRANSFER FUNCTIONS
+// -----------------------------------------------------------------------------
+
+/// Converts absolute linear luminance (nits) to PQ non-linear signal value (0.0 to 1.0).
 #[inline]
 fn nit_to_pq(nits: f32) -> f32 {
     let y = nits / PQ_MAX_NITS;
@@ -42,6 +69,7 @@ fn nit_to_pq(nits: f32) -> f32 {
         .powf(PQ_M)
 }
 
+/// Converts a PQ non-linear signal value (0.0 to 1.0) back to absolute linear luminance (nits).
 #[inline]
 fn pq_to_nit(pq: f32) -> f32 {
     let y_pow = pq.abs().powf(1.0 / PQ_M);
@@ -50,6 +78,7 @@ fn pq_to_nit(pq: f32) -> f32 {
     (num / den).abs().powf(1.0 / PQ_N) * PQ_MAX_NITS
 }
 
+/// Helper function to apply the ST 2084 PQ curve across an RGB array.
 #[inline]
 fn linear_to_st2084(linear_nits: [f32; 3]) -> [f32; 3] {
     [
@@ -59,12 +88,14 @@ fn linear_to_st2084(linear_nits: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// Helper function to linearize an RGB array encoded with the ST 2084 PQ curve.
 #[inline]
 fn st2084_to_linear(pq: [f32; 3]) -> [f32; 3] {
     [pq_to_nit(pq[0]), pq_to_nit(pq[1]), pq_to_nit(pq[2])]
 }
 
-/// Linear to sRGB OETF (Gamma correction)
+/// Applies the sRGB Opto-Electronic Transfer Function (OETF) to a linear signal.
+/// Necessary for correct display of linear image buffers on standard LDR monitors.
 #[inline]
 fn linear_to_srgb(x: f32) -> f32 {
     let x = x.clamp(0.0, 1.0);
@@ -75,7 +106,8 @@ fn linear_to_srgb(x: f32) -> f32 {
     }
 }
 
-/// Rec.709 (sRGB Linear) to Rec.2020 color space matrix
+/// Matrix multiplication to transform colors from Rec.709 (sRGB gamut) to Rec.2020 (Wide Gamut).
+/// Required prior to entering Dolby/ITU standardized HDR color spaces.
 #[inline]
 fn rec709_to_rec2020(col: [f32; 3]) -> [f32; 3] {
     [
@@ -85,7 +117,7 @@ fn rec709_to_rec2020(col: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// Rec.2020 to Rec.709 (sRGB Linear) color space matrix
+/// Matrix multiplication to transform colors from Rec.2020 back to Rec.709.
 #[inline]
 fn rec2020_to_rec709(col: [f32; 3]) -> [f32; 3] {
     [
@@ -95,16 +127,18 @@ fn rec2020_to_rec709(col: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// Converts linear Rec.2020 RGB values to ICtCp color space (using SMPTE ST 2084 transfer function internally).
+/// Converts linear Rec.2020 RGB values to the ICtCp perceptual color space.
+/// ICtCp separates Intensity (I) from Chroma (Ct, Cp) specifically for HDR manipulation.
 fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
-    // LMS transformation matrix (Rec. 2020 to LMS)
+    // Step 1: LMS transformation matrix (Rec. 2020 to LMS color space)
     let l = col[0] * 0.412109 + col[1] * 0.523926 + col[2] * 0.063965;
     let m = col[0] * 0.166748 + col[1] * 0.720459 + col[2] * 0.112793;
     let s = col[0] * 0.024170 + col[1] * 0.075439 + col[2] * 0.900391;
 
+    // Step 2: Apply non-linear PQ transfer function to LMS cone responses
     let pq_lms = linear_to_st2084([l.max(0.0), m.max(0.0), s.max(0.0)]);
 
-    // LMS to ICtCp matrix conversion
+    // Step 3: LMS to ICtCp matrix conversion
     let i = pq_lms[0] * 0.5000 + pq_lms[1] * 0.5000 + pq_lms[2] * 0.0000;
     let ct = pq_lms[0] * 1.6137 - pq_lms[1] * 3.3234 + pq_lms[2] * 1.7097;
     let cp = pq_lms[0] * 4.3780 - pq_lms[1] * 4.2455 - pq_lms[2] * 0.1325;
@@ -114,14 +148,15 @@ fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
 
 /// Converts ICtCp color space values back to linear Rec.2020 RGB.
 fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
-    // ICtCp to LMS matrix conversion
+    // Step 1: ICtCp to LMS matrix conversion
     let l = col[0] * 1.0 + col[1] * 0.008605 + col[2] * 0.111036;
     let m = col[0] * 1.0 - col[1] * 0.008605 - col[2] * 0.111036;
     let s = col[0] * 1.0 + col[1] * 0.560049 - col[2] * 0.320637;
 
+    // Step 2: Linearize LMS using the PQ transfer function inverse
     let lms = st2084_to_linear([l, m, s]);
 
-    // LMS to Rec.2020 RGB conversion matrix
+    // Step 3: LMS to Rec.2020 RGB conversion matrix
     let r = lms[0] * 3.43661 - lms[1] * 2.50645 + lms[2] * 0.069845;
     let g = -lms[0] * 0.79133 + lms[1] * 1.9836 - lms[2] * 0.192271;
     let b = -lms[0] * 0.02595 - lms[1] * 0.098914 + lms[2] * 1.12486;
@@ -129,8 +164,71 @@ fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
     [r, g, b]
 }
 
+// -----------------------------------------------------------------------------
+// TONEMAPPERS & VISUALIZERS
+// -----------------------------------------------------------------------------
+
+/// False Color / Exposure Heatmap visualizer.
+/// Maps linear luminance into a thermal-style color gradient to easily spot clipping.
+/// Blue = Shadows, Grey/Green = Midtones, Red/White = Highlights/Clipping.
+#[inline]
+fn tonemap_false_color(color: [f32; 3]) -> [f32; 3] {
+    let luma = get_luma(color);
+    // Logarithmic mapping for better visual distribution of light stops
+    let log_luma = ((luma.max(1e-5).log2() + 10.0) * 0.071428).clamp(0.0, 1.0);
+
+    let r = smoothstep(0.5, 0.8, log_luma) + if log_luma >= 0.9 { 1.0 } else { 0.0 };
+    let g = smoothstep(0.2, 0.5, log_luma) - smoothstep(0.7, 0.9, log_luma);
+    let b = smoothstep(0.0, 0.2, log_luma) - smoothstep(0.4, 0.5, log_luma);
+
+    [r, g, b]
+}
+
+/// The core forward tone scale curve for ACES 2.0.
+/// Calculates the S-curve compression for luminance.
+#[inline]
+fn aces2_tone_scale_fwd(y: f32) -> f32 {
+    let m_2 = 1.0470;
+    let s_2 = 0.9078;
+    let g = 1.1500;
+    let t_1 = 0.0400;
+
+    let f = m_2 * (y.max(0.0) / (y + s_2)).powf(g);
+    (f * f / (f + t_1)).max(0.0)
+}
+
+/// ACES 2.0 Fit Tonemapper.
+/// Replaces legacy ACES to fix hue skewing (e.g., blue neon turning magenta).
+/// Operates in the ICtCp perceptual space to isolate luminance scaling from color.
+#[inline]
+fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
+    let color_2020 = rec709_to_rec2020(color);
+    let mut ictcp = rgb_to_ictcp(color_2020);
+
+    // Map PQ Intensity to equivalent Linear domain (0 to 100 nits scale)
+    let i_linear = pq_to_nit(ictcp[0]) / 100.0;
+    let i_mapped = aces2_tone_scale_fwd(i_linear);
+
+    // Dynamic Chroma Compression: Desaturates extreme highlights towards white.
+    // Linearly interpolates chroma scale from 1.1 down to 0.0 based on mapped intensity.
+    let t = i_mapped.max(0.0).powf(1.5);
+    let chroma_scale = (1.1 - 1.1 * t).clamp(0.0, 1.0);
+
+    // Map Linear back to PQ Intensity and apply chroma scaling
+    ictcp[0] = nit_to_pq(i_mapped * 100.0);
+    ictcp[1] *= chroma_scale;
+    ictcp[2] *= chroma_scale;
+
+    // Return to output gamut
+    let rgb_2020 = ictcp_to_rgb(ictcp);
+    let rgb_709 = rec2020_to_rec709(rgb_2020);
+
+    [rgb_709[0], rgb_709[1], rgb_709[2]]
+}
+
 /// Khronos PBR Neutral Tonemapper.
-/// Formulated to preserve base texture color values and prevent hue shifts at high intensities.
+/// Formulated strictly to preserve base texture/albedo color values for 3D artists.
+/// Prevents hue shifts at high intensities without adding cinematic contrast.
 #[inline]
 fn pbr_neutral_tonemapping(color_in: [f32; 3]) -> [f32; 3] {
     let mut color = [
@@ -174,7 +272,7 @@ fn pbr_neutral_tonemapping(color_in: [f32; 3]) -> [f32; 3] {
     ]
 }
 
-/// Hermite spline function defined in ITU-R BT.2390 for dynamic range compression.
+/// Hermite spline function defined in ITU-R BT.2390 for dynamic range compression (EETF).
 #[inline]
 fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
     let ks = (1.5 * max_out_pq - 0.5 * max_in_pq).max(0.0);
@@ -203,7 +301,8 @@ fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
     }
 }
 
-/// Perceptual tonemapping based on ITU-R BT.2446 Method C chroma scaling and ST 2084 PQ mapping.
+/// Perceptual tonemapping based on ITU-R BT.2446 Method C.
+/// Uses dynamic EETF luminance compression while applying Hunt Effect compensation for chroma.
 fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
     let nits = [
         (color[0] * exposure * 100.0).max(0.0),
@@ -211,15 +310,17 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
         (color[2] * exposure * 100.0).max(0.0),
     ];
 
-    // BT.2446c is formulated around Rec.2020. Transform Rec.709 linear into Rec.2020 linear.
+    // BT.2446c is mathematically formulated around Rec.2020.
+    // We must transform Rec.709 linear inputs into Rec.2020 prior to processing.
     let nits_2020 = rec709_to_rec2020(nits);
 
     let mut ictcp = rgb_to_ictcp(nits_2020);
     let i_in = ictcp[0];
 
     let max_in_pq = nit_to_pq(scene_peak_nits);
-    let max_out_pq = nit_to_pq(100.0); // Standard SDR display peak luminance mapped to 100 nits
+    let max_out_pq = nit_to_pq(100.0); // Map to standard SDR display peak (100 nits)
 
+    // Apply EETF compression solely to the intensity channel
     let i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
     ictcp[0] = i_out;
 
@@ -228,7 +329,7 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
     // Saturating compensation mimicking Hunt Effect adjustments
     let saturation_boost = 1.15;
 
-    // Smooth path-to-white translation for highlights above 90% target scale
+    // Smooth path-to-white translation for highlights above the 90% target scale
     let normalized_i = (i_out / max_out_pq).clamp(0.0, 1.0);
     let path_to_white = 1.0 - smoothstep(0.90, 1.0, normalized_i);
 
@@ -249,13 +350,18 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
     ]
 }
 
+/// Legacy ACES Filmic curve (Krzysztof Narkowicz approximation).
 #[inline]
 fn aces_tonemap_raw(x: f32) -> f32 {
     let (a, b, c, d, e) = (2.51, 0.03, 2.43, 0.59, 0.14);
     ((x * (a * x + b)) / (x * (c * x + d) + e)).clamp(0.0, 1.0)
 }
 
-/// Decodes the first RGBA floating-point layer of an EXR file.
+// -----------------------------------------------------------------------------
+// EXR & IMAGE BUFFER PROCESSING
+// -----------------------------------------------------------------------------
+
+/// Decodes the first RGBA floating-point layer of an EXR file into a flat `f32` vector.
 pub fn load_exr_rgba(path: &Path) -> Result<(Vec<f32>, u32, u32)> {
     let image = read_first_rgba_layer_from_file(
         path,
@@ -278,12 +384,13 @@ pub fn load_exr_rgba(path: &Path) -> Result<(Vec<f32>, u32, u32)> {
     ))
 }
 
-/// Maps high-dynamic-range (HDR) float pixels into low-dynamic-range (LDR) u8 buffers using selected curve operators.
+/// Maps high-dynamic-range (HDR) float pixels into low-dynamic-range (LDR) u8 buffers.
+/// Applies the globally selected Tonemap operator, exposure compensation, and parallel multi-threading.
 pub fn tonemap_hdr_to_ldr_rgba(
     hdr_pixels: &[f32],
     width: u32,
     height: u32,
-    mut operator: TonemapOperator,
+    operator: TonemapOperator,
     exposure: f32,
 ) -> Result<RgbaImage> {
     let total_pixels = (width * height) as usize;
@@ -291,27 +398,28 @@ pub fn tonemap_hdr_to_ldr_rgba(
         return Err(anyhow::anyhow!("Buffer size mismatch"));
     }
 
-    // Resolve global tonemap overrides
-    if !TONEMAP_ENABLED.load(Ordering::Relaxed) {
-        operator = TonemapOperator::None;
+    // Resolve global tonemap overrides from the Atomic states
+    let active_operator = if !TONEMAP_ENABLED.load(Ordering::Relaxed) {
+        TonemapOperator::None
     } else {
-        let active_op = TONEMAP_OPERATOR.load(Ordering::Relaxed);
-        if active_op == 2 {
-            operator = TonemapOperator::PbrNeutral;
-        } else if active_op == 1 {
-            operator = TonemapOperator::ICtCpLumina;
-        } else if active_op == 0 {
-            operator = TonemapOperator::AcesFilmic;
+        match TONEMAP_OPERATOR.load(Ordering::Relaxed) {
+            0 => TonemapOperator::AcesFilmic,
+            1 => TonemapOperator::ICtCpLumina,
+            2 => TonemapOperator::PbrNeutral,
+            3 => TonemapOperator::Aces2Fit,
+            4 => TonemapOperator::FalseColor,
+            _ => operator, // Используем переданный аргумент как fallback (убирает warning)
         }
-    }
+    };
 
-    // Calculate dynamic scene peak luminance for BT2446c EETF curve scaling
+    // Calculate dynamic scene peak luminance via a parallel pre-pass.
+    // Required specifically for the BT2446c EETF curve scaling.
     let mut scene_peak_nits = 1000.0;
-    if operator == TonemapOperator::ICtCpLumina {
+    if active_operator == TonemapOperator::ICtCpLumina {
         let max_lum = hdr_pixels
             .par_chunks_exact(4)
             .map(|hdr| {
-                // Rec.709 Relative Luminance
+                // Approximate relative luminance
                 let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
                 y * exposure
             })
@@ -324,6 +432,7 @@ pub fn tonemap_hdr_to_ldr_rgba(
 
     let mut ldr_pixels = vec![0u8; total_pixels * 4];
 
+    // Main pixel mapping pipeline (executed in parallel chunks)
     ldr_pixels
         .par_chunks_exact_mut(4)
         .zip(hdr_pixels.par_chunks_exact(4))
@@ -332,12 +441,20 @@ pub fn tonemap_hdr_to_ldr_rgba(
             let g_in = hdr[1] * exposure;
             let b_in = hdr[2] * exposure;
 
-            let (mut r, mut g, mut b) = match operator {
+            let (mut r, mut g, mut b) = match active_operator {
                 TonemapOperator::AcesFilmic => (
                     aces_tonemap_raw(r_in),
                     aces_tonemap_raw(g_in),
                     aces_tonemap_raw(b_in),
                 ),
+                TonemapOperator::Aces2Fit => {
+                    let mapped = tonemap_aces2_fit([r_in, g_in, b_in]);
+                    (mapped[0], mapped[1], mapped[2])
+                }
+                TonemapOperator::FalseColor => {
+                    let mapped = tonemap_false_color([r_in, g_in, b_in]);
+                    (mapped[0], mapped[1], mapped[2])
+                }
                 TonemapOperator::ICtCpLumina => {
                     let mapped =
                         tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, scene_peak_nits);
@@ -350,8 +467,11 @@ pub fn tonemap_hdr_to_ldr_rgba(
                 TonemapOperator::None => (r_in, g_in, b_in),
             };
 
-            // ACES formula intrinsically mimics an sRGB curve, so we only apply OETF to others
-            if operator != TonemapOperator::AcesFilmic {
+            // Skip OETF for AcesFilmic (curve baked in) and FalseColor (raw heatmap colors)
+            if !matches!(
+                active_operator,
+                TonemapOperator::AcesFilmic | TonemapOperator::FalseColor
+            ) {
                 r = linear_to_srgb(r);
                 g = linear_to_srgb(g);
                 b = linear_to_srgb(b);
@@ -370,7 +490,8 @@ pub fn tonemap_hdr_to_ldr_rgba(
     RgbaImage::from_raw(width, height, ldr_pixels).context("Failed to build RgbaImage")
 }
 
-/// Computes pixel differences between two buffers in parallel using multicore CPU chunk mapping.
+/// Computes pixel differences between two Rgba buffers in parallel.
+/// Used for visual regression testing and sub-pixel artifact spotting.
 pub fn calculate_difference_map(
     img1: &RgbaImage,
     img2: &RgbaImage,
@@ -379,6 +500,7 @@ pub fn calculate_difference_map(
     let (w1, h1) = img1.dimensions();
     let (w2, h2) = img2.dimensions();
 
+    // Auto-align resolution if dimensions mismatch
     let resized_img2;
     let ref_img2 = if w1 != w2 || h1 != h2 {
         resized_img2 = image::imageops::resize(img2, w1, h1, image::imageops::FilterType::Triangle);
@@ -409,12 +531,13 @@ pub fn calculate_difference_map(
 
                 let intensity = ((diff_r + diff_g + diff_b + diff_a) / 4) as u8;
 
-                // Map differences into blue-to-red diagnostic heatmap
+                // Map absolute differences into a blue-to-red diagnostic heatmap
                 pixel_out[0] = intensity;
                 pixel_out[1] = 0;
                 pixel_out[2] = 255 - intensity;
                 pixel_out[3] = 255;
             } else {
+                // Direct RGB delta subtraction
                 pixel_out[0] = p1[0].abs_diff(p2[0]);
                 pixel_out[1] = p1[1].abs_diff(p2[1]);
                 pixel_out[2] = p1[2].abs_diff(p2[2]);
