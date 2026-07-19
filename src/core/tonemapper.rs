@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 pub static TONEMAP_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// Global state tracking the currently selected tonemap operator.
-/// 0: AcesFilmic, 1: ICtCp Perceptual, 2: Khronos PBR Neutral, 3: ACES 2.0 Fit, 4: False Color
-pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(0);
+/// 0: None, 1: FalseColor, 2: AcesFilmic, 3: ACES 2.0 Fit, 4: Khronos PBR Neutral, 5: ICtCp Perceptual
+pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(2); // Defaults to AcesFilmic
 
 /// Supported tonemapping operators and visualization modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,8 +21,8 @@ pub enum TonemapOperator {
     FalseColor,
     AcesFilmic,
     Aces2Fit,
-    ICtCpLumina,
     PbrNeutral,
+    ICtCpPerceptual,
 }
 
 // -----------------------------------------------------------------------------
@@ -403,19 +403,20 @@ pub fn tonemap_hdr_to_ldr_rgba(
         TonemapOperator::None
     } else {
         match TONEMAP_OPERATOR.load(Ordering::Relaxed) {
-            0 => TonemapOperator::AcesFilmic,
-            1 => TonemapOperator::ICtCpLumina,
-            2 => TonemapOperator::PbrNeutral,
+            0 => TonemapOperator::None,
+            1 => TonemapOperator::FalseColor,
+            2 => TonemapOperator::AcesFilmic,
             3 => TonemapOperator::Aces2Fit,
-            4 => TonemapOperator::FalseColor,
-            _ => operator, // Используем переданный аргумент как fallback (убирает warning)
+            4 => TonemapOperator::PbrNeutral,
+            5 => TonemapOperator::ICtCpPerceptual,
+            _ => operator, // Fallback to provided operator if index is unknown
         }
     };
 
     // Calculate dynamic scene peak luminance via a parallel pre-pass.
     // Required specifically for the BT2446c EETF curve scaling.
     let mut scene_peak_nits = 1000.0;
-    if active_operator == TonemapOperator::ICtCpLumina {
+    if active_operator == TonemapOperator::ICtCpPerceptual {
         let max_lum = hdr_pixels
             .par_chunks_exact(4)
             .map(|hdr| {
@@ -441,7 +442,13 @@ pub fn tonemap_hdr_to_ldr_rgba(
             let g_in = hdr[1] * exposure;
             let b_in = hdr[2] * exposure;
 
+            // Apply selected Tonemap Operator
             let (mut r, mut g, mut b) = match active_operator {
+                TonemapOperator::None => (r_in, g_in, b_in),
+                TonemapOperator::FalseColor => {
+                    let mapped = tonemap_false_color([r_in, g_in, b_in]);
+                    (mapped[0], mapped[1], mapped[2])
+                }
                 TonemapOperator::AcesFilmic => (
                     aces_tonemap_raw(r_in),
                     aces_tonemap_raw(g_in),
@@ -451,23 +458,19 @@ pub fn tonemap_hdr_to_ldr_rgba(
                     let mapped = tonemap_aces2_fit([r_in, g_in, b_in]);
                     (mapped[0], mapped[1], mapped[2])
                 }
-                TonemapOperator::FalseColor => {
-                    let mapped = tonemap_false_color([r_in, g_in, b_in]);
-                    (mapped[0], mapped[1], mapped[2])
-                }
-                TonemapOperator::ICtCpLumina => {
-                    let mapped =
-                        tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, scene_peak_nits);
-                    (mapped[0], mapped[1], mapped[2])
-                }
                 TonemapOperator::PbrNeutral => {
                     let mapped = pbr_neutral_tonemapping([r_in, g_in, b_in]);
                     (mapped[0], mapped[1], mapped[2])
                 }
-                TonemapOperator::None => (r_in, g_in, b_in),
+                TonemapOperator::ICtCpPerceptual => {
+                    let mapped =
+                        tonemap_perceptual_bt2446c([r_in, g_in, b_in], 1.0, scene_peak_nits);
+                    (mapped[0], mapped[1], mapped[2])
+                }
             };
 
-            // Skip OETF for AcesFilmic (curve baked in) and FalseColor (raw heatmap colors)
+            // Skip OETF (Gamma) for AcesFilmic (curve baked in) and FalseColor (raw heatmap colors).
+            // Apply standard sRGB Gamma correction to all linear outputs.
             if !matches!(
                 active_operator,
                 TonemapOperator::AcesFilmic | TonemapOperator::FalseColor
