@@ -52,73 +52,69 @@ export component InteractiveThumbnail inherits TouchArea {
             image-fit: contain;
         }
 
-        if show_corners: Rectangle {
+        if show_corners && root.has-hover: Rectangle {
             x: 2px;
             y: 2px;
             width: 12px;
             height: 12px;
-            background: !root.has-hover ? #f23f43.with-alpha(0.25) : (
-                root.active_quadrant == "R" ? #f23f43 : #f23f43.darker(0.3).with-alpha(0.35));
+            background: root.active_quadrant == "R" ? #f23f43 : #f23f43.darker(0.3).with-alpha(0.35);
             border-radius: 2px;
             Text {
                 text: "R";
                 font-size: 8px;
                 font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "R" ? #ffffff : #ffffff.with-alpha(0.4));
+                color: root.active_quadrant == "R" ? #ffffff : #ffffff.with-alpha(0.4);
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
-        if show_corners: Rectangle {
+        if show_corners && root.has-hover: Rectangle {
             x: rect.width - 14px;
             y: 2px;
             width: 12px;
             height: 12px;
-            background: !root.has-hover ? #23a55a.with-alpha(0.25) : (
-                root.active_quadrant == "G" ? #23a55a : #23a55a.darker(0.3).with-alpha(0.35));
+            background: root.active_quadrant == "G" ? #23a55a : #23a55a.darker(0.3).with-alpha(0.35);
             border-radius: 2px;
             Text {
                 text: "G";
                 font-size: 8px;
                 font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "G" ? #ffffff : #ffffff.with-alpha(0.4));
+                color: root.active_quadrant == "G" ? #ffffff : #ffffff.with-alpha(0.4);
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
-        if show_corners: Rectangle {
+        if show_corners && root.has-hover: Rectangle {
             x: 2px;
             y: rect.height - 14px;
             width: 12px;
             height: 12px;
-            background: !root.has-hover ? #5865f2.with-alpha(0.25) : (
-                root.active_quadrant == "B" ? #5865f2 : #5865f2.darker(0.3).with-alpha(0.35));
+            background: root.active_quadrant == "B" ? #5865f2 : #5865f2.darker(0.3).with-alpha(0.35);
             border-radius: 2px;
             Text {
                 text: "B";
                 font-size: 8px;
                 font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "B" ? #ffffff : #ffffff.with-alpha(0.4));
+                color: root.active_quadrant == "B" ? #ffffff : #ffffff.with-alpha(0.4);
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
         }
 
-        if show_corners: Rectangle {
+        if show_corners && root.has-hover: Rectangle {
             x: rect.width - 14px;
             y: rect.height - 14px;
             width: 12px;
             height: 12px;
-            background: !root.has-hover ? #ffffff.with-alpha(0.25) : (
-                root.active_quadrant == "A" ? #ffffff : #ffffff.darker(0.5).with-alpha(0.35));
+            background: root.active_quadrant == "A" ? #ffffff : #ffffff.darker(0.5).with-alpha(0.35);
             border-radius: 2px;
             Text {
                 text: "A";
                 font-size: 8px;
                 font-weight: 700;
-                color: !root.has-hover ? #ffffff.with-alpha(0.6) : (root.active_quadrant == "A" ? #000000 : #ffffff.with-alpha(0.4));
+                color: root.active_quadrant == "A" ? #000000 : #ffffff.with-alpha(0.4);
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
