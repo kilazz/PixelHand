@@ -32,7 +32,7 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
         scroll-event(evt) => {
             let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
-            Store.zoom_factor = (Store.zoom_factor + zoom_delta).clamp(1.0, 10.0);
+            Store.zoom_factor = (Store.zoom_factor + zoom_delta).clamp(0.1, 10.0);
             if (Store.zoom_factor == 1.0) {
                 Store.pan_x = 0px;
                 Store.pan_y = 0px;
@@ -62,14 +62,22 @@ export component InteractiveCompareViewport inherits Rectangle {
             Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: #111214;
+                background: Store.background_mode == 2 ? #000000 : (Store.background_mode == 3 ? #ffffff : #111214);
                 border-color: #3e3e42;
                 border-width: 1px;
                 border-radius: 4px;
                 clip: true;
 
-                Image {
+                if Store.background_mode == 0: Image {
                     source: Store.checkerboard_pattern;
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                    width: 100%;
+                    height: 100%;
+                }
+
+                if Store.background_mode == 1: Image {
+                    source: Store.checkerboard_pattern_light;
                     horizontal-tiling: repeat;
                     vertical-tiling: repeat;
                     width: 100%;
@@ -79,8 +87,19 @@ export component InteractiveCompareViewport inherits Rectangle {
                 Image {
                     source: Store.image_original;
                     image-fit: contain;
-                    width: parent.width * Store.zoom_factor;
-                    height: parent.height * Store.zoom_factor;
+                    width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+                    height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
+                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
+                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                }
+
+                // Smooth frame blending overlay (Original Image)
+                if Store.enable_frame_blending: Image {
+                    source: Store.image_original_next;
+                    opacity: Store.blend_factor;
+                    image-fit: contain;
+                    width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+                    height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
                     x: parent.width / 2 - self.width / 2 + Store.pan_x;
                     y: parent.height / 2 - self.height / 2 + Store.pan_y;
                 }
@@ -97,14 +116,22 @@ export component InteractiveCompareViewport inherits Rectangle {
             Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: #111214;
+                background: Store.background_mode == 2 ? #000000 : (Store.background_mode == 3 ? #ffffff : #111214);
                 border-color: #3e3e42;
                 border-width: 1px;
                 border-radius: 4px;
                 clip: true;
 
-                Image {
+                if Store.background_mode == 0: Image {
                     source: Store.checkerboard_pattern;
+                    horizontal-tiling: repeat;
+                    vertical-tiling: repeat;
+                    width: 100%;
+                    height: 100%;
+                }
+
+                if Store.background_mode == 1: Image {
+                    source: Store.checkerboard_pattern_light;
                     horizontal-tiling: repeat;
                     vertical-tiling: repeat;
                     width: 100%;
@@ -114,8 +141,19 @@ export component InteractiveCompareViewport inherits Rectangle {
                 Image {
                     source: Store.image_duplicate;
                     image-fit: contain;
-                    width: parent.width * Store.zoom_factor;
-                    height: parent.height * Store.zoom_factor;
+                    width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+                    height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
+                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
+                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                }
+
+                // Smooth frame blending overlay (Duplicate Image)
+                if Store.enable_frame_blending: Image {
+                    source: Store.image_duplicate_next;
+                    opacity: Store.blend_factor;
+                    image-fit: contain;
+                    width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+                    height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
                     x: parent.width / 2 - self.width / 2 + Store.pan_x;
                     y: parent.height / 2 - self.height / 2 + Store.pan_y;
                 }
@@ -128,8 +166,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         duplicate: Store.image_duplicate;
         checkerboard: Store.checkerboard_pattern;
         wipe-val <=> Store.wipe_slider_val;
-        width: parent.width * Store.zoom_factor;
-        height: parent.height * Store.zoom_factor;
+        width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+        height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
         x: parent.width / 2 - self.width / 2 + Store.pan_x;
         y: parent.height / 2 - self.height / 2 + Store.pan_y;
     }
@@ -138,8 +176,18 @@ export component InteractiveCompareViewport inherits Rectangle {
         width: 100%;
         height: 100%;
         clip: true;
-        Image {
+        background: Store.background_mode == 2 ? #000000 : (Store.background_mode == 3 ? #ffffff : #111214);
+
+        if Store.background_mode == 0: Image {
             source: Store.checkerboard_pattern;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        if Store.background_mode == 1: Image {
+            source: Store.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -149,8 +197,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         Image {
             source: Store.image_original;
             image-fit: contain;
-            width: parent.width * Store.zoom_factor;
-            height: parent.height * Store.zoom_factor;
+            width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+            height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
             x: parent.width / 2 - self.width / 2 + Store.pan_x;
             y: parent.height / 2 - self.height / 2 + Store.pan_y;
         }
@@ -159,8 +207,8 @@ export component InteractiveCompareViewport inherits Rectangle {
             source: Store.image_duplicate;
             image-fit: contain;
             opacity: Store.wipe_slider_val;
-            width: parent.width * Store.zoom_factor;
-            height: parent.height * Store.zoom_factor;
+            width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+            height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
             x: parent.width / 2 - self.width / 2 + Store.pan_x;
             y: parent.height / 2 - self.height / 2 + Store.pan_y;
         }
@@ -170,8 +218,18 @@ export component InteractiveCompareViewport inherits Rectangle {
         width: 100%;
         height: 100%;
         clip: true;
-        Image {
+        background: Store.background_mode == 2 ? #000000 : (Store.background_mode == 3 ? #ffffff : #111214);
+
+        if Store.background_mode == 0: Image {
             source: Store.checkerboard_pattern;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        if Store.background_mode == 1: Image {
+            source: Store.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -181,8 +239,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         Image {
             source: Store.image_heatmap;
             image-fit: contain;
-            width: parent.width * Store.zoom_factor;
-            height: parent.height * Store.zoom_factor;
+            width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+            height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
             x: parent.width / 2 - self.width / 2 + Store.pan_x;
             y: parent.height / 2 - self.height / 2 + Store.pan_y;
         }
@@ -192,8 +250,18 @@ export component InteractiveCompareViewport inherits Rectangle {
         width: 100%;
         height: 100%;
         clip: true;
-        Image {
+        background: Store.background_mode == 2 ? #000000 : (Store.background_mode == 3 ? #ffffff : #111214);
+
+        if Store.background_mode == 0: Image {
             source: Store.checkerboard_pattern;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        if Store.background_mode == 1: Image {
+            source: Store.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -203,8 +271,19 @@ export component InteractiveCompareViewport inherits Rectangle {
         Image {
             source: Store.flicker_show_duplicate ? Store.image_duplicate : Store.image_original;
             image-fit: contain;
-            width: parent.width * Store.zoom_factor;
-            height: parent.height * Store.zoom_factor;
+            width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+            height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
+            x: parent.width / 2 - self.width / 2 + Store.pan_x;
+            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+        }
+
+        // Smooth frame blending overlay (Flicker Mode transitions)
+        if Store.enable_frame_blending: Image {
+            source: Store.flicker_show_duplicate ? Store.image_duplicate_next : Store.image_original_next;
+            opacity: Store.blend_factor;
+            image-fit: contain;
+            width: Store.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
+            height: Store.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
             x: parent.width / 2 - self.width / 2 + Store.pan_x;
             y: parent.height / 2 - self.height / 2 + Store.pan_y;
         }

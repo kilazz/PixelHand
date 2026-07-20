@@ -6,26 +6,44 @@ use slint::{ModelRc, SharedPixelBuffer, VecModel};
 use std::path::Path;
 use std::rc::Rc;
 
-/// Generates a tileable dark checkerboard pattern directly in memory for transparent viewports.
-pub fn generate_checkerboard() -> slint::Image {
+/// Generates a tileable dark or light checkerboard pattern directly in memory for transparent viewports.
+pub fn generate_checkerboard(is_light: bool) -> slint::Image {
     let mut buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::new(32, 32);
     let pixels = buffer.make_mut_slice();
     for y in 0..32 {
         for x in 0..32 {
-            let is_dark_square = (x / 8 + y / 8) % 2 == 0;
-            pixels[y * 32 + x] = if is_dark_square {
-                slint::Rgba8Pixel {
-                    r: 43,
-                    g: 45,
-                    b: 49,
-                    a: 255,
+            let is_first_square = (x / 8 + y / 8) % 2 == 0;
+            pixels[y * 32 + x] = if is_light {
+                if is_first_square {
+                    slint::Rgba8Pixel {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                        a: 255,
+                    } // White
+                } else {
+                    slint::Rgba8Pixel {
+                        r: 200,
+                        g: 200,
+                        b: 200,
+                        a: 255,
+                    } // Light Gray
                 }
             } else {
-                slint::Rgba8Pixel {
-                    r: 60,
-                    g: 63,
-                    b: 65,
-                    a: 255,
+                if is_first_square {
+                    slint::Rgba8Pixel {
+                        r: 43,
+                        g: 45,
+                        b: 49,
+                        a: 255,
+                    }
+                } else {
+                    slint::Rgba8Pixel {
+                        r: 60,
+                        g: 63,
+                        b: 65,
+                        a: 255,
+                    }
                 }
             };
         }
@@ -261,6 +279,15 @@ pub fn get_current_active_channel(store: &Store) -> &'static str {
 
 /// Applies selective checkbox operations across the results array.
 pub fn apply_selection_rule(state: &mut AppState, rule: &str) {
+    let mut visible_indices = Vec::new();
+
+    // Track visible non-header indices to restrict selection adjustments strictly to the visible list view state
+    for (abs_idx, row) in state.results.iter().enumerate() {
+        if !row.is_header && !state.collapsed_groups.contains(&row.group_index) {
+            visible_indices.push(abs_idx);
+        }
+    }
+
     match rule {
         "all" => {
             for row in &mut state.results {
@@ -339,4 +366,46 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
         similarity: slint::SharedString::from(similarity_str),
         path: slint::SharedString::from(&file.path),
     }
+}
+
+/// Extracts a specific frame from a spritesheet texture using grid subdivisions (columns and rows).
+pub fn slice_spritesheet_frame(
+    img: &image::RgbaImage,
+    cols: u32,
+    rows: u32,
+    frame: u32,
+) -> image::RgbaImage {
+    let cols = cols.max(1);
+    let rows = rows.max(1);
+    let total_frames = cols * rows;
+    let frame = frame % total_frames;
+
+    let original_width = img.width();
+    let original_height = img.height();
+
+    let sprite_w = original_width / cols;
+    let sprite_h = original_height / rows;
+
+    if sprite_w == 0 || sprite_h == 0 {
+        return img.clone();
+    }
+
+    let frame_x = (frame % cols) * sprite_w;
+    let frame_y = (frame / cols) * sprite_h;
+
+    // Crops the frame cleanly without allocating any extra buffers
+    image::imageops::crop_imm(img, frame_x, frame_y, sprite_w, sprite_h).to_image()
+}
+
+/// Simulates non-square pixels or customized aspect ratios by dynamically scaling the width.
+pub fn apply_aspect_ratio(img: &image::RgbaImage, ratio: f32) -> image::RgbaImage {
+    if (ratio - 1.0).abs() < 1e-2 {
+        return img.clone();
+    }
+
+    let new_w = (img.width() as f32 * ratio).max(1.0) as u32;
+    let new_h = img.height();
+
+    // Uses fast triangle/bilinear resizing to simulate aspect ratios in real-time
+    image::imageops::resize(img, new_w, new_h, image::imageops::FilterType::Triangle)
 }

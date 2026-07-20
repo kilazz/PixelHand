@@ -1,7 +1,6 @@
 // src/handlers/ui_state.rs
 
 use slint::ComponentHandle;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
 use crate::app::{AppWindow, Store};
@@ -36,11 +35,11 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
             utils::settings::save_settings(&store);
 
-            crate::app::TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
-            crate::app::AUTO_EXPOSURE_ENABLED
-                .store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
-            crate::app::TONEMAP_OPERATOR
-                .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
+            crate::app::update_viewer_settings(|s| {
+                s.tonemap_enabled = store.get_tonemap_enabled();
+                s.auto_exposure_enabled = store.get_tonemap_auto_exposure();
+                s.tonemap_operator = store.get_tonemap_operator() as usize;
+            });
 
             if let Some(cache) = utils::cache::DECODED_CACHE.get() {
                 cache.invalidate_all();
@@ -81,6 +80,23 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
             if !orig_path.is_empty() && !dup_path.is_empty() {
                 crate::app::trigger_viewport_update(app_weak_mip.clone(), orig_path, dup_path);
+            }
+        }
+    });
+
+    // Centralized event listener for Spritesheet Frame changes, Background toggles,
+    // and manual color adjustments (Brightness, Contrast, Gamma, Ratio).
+    let app_weak_frame = app.as_weak();
+    let store = app.global::<Store>();
+    store.on_active_frame_changed(move || {
+        let app_copy = app_weak_frame.clone();
+        if let Some(ui) = app_copy.upgrade() {
+            let store = ui.global::<Store>();
+            let orig_path = store.get_original_meta().path.to_string();
+            let dup_path = store.get_duplicate_meta().path.to_string();
+
+            if !orig_path.is_empty() && !dup_path.is_empty() {
+                crate::app::trigger_viewport_update(app_weak_frame.clone(), orig_path, dup_path);
             }
         }
     });
@@ -487,7 +503,6 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
         }
     });
 
-    // Subscribes to layout changes to rebuild grid UI chunkings gracefully dynamically
     let app_weak_grid = app.as_weak();
     let state_grid = state.clone();
     let store = app.global::<Store>();

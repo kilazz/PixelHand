@@ -73,14 +73,14 @@ pub fn bind_scan_execution(
                 return;
             }
 
-            // Sync GUI tonemapping state to thread-safe app static registers prior to execution
+            // Sync GUI tonemapping state to thread-safe app settings context prior to execution
             if let Some(ref_ui) = app_weak_download.upgrade() {
                 let store = ref_ui.global::<Store>();
-                crate::app::TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
-                crate::app::AUTO_EXPOSURE_ENABLED
-                    .store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
-                crate::app::TONEMAP_OPERATOR
-                    .store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
+                crate::app::update_viewer_settings(|s| {
+                    s.tonemap_enabled = store.get_tonemap_enabled();
+                    s.auto_exposure_enabled = store.get_tonemap_auto_exposure();
+                    s.tonemap_operator = store.get_tonemap_operator() as usize;
+                });
             }
 
             let params_for_task_clone = params_for_task.clone();

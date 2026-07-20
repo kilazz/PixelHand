@@ -115,6 +115,17 @@ pub fn save_settings(store: &crate::app::Store) {
         filter_only_uncompressed: store.get_filter_only_uncompressed(),
         filter_only_missing_mips: store.get_filter_only_missing_mips(),
         filter_only_cubemaps: store.get_filter_only_cubemaps(),
+        grid_cols: store.get_grid_cols(),
+        grid_rows: store.get_grid_rows(),
+        manual_brightness: store.get_manual_brightness(),
+        manual_contrast: store.get_manual_contrast(),
+        manual_gamma: store.get_manual_gamma(),
+        aspect_ratio_modifier: store.get_aspect_ratio_modifier(),
+        background_mode: store.get_background_mode(),
+        flipbook_fps: store.get_flipbook_fps(),
+        fit_to_window: store.get_fit_to_window(),
+        play_speed: store.get_play_speed(),
+        enable_frame_blending: store.get_enable_frame_blending(),
     };
 
     match get_portable_app_data_dir() {

@@ -1,6 +1,7 @@
 // src/utils/cache.rs
 
 use moka::sync::Cache;
+use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
@@ -85,10 +86,19 @@ pub async fn get_channel_preview_image(
             _ => 3,
         };
         let mut out_rgb = image::RgbImage::new(rgba.width(), rgba.height());
-        for (x, y, pixel) in rgba.enumerate_pixels() {
-            let val = pixel[channel_idx];
-            out_rgb.put_pixel(x, y, image::Rgb([val, val, val]));
-        }
+
+        // Fast parallel channel extraction bypassing bounds checking and slow per-coordinate loops
+        out_rgb
+            .as_mut()
+            .par_chunks_exact_mut(3)
+            .zip(rgba.as_raw().par_chunks_exact(4))
+            .for_each(|(out_pixel, in_pixel)| {
+                let val = in_pixel[channel_idx];
+                out_pixel[0] = val;
+                out_pixel[1] = val;
+                out_pixel[2] = val;
+            });
+
         image::DynamicImage::ImageRgb8(out_rgb)
     };
 

@@ -85,6 +85,28 @@ export global Store {
     // Previews & Quality Configurations
     in-out property <bool> enable_previews: true;
     in-out property <int> preview_quality: 1;
+    in-out property <bool> fit_to_window: true;
+
+    // ==========================================
+    // --- SPRITESHEET & FLIPBOOK CONFIGS -------
+    // ==========================================
+    in-out property <int> grid_cols: 1;
+    in-out property <int> grid_rows: 1;
+    in-out property <int> active_frame: 0;
+    in-out property <int> sprites_count: 1;
+    in-out property <int> sprite_width: 0;
+    in-out property <int> sprite_height: 0;
+    in-out property <bool> play_flipbook: false;
+    in-out property <float> flipbook_fps: 12.0;
+
+    // ==========================================
+    // --- MANUAL COLOR & ASPECT CORRECTIONS ----
+    // ==========================================
+    in-out property <float> manual_brightness: 1.0;
+    in-out property <float> manual_contrast: 1.0;
+    in-out property <float> manual_gamma: 1.0;
+    in-out property <float> aspect_ratio_modifier: 1.0;
+    in-out property <int> background_mode: 0; // 0: Checkerboard, 1: Solid Black, 2: Solid White
 
     // ==========================================
     // --- UI DRAG & LAYOUT STATES --------------
@@ -163,6 +185,7 @@ export global Store {
     in-out property <image> image_heatmap;
     in-out property <image> histogram_image;
     in-out property <image> checkerboard_pattern;
+    in-out property <image> checkerboard_pattern_light;
 
     // Compare Viewport Parameters
     in-out property <int> compare_mode: 0; // 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference, 4: Flicker
@@ -208,6 +231,13 @@ export global Store {
     in-out property <bool> results_grid_mode: false;
     in-out property <bool> has_results: false;
 
+    // PREVIEW SYSTEM FOR BLENDING ANIMATIONS
+    in-out property <image> image_original_next;
+    in-out property <image> image_duplicate_next;
+    in-out property <float> blend_factor: 0.0;
+    in-out property <bool> enable_frame_blending: false;
+    in-out property <float> play_speed: 1.0;
+
     // ==========================================
     // --- OPERATIONAL ACTIONS CALLBACKS --------
     // ==========================================
@@ -222,6 +252,7 @@ export global Store {
     callback channel_toggled();
     callback mip_level_changed();
     callback compare_mode_changed();
+    callback active_frame_changed();
     callback trigger_selection_rule(string);
     callback save_settings();
     callback tonemap_toggled();

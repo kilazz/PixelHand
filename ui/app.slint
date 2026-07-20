@@ -200,6 +200,30 @@ export component AppWindow inherits Window {
     in-out property <string> console_log <=> Store.console_log;
     in-out property <string> context_hovered_path <=> Store.context_hovered_path;
 
+    // Viewer component mappings
+    in-out property <int> grid_cols <=> Store.grid_cols;
+    in-out property <int> grid_rows <=> Store.grid_rows;
+    in-out property <int> active_frame <=> Store.active_frame;
+    in-out property <int> sprites_count <=> Store.sprites_count;
+    in-out property <int> sprite_width <=> Store.sprite_width;
+    in-out property <int> sprite_height <=> Store.sprite_height;
+    in-out property <bool> play_flipbook <=> Store.play_flipbook;
+    in-out property <float> flipbook_fps <=> Store.flipbook_fps;
+
+    in-out property <float> manual_brightness <=> Store.manual_brightness;
+    in-out property <float> manual_contrast <=> Store.manual_contrast;
+    in-out property <float> manual_gamma <=> Store.manual_gamma;
+    in-out property <float> aspect_ratio_modifier <=> Store.aspect_ratio_modifier;
+    in-out property <int> background_mode <=> Store.background_mode;
+    in-out property <bool> fit_to_window <=> Store.fit_to_window;
+
+    // Continuous Playback and GPU Blending
+    in-out property <float> play_speed <=> Store.play_speed;
+    in-out property <bool> enable_frame_blending <=> Store.enable_frame_blending;
+    in-out property <image> image_original_next <=> Store.image_original_next;
+    in-out property <image> image_duplicate_next <=> Store.image_duplicate_next;
+    in-out property <float> blend_factor <=> Store.blend_factor;
+
     skipped_popup := SkippedFilesPopup { }
 
     context_popup := ContextMenuPopup { }
@@ -587,6 +611,7 @@ export component AppWindow inherits Window {
                         color: #ffffff;
                     }
 
+                    // Comparison Modes & HDR parameters
                     HorizontalLayout {
                         spacing: 8px;
                         height: 28px;
@@ -605,6 +630,7 @@ export component AppWindow inherits Window {
 
                         if Store.compare_mode == 1 || Store.compare_mode == 2: HorizontalLayout {
                             spacing: 8px;
+                            horizontal-stretch: 0;
                             Text {
                                 text: "Wipe Shift:";
                                 vertical-alignment: center;
@@ -617,10 +643,12 @@ export component AppWindow inherits Window {
                                 minimum: 0.0;
                                 maximum: 1.0;
                                 height: 24px;
+                                width: 120px;
                             }
                         }
                         if Store.compare_mode == 4: HorizontalLayout {
                             spacing: 8px;
+                            horizontal-stretch: 0;
                             Text {
                                 text: "Flicker Speed:";
                                 vertical-alignment: center;
@@ -628,24 +656,27 @@ export component AppWindow inherits Window {
                                 color: #cfcfcf;
                             }
 
-                            Slider {
-                                value <=> Store.flicker_interval_val;
+                            SpinBox {
+                                value: Math.round(Store.flicker_interval_val);
                                 minimum: 50;
-                                maximum: 1000;
+                                maximum: 2000;
                                 height: 24px;
+                                width: 95px;
+                                edited(val) => {
+                                    Store.flicker_interval_val = val;
+                                }
                             }
 
                             Text {
-                                text: Math.round(Store.flicker_interval_val) + "ms";
+                                text: "ms";
                                 vertical-alignment: center;
                                 font-size: 11px;
-                                color: #ffffff;
-                                width: 45px;
+                                color: #cfcfcf;
                             }
                         }
                         HorizontalLayout {
                             spacing: 8px;
-                            width: 180px;
+                            horizontal-stretch: 0;
                             Text {
                                 text: "Mip Level:";
                                 vertical-alignment: center;
@@ -693,20 +724,438 @@ export component AppWindow inherits Window {
                             width: 165px;
                             selected(val) => { Store.tonemap_toggled(); }
                         }
+
                         Rectangle {
                             horizontal-stretch: 1;
                         }
 
+                        HorizontalLayout {
+                            spacing: 4px;
+                            alignment: end;
+
+                            // Zoom Input SpinBox
+                            SpinBox {
+                                value: Math.round(Store.zoom_factor * 100);
+                                minimum: 10;
+                                maximum: 1000;
+                                height: 24px;
+                                width: 100px;
+                                edited(val) => {
+                                    Store.zoom_factor = val / 100.0;
+                                }
+                            }
+
+                            Text {
+                                text: "%";
+                                font-size: 12px;
+                                color: #cfcfcf;
+                                vertical-alignment: center;
+                            }
+
+                            // Fit to Window button (Scale to Fit)
+                            CustomButton {
+                                text: "Fit";
+                                height: 24px;
+                                width: 45px;
+                                primary-color: Store.fit_to_window ? #3e6a90 : #474747;
+                                clicked => {
+                                    Store.fit_to_window = true;
+                                    Store.zoom_factor = 1.0;
+                                    Store.pan_x = 0px;
+                                    Store.pan_y = 0px;
+                                }
+                            }
+
+                            // Original Size button (1:1 Pixel-Perfect)
+                            CustomButton {
+                                text: "1:1";
+                                height: 24px;
+                                width: 45px;
+                                primary-color: !Store.fit_to_window ? #3e6a90 : #474747;
+                                clicked => {
+                                    Store.fit_to_window = false;
+                                    Store.zoom_factor = 1.0;
+                                    Store.pan_x = 0px;
+                                    Store.pan_y = 0px;
+                                }
+                            }
+
+                            // Reset Zoom (Default Reset)
+                            CustomButton {
+                                text: "Reset Zoom";
+                                height: 24px;
+                                primary-color: #474747;
+                                clicked => {
+                                    Store.fit_to_window = true;
+                                    Store.zoom_factor = 1.0;
+                                    Store.pan_x = 0px;
+                                    Store.pan_y = 0px;
+                                }
+                            }
+                        }
+                    }
+
+                    // Spritesheet slicing subdivision & Animation Flipbook controls
+                    HorizontalLayout {
+                        spacing: 8px;
+                        height: 28px;
+
+                        Text {
+                            text: "Grid Slice (Col x Row):";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        SpinBox {
+                            value <=> Store.grid_cols;
+                            minimum: 1;
+                            maximum: 64;
+                            height: 24px;
+                            width: 90px;
+                            edited(val) => { Store.grid_cols = val; Store.active_frame_changed(); }
+                        }
+
+                        Text {
+                            text: "x";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        SpinBox {
+                            value <=> Store.grid_rows;
+                            minimum: 1;
+                            maximum: 64;
+                            height: 24px;
+                            width: 90px;
+                            edited(val) => { Store.grid_rows = val; Store.active_frame_changed(); }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    // TOOLBAR 3: Manual color tweaks (Brightness, Contrast, Gamma), Ratio and Background selections
+                    HorizontalLayout {
+                        spacing: 12px;
+                        height: 28px;
+
+                        Text {
+                            text: "Bg:";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        ComboBox {
+                            model: ["Dark Checkerboard", "Light Checkerboard", "Solid Black", "Solid White"];
+                            current-index <=> Store.background_mode;
+                            height: 24px;
+                            width: 135px;
+                            selected(val) => { Store.active_frame_changed(); }
+                        }
+
+                        Text {
+                            text: "Brightness:";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        Slider {
+                            value <=> Store.manual_brightness;
+                            minimum: 0.1;
+                            maximum: 3.0;
+                            height: 24px;
+                            width: 100px;
+                            changed(val) => { Store.active_frame_changed(); }
+                        }
+
+                        Text {
+                            text: "Contrast:";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        Slider {
+                            value <=> Store.manual_contrast;
+                            minimum: 0.1;
+                            maximum: 3.0;
+                            height: 24px;
+                            width: 100px;
+                            changed(val) => { Store.active_frame_changed(); }
+                        }
+
+                        Text {
+                            text: "Gamma:";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        Slider {
+                            value <=> Store.manual_gamma;
+                            minimum: 0.1;
+                            maximum: 3.0;
+                            height: 24px;
+                            width: 100px;
+                            changed(val) => { Store.active_frame_changed(); }
+                        }
+
+                        Text {
+                            text: "Ratio:";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        Slider {
+                            value <=> Store.aspect_ratio_modifier;
+                            minimum: 0.2;
+                            maximum: 3.0;
+                            height: 24px;
+                            width: 100px;
+                            changed(val) => { Store.active_frame_changed(); }
+                        }
+
                         CustomButton {
-                            text: "Reset Zoom";
+                            text: "Reset Adjustments";
                             height: 24px;
                             primary-color: #474747;
-                            clicked => { Store.zoom_factor = 1.0; Store.pan_x = 0px; Store.pan_y = 0px; }
+                            clicked => {
+                                Store.manual_brightness = 1.0;
+                                Store.manual_contrast = 1.0;
+                                Store.manual_gamma = 1.0;
+                                Store.aspect_ratio_modifier = 1.0;
+                                Store.active_frame_changed();
+                            }
+                        }
+
+                        Rectangle {
+                            horizontal-stretch: 1;
                         }
                     }
 
                     // ENCAPSULATED COMPARISON VIEWPORT
                     InteractiveCompareViewport { }
+
+                    // FIXED BOTTOM TIMELINE PLAYER
+                    if Store.grid_cols > 1 || Store.grid_rows > 1: Rectangle {
+                        height: 38px;
+                        background: #1e1e1e;
+                        border-color: #353535;
+                        border-width: 1px;
+                        border-radius: 6px;
+
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 12px;
+                            cross-axis-alignment: center; // Vertically center all layout items
+
+                            // Playback buttons
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                cross-axis-alignment: center; // Vertically center transport buttons
+
+                                // Go to Start
+                                CustomButton {
+                                    text: "|<";
+                                    height: 24px;
+                                    width: 24px;
+                                    compact: true;
+                                    primary-color: #3d3d3d;
+                                    clicked => {
+                                        Store.active_frame = 0;
+                                        Store.active_frame_changed();
+                                    }
+                                }
+
+                                // Prev Frame
+                                CustomButton {
+                                    text: "<";
+                                    height: 24px;
+                                    width: 24px;
+                                    compact: true;
+                                    primary-color: #3d3d3d;
+                                    clicked => {
+                                        Store.active_frame = Math.max(0, Store.active_frame - 1);
+                                        Store.active_frame_changed();
+                                    }
+                                }
+
+                                // Play / Pause
+                                CustomButton {
+                                    text: Store.play_flipbook ? "||" : ">";
+                                    height: 24px;
+                                    width: 28px;
+                                    compact: true;
+                                    primary-color: Store.play_flipbook ? #aa3838 : #23a55a;
+                                    clicked => {
+                                        Store.play_flipbook = !Store.play_flipbook;
+                                    }
+                                }
+
+                                // Next Frame
+                                CustomButton {
+                                    text: ">";
+                                    height: 24px;
+                                    width: 24px;
+                                    compact: true;
+                                    primary-color: #3d3d3d;
+                                    clicked => {
+                                        let total_frames = Store.grid_cols * Store.grid_rows;
+                                        Store.active_frame = Math.min(total_frames - 1, Store.active_frame + 1);
+                                        Store.active_frame_changed();
+                                    }
+                                }
+
+                                // Go to End
+                                CustomButton {
+                                    text: ">|";
+                                    height: 24px;
+                                    width: 24px;
+                                    compact: true;
+                                    primary-color: #3d3d3d;
+                                    clicked => {
+                                        let total_frames = Store.grid_cols * Store.grid_rows;
+                                        Store.active_frame = total_frames - 1;
+                                        Store.active_frame_changed();
+                                    }
+                                }
+                            }
+
+                            // Current Frame Input
+                            SpinBox {
+                                value: Store.active_frame + 1;
+                                minimum: 1;
+                                maximum: Math.max(1, Store.grid_cols * Store.grid_rows);
+                                height: 24px;
+                                width: 90px;
+                                edited(val) => {
+                                    Store.active_frame = val - 1;
+                                    Store.active_frame_changed();
+                                }
+                            }
+
+                            Text {
+                                text: "f";
+                                font-size: 11px;
+                                color: #cfcfcf;
+                                vertical-alignment: center;
+                            }
+
+                            // FPS Input
+                            SpinBox {
+                                value: Math.round(Store.flipbook_fps);
+                                minimum: 1;
+                                maximum: 144;
+                                height: 24px;
+                                width: 90px;
+                                edited(val) => {
+                                    Store.flipbook_fps = val;
+                                }
+                            }
+
+                            Text {
+                                text: "fps";
+                                font-size: 11px;
+                                color: #cfcfcf;
+                                vertical-alignment: center;
+                            }
+
+                            // Speed Multiplier Slider
+                            Text {
+                                text: "Speed:";
+                                font-size: 11px;
+                                color: #cfcfcf;
+                                vertical-alignment: center;
+                            }
+
+                            Slider {
+                                value <=> Store.play_speed;
+                                minimum: 0.1;
+                                maximum: 4.0;
+                                height: 24px;
+                                width: 80px;
+                            }
+
+                            Text {
+                                text: (Math.round(Store.play_speed * 10) / 10) + "x";
+                                font-size: 11px;
+                                color: #ffffff;
+                                vertical-alignment: center;
+                                width: 30px;
+                            }
+
+                            // Frame Blending CheckBox
+                            CheckBox {
+                                text: "Blend";
+                                checked <=> Store.enable_frame_blending;
+                                height: 24px;
+                            }
+
+                            // Timeline scrubbing track
+                            VerticalLayout {
+                                alignment: center;
+                                horizontal-stretch: 1;
+
+                                timeline-track := Rectangle {
+                                    height: 10px;
+                                    background: #181818;
+                                    border-color: #353535;
+                                    border-width: 1px;
+                                    border-radius: 5px;
+
+                                    // Fill bar
+                                    Rectangle {
+                                        x: 0px;
+                                        width: parent.width * (Store.active_frame / Math.max(1, (Store.grid_cols * Store.grid_rows) - 1));
+                                        height: 100%;
+                                        background: #e59535;
+                                        border-radius: 5px;
+                                    }
+
+                                    // Handle
+                                    Rectangle {
+                                        x: (parent.width - self.width) * (Store.active_frame / Math.max(1, (Store.grid_cols * Store.grid_rows) - 1));
+                                        y: (parent.height - self.height) / 2;
+                                        width: 14px;
+                                        height: 14px;
+                                        background: #ffffff;
+                                        border-radius: 7px;
+                                        border-color: #e59535;
+                                        border-width: 2px;
+                                    }
+
+                                    timeline-ta := TouchArea {
+                                        width: 100%;
+                                        height: 100%;
+                                        moved => {
+                                            if (self.pressed) {
+                                                let total_frames = Store.grid_cols * Store.grid_rows;
+                                                let ratio = self.mouse-x / parent.width;
+                                                let raw_frame = Math.round(ratio * (total_frames - 1));
+                                                Store.active_frame = raw_frame.clamp(0, total_frames - 1);
+                                                Store.active_frame_changed();
+                                            }
+                                        }
+                                        clicked => {
+                                            let total_frames = Store.grid_cols * Store.grid_rows;
+                                            let ratio = self.mouse-x / parent.width;
+                                            let raw_frame = Math.round(ratio * (total_frames - 1));
+                                            Store.active_frame = raw_frame.clamp(0, total_frames - 1);
+                                            Store.active_frame_changed();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     HorizontalLayout {
                         spacing: 6px;
@@ -1005,6 +1454,18 @@ export component AppWindow inherits Window {
                                     name: "Similarity";
                                     val1: "100.0%";
                                     val2: Store.duplicate_meta.similarity;
+                                }
+
+                                SpecsRow {
+                                    name: "Sprites Count";
+                                    val1: Store.grid_cols > 1 || Store.grid_rows > 1 ? Store.sprites_count : "-";
+                                    val2: Store.grid_cols > 1 || Store.grid_rows > 1 ? Store.sprites_count : "-";
+                                }
+
+                                SpecsRow {
+                                    name: "Sprite Size";
+                                    val1: Store.grid_cols > 1 || Store.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
+                                    val2: Store.grid_cols > 1 || Store.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
                                 }
 
                                 Rectangle {

@@ -168,8 +168,13 @@ async fn scan_and_index_directory(
 
         if let Some((cached_size, cached_mtime, cached_vec)) = cache_map.get(&key) {
             if *cached_size == size && *cached_mtime == mtime {
+                let mut hasher = Xxh64::new(0);
+                hasher.update(p_str.as_bytes());
+                hasher.update(chan_str.as_bytes());
+                let deterministic_id = format!("{:016x}", hasher.digest());
+
                 final_records.push(DbRecord {
-                    id: uuid::Uuid::new_v4().to_string(),
+                    id: deterministic_id,
                     vector: cached_vec.clone(),
                     path: p_str,
                     channel: chan_str.to_string(),
@@ -285,10 +290,16 @@ async fn scan_and_index_directory(
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(0);
 
+                    let path_str = item.path.to_string_lossy().to_string();
+                    let mut hasher = Xxh64::new(0);
+                    hasher.update(path_str.as_bytes());
+                    hasher.update(chan_str.as_bytes());
+                    let deterministic_id = format!("{:016x}", hasher.digest());
+
                     chunk_records.push(DbRecord {
-                        id: uuid::Uuid::new_v4().to_string(),
+                        id: deterministic_id,
                         vector,
-                        path: item.path.to_string_lossy().to_string(),
+                        path: path_str,
                         channel: chan_str.to_string(),
                         file_size: size,
                         mtime,

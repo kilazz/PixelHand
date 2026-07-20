@@ -174,15 +174,15 @@ fn rec2020_to_rec709(col: [f32; 3]) -> [f32; 3] {
 /// Converts linear Rec.2020 RGB values to the ICtCp perceptual color space.
 /// ICtCp separates Intensity (I) from Chroma (Ct, Cp) specifically for HDR manipulation.
 fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
-    // Step 1: LMS transformation matrix (Rec. 2020 to LMS color space)
+    // LMS transformation matrix (Rec. 2020 to LMS color space)
     let l = col[0] * 0.412109 + col[1] * 0.523926 + col[2] * 0.063965;
     let m = col[0] * 0.166748 + col[1] * 0.720459 + col[2] * 0.112793;
     let s = col[0] * 0.024170 + col[1] * 0.075439 + col[2] * 0.900391;
 
-    // Step 2: Apply non-linear PQ transfer function to LMS cone responses
+    // Apply non-linear PQ transfer function to LMS cone responses
     let pq_lms = linear_to_st2084([l.max(0.0), m.max(0.0), s.max(0.0)]);
 
-    // Step 3: LMS to ICtCp matrix conversion
+    // LMS to ICtCp matrix conversion
     let i = pq_lms[0] * 0.5000 + pq_lms[1] * 0.5000 + pq_lms[2] * 0.0000;
     let ct = pq_lms[0] * 1.6137 - pq_lms[1] * 3.3234 + pq_lms[2] * 1.7097;
     let cp = pq_lms[0] * 4.3780 - pq_lms[1] * 4.2455 - pq_lms[2] * 0.1325;
@@ -192,15 +192,15 @@ fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
 
 /// Converts ICtCp color space values back to linear Rec.2020 RGB.
 fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
-    // Step 1: ICtCp to LMS matrix conversion
+    // ICtCp to LMS matrix conversion
     let l = col[0] * 1.0 + col[1] * 0.008605 + col[2] * 0.111036;
     let m = col[0] * 1.0 - col[1] * 0.008605 - col[2] * 0.111036;
     let s = col[0] * 1.0 + col[1] * 0.560049 - col[2] * 0.320637;
 
-    // Step 2: Linearize LMS using the PQ transfer function inverse
+    // Linearize LMS using the PQ transfer function inverse
     let lms = st2084_to_linear([l, m, s]);
 
-    // Step 3: LMS to Rec.2020 RGB conversion matrix
+    // LMS to Rec.2020 RGB conversion matrix
     let r = lms[0] * 3.43661 - lms[1] * 2.50645 + lms[2] * 0.069845;
     let g = -lms[0] * 0.79133 + lms[1] * 1.9836 - lms[2] * 0.192271;
     let b = -lms[0] * 0.02595 - lms[1] * 0.098914 + lms[2] * 1.12486;
@@ -425,9 +425,6 @@ fn tonemap_ictcp_lumina(color_in: [f32; 3], exposure: f32, scene_peak_nits: f32)
     // Base luminance compression via BT.2390 EETF
     let i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
 
-    // ==================================================
-    // PUNCH EFFECT: BALANCED CONTRAST (S-CURVE)
-    // ==================================================
     // Normalize luminance to 0..1 range to apply the S-curve
     let normalized_i = (i_out / max_out_pq).clamp(0.0, 1.0);
 
@@ -441,7 +438,6 @@ fn tonemap_ictcp_lumina(color_in: [f32; 3], exposure: f32, scene_peak_nits: f32)
     let i_out_punched = punched_i * max_out_pq;
     ictcp[0] = i_out_punched;
 
-    // Calculate chroma with the updated contrast
     // Compression ratio in the PQ domain
     let compression_ratio = if i_in > 1e-5 {
         i_out_punched / i_in
@@ -627,6 +623,38 @@ pub fn tonemap_hdr_to_ldr_rgba(
         });
 
     RgbaImage::from_raw(width, height, ldr_pixels).ok_or(TonemapError::ImageBuildFailed)
+}
+
+/// Applies manual Brightness, Contrast, and Gamma color corrections to an RgbaImage in parallel.
+/// Scaling and shifting operations are safely restricted to RGB channels.
+pub fn apply_manual_corrections(img: &mut RgbaImage, brightness: f32, contrast: f32, gamma: f32) {
+    if (brightness - 1.0).abs() < 1e-3
+        && (contrast - 1.0).abs() < 1e-3
+        && (gamma - 1.0).abs() < 1e-3
+    {
+        return; // Early return to bypass computations when properties are at defaults
+    }
+
+    let raw = img.as_mut();
+    raw.par_chunks_exact_mut(4).for_each(|pixel| {
+        // Process only the RGB channels, skipping Alpha (index 3)
+        for ch in pixel.iter_mut().take(3) {
+            let mut val = *ch as f32 / 255.0;
+
+            // 1. Brightness: Direct scalar multiplication
+            val *= brightness;
+
+            // 2. Contrast: Centered and scaled around the standard mid-gray (0.5) boundary
+            val = (val - 0.5) * contrast + 0.5;
+
+            // 3. Gamma: Power function curve
+            if val > 0.0 && gamma != 1.0 {
+                val = val.powf(gamma);
+            }
+
+            *ch = (val.clamp(0.0, 1.0) * 255.0) as u8;
+        }
+    });
 }
 
 /// Computes pixel differences between two Rgba buffers in parallel.

@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use slint::ComponentHandle;
 use std::fs;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::state::{AppSettings, AppState};
@@ -18,14 +18,70 @@ pub static APP_HANDLE: OnceLock<slint::Weak<AppWindow>> = OnceLock::new();
 // Fast intermediate thread-safe queue to bypass immediate UI locked calls
 static LOG_MESSAGES: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 
-// Thread-safe atomic registers to bridge Slint states to background high-frequency loops safely
-pub static COMPARE_MODE: AtomicUsize = AtomicUsize::new(0);
-pub static FLICKER_INTERVAL: AtomicUsize = AtomicUsize::new(333);
+// Thread-safe settings context to bridge Slint states to background loops safely
+#[derive(Debug, Clone, Copy)]
+pub struct ViewerSettings {
+    pub compare_mode: usize,
+    pub flicker_interval: usize,
+    pub tonemap_enabled: bool,
+    pub auto_exposure_enabled: bool,
+    pub tonemap_operator: usize,
+    pub play_flipbook: bool,
+    pub flipbook_fps: usize,
+    pub brightness: usize, // 100 as 1.0
+    pub contrast: usize,
+    pub gamma: usize,
+    pub ratio: usize,
+    pub grid_cols: usize,
+    pub grid_rows: usize,
+    pub active_frame: usize,
+    pub play_speed: f32,
+    pub enable_frame_blending: bool,
+}
 
-// App-level atomics to bridge UI tonemapping states to pure core encoders
-pub static TONEMAP_ENABLED: AtomicBool = AtomicBool::new(true);
-pub static AUTO_EXPOSURE_ENABLED: AtomicBool = AtomicBool::new(true);
-pub static TONEMAP_OPERATOR: AtomicUsize = AtomicUsize::new(2);
+impl Default for ViewerSettings {
+    fn default() -> Self {
+        Self {
+            compare_mode: 0,
+            flicker_interval: 333,
+            tonemap_enabled: true,
+            auto_exposure_enabled: true,
+            tonemap_operator: 2,
+            play_flipbook: false,
+            flipbook_fps: 12,
+            brightness: 100,
+            contrast: 100,
+            gamma: 100,
+            ratio: 100,
+            grid_cols: 1,
+            grid_rows: 1,
+            active_frame: 0,
+            play_speed: 1.0,
+            enable_frame_blending: false,
+        }
+    }
+}
+
+pub static VIEWER_SETTINGS: OnceLock<Mutex<ViewerSettings>> = OnceLock::new();
+
+pub fn get_viewer_settings() -> ViewerSettings {
+    let lock = VIEWER_SETTINGS.get_or_init(|| Mutex::new(ViewerSettings::default()));
+    if let Ok(guard) = lock.lock() {
+        *guard
+    } else {
+        ViewerSettings::default()
+    }
+}
+
+pub fn update_viewer_settings<F>(f: F)
+where
+    F: FnOnce(&mut ViewerSettings),
+{
+    let lock = VIEWER_SETTINGS.get_or_init(|| Mutex::new(ViewerSettings::default()));
+    if let Ok(mut guard) = lock.lock() {
+        f(&mut guard);
+    }
+}
 
 /// Custom tracing subscriber log handler wrapping native console pipes
 struct UiLogWriter;
@@ -100,10 +156,11 @@ pub fn append_to_console_log(msg: &str) {
 
 /// Dynamic state mapper producing a pure config instance for loaders on demand.
 pub fn get_active_tonemap_config() -> crate::core::tonemapper::TonemapConfig {
+    let s = get_viewer_settings();
     crate::core::tonemapper::TonemapConfig {
-        enabled: TONEMAP_ENABLED.load(Ordering::Relaxed),
-        auto_exposure: AUTO_EXPOSURE_ENABLED.load(Ordering::Relaxed),
-        operator: match TONEMAP_OPERATOR.load(Ordering::Relaxed) {
+        enabled: s.tonemap_enabled,
+        auto_exposure: s.auto_exposure_enabled,
+        operator: match s.tonemap_operator {
             0 => crate::core::tonemapper::TonemapOperator::None,
             1 => crate::core::tonemapper::TonemapOperator::FalseColor,
             2 => crate::core::tonemapper::TonemapOperator::AcesFilmic,
@@ -151,13 +208,20 @@ pub fn run_gui() -> Result<()> {
     let loaded_settings = utils::settings::load_settings().unwrap_or_default();
     apply_settings_to_ui(&app, &loaded_settings);
 
-    let checkerboard = utils::ui::generate_checkerboard();
-    store.set_checkerboard_pattern(checkerboard);
+    // Generate both dark and light checkerboard patterns
+    let checkerboard_dark = utils::ui::generate_checkerboard(false);
+    let checkerboard_light = utils::ui::generate_checkerboard(true);
+    store.set_checkerboard_pattern(checkerboard_dark);
+    store.set_checkerboard_pattern_light(checkerboard_light);
 
-    // Initialize atomic variables from AppSettings
-    TONEMAP_ENABLED.store(loaded_settings.tonemap_enabled, Ordering::Relaxed);
-    AUTO_EXPOSURE_ENABLED.store(loaded_settings.tonemap_auto_exposure, Ordering::Relaxed);
-    TONEMAP_OPERATOR.store(loaded_settings.tonemap_operator as usize, Ordering::Relaxed);
+    // Initialize state context variables from AppSettings
+    update_viewer_settings(|s| {
+        s.tonemap_enabled = loaded_settings.tonemap_enabled;
+        s.auto_exposure_enabled = loaded_settings.tonemap_auto_exposure;
+        s.tonemap_operator = loaded_settings.tonemap_operator as usize;
+        s.play_speed = loaded_settings.play_speed;
+        s.enable_frame_blending = loaded_settings.enable_frame_blending;
+    });
 
     // Flush initial startup logs queued before UI loop initialization
     if let Some(queue_mutex) = LOG_MESSAGES.get()
@@ -230,7 +294,7 @@ pub fn run_gui() -> Result<()> {
     });
 
     // background task 1: Low-frequency (100ms) sync that safely polls Slint properties on the UI thread
-    // and stores them into thread-safe atomics, preventing event loop flooding.
+    // and stores them into thread-safe context settings, preventing event loop flooding.
     let app_weak_sync = app.as_weak();
     tokio::spawn(async move {
         loop {
@@ -238,9 +302,24 @@ pub fn run_gui() -> Result<()> {
             let success = app_weak_sync
                 .upgrade_in_event_loop(|ui| {
                     let store = ui.global::<Store>();
-                    COMPARE_MODE.store(store.get_compare_mode() as usize, Ordering::Relaxed);
-                    FLICKER_INTERVAL
-                        .store(store.get_flicker_interval_val() as usize, Ordering::Relaxed);
+                    update_viewer_settings(|s| {
+                        s.compare_mode = store.get_compare_mode() as usize;
+                        s.flicker_interval = store.get_flicker_interval_val() as usize;
+
+                        // Sync manual adjustments to context
+                        s.brightness = (store.get_manual_brightness() * 100.0) as usize;
+                        s.contrast = (store.get_manual_contrast() * 100.0) as usize;
+                        s.gamma = (store.get_manual_gamma() * 100.0) as usize;
+                        s.ratio = (store.get_aspect_ratio_modifier() * 100.0) as usize;
+
+                        s.grid_cols = store.get_grid_cols() as usize;
+                        s.grid_rows = store.get_grid_rows() as usize;
+                        s.active_frame = store.get_active_frame() as usize;
+                        s.play_flipbook = store.get_play_flipbook();
+                        s.flipbook_fps = store.get_flipbook_fps() as usize;
+                        s.play_speed = store.get_play_speed();
+                        s.enable_frame_blending = store.get_enable_frame_blending();
+                    });
                 })
                 .is_ok();
             if !success {
@@ -250,7 +329,7 @@ pub fn run_gui() -> Result<()> {
     });
 
     // background task 2: High-frequency flicker precision loop executing strictly using
-    // thread-safe atomic registers to prevent cross-thread Slint safety violations.
+    // thread-safe context settings to prevent cross-thread Slint safety violations.
     let app_weak_flicker = app.as_weak();
     tokio::spawn(async move {
         let mut elapsed_ms: u64 = 0;
@@ -259,10 +338,10 @@ pub fn run_gui() -> Result<()> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(tick_rate_ms)).await;
 
-            let mode = COMPARE_MODE.load(Ordering::Relaxed);
-            if mode == 4 {
+            let s = get_viewer_settings();
+            if s.compare_mode == 4 {
                 elapsed_ms += tick_rate_ms;
-                let target_duration = FLICKER_INTERVAL.load(Ordering::Relaxed) as u64;
+                let target_duration = s.flicker_interval as u64;
 
                 if elapsed_ms >= target_duration.max(50) {
                     elapsed_ms = 0; // Reset timer
@@ -277,6 +356,57 @@ pub fn run_gui() -> Result<()> {
                 }
             } else {
                 elapsed_ms = 0;
+            }
+        }
+    });
+
+    // High-frequency Flipbook precision loop executing frame progressions
+    let app_weak_flipbook = app.as_weak();
+    tokio::spawn(async move {
+        let mut continuous_time_ms: f64 = 0.0;
+        let tick_rate_ms: u64 = 16; // ~60 FPS update cycle (16.67ms)
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(tick_rate_ms)).await;
+
+            let s = get_viewer_settings();
+            if s.play_flipbook {
+                let cols = s.grid_cols.max(1);
+                let rows = s.grid_rows.max(1);
+                let total_frames = cols * rows;
+
+                if total_frames > 1 {
+                    // Frame duration at base FPS
+                    let fps = s.flipbook_fps.max(1);
+                    let frame_duration_ms = 1000.0 / fps as f64;
+
+                    // Advance time with Speed Multiplier
+                    continuous_time_ms += tick_rate_ms as f64 * s.play_speed as f64;
+
+                    // Current animation position in frames
+                    let frame_position = continuous_time_ms / frame_duration_ms;
+                    let current_frame = (frame_position.floor() as usize) % total_frames;
+                    let blend_factor = frame_position.fract() as f32;
+
+                    let _ = app_weak_flipbook.upgrade_in_event_loop(move |ui| {
+                        let store = ui.global::<Store>();
+                        if store.get_play_flipbook() {
+                            store.set_active_frame(current_frame as i32);
+                            if s.enable_frame_blending {
+                                store.set_blend_factor(blend_factor);
+                            } else {
+                                store.set_blend_factor(0.0);
+                            }
+                            store.invoke_active_frame_changed(); // Trigger viewport updates
+                        }
+                    });
+                }
+            } else {
+                // Keep continuous time reset or in sync with current active frame
+                // Read properties directly from the viewer settings context rather than a main thread closure
+                let fps = s.flipbook_fps.max(1);
+                let frame_duration_ms = 1000.0 / fps as f64;
+                continuous_time_ms = s.active_frame as f64 * frame_duration_ms;
             }
         }
     });
@@ -377,6 +507,21 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
 
     crate::scanners::ENABLE_PREVIEWS.store(settings.enable_previews, Ordering::Relaxed);
     crate::scanners::PREVIEW_QUALITY.store(settings.preview_quality, Ordering::Relaxed);
+
+    // Apply the newly integrated GameTextureViewer settings mapped to AppWindow properties
+    app.set_grid_cols(settings.grid_cols);
+    app.set_grid_rows(settings.grid_rows);
+    app.set_manual_brightness(settings.manual_brightness);
+    app.set_manual_contrast(settings.manual_contrast);
+    app.set_manual_gamma(settings.manual_gamma);
+    app.set_aspect_ratio_modifier(settings.aspect_ratio_modifier);
+    app.set_background_mode(settings.background_mode);
+    app.set_flipbook_fps(settings.flipbook_fps);
+    app.set_fit_to_window(settings.fit_to_window);
+
+    // Apply the newly integrated Continuous Playback and Blending options
+    app.set_play_speed(settings.play_speed);
+    app.set_enable_frame_blending(settings.enable_frame_blending);
 }
 
 /// Helper function to push decoded graphics buffers to Slint preview targets.
@@ -395,15 +540,135 @@ pub fn trigger_viewport_update(
     let mip_level = store.get_active_mip_level() as u32;
     let app_weak_clone = app_weak.clone();
 
+    // Capture the interactive parameters from the store
+    let brightness = store.get_manual_brightness();
+    let contrast = store.get_manual_contrast();
+    let gamma = store.get_manual_gamma();
+    let ratio = store.get_aspect_ratio_modifier();
+
+    let grid_cols = store.get_grid_cols() as u32;
+    let grid_rows = store.get_grid_rows() as u32;
+    let active_frame = store.get_active_frame() as u32;
+
+    // Decides indices of original and blending frames prior to dispatching tasks
+    let total_frames = grid_cols * grid_rows;
+    let next_frame = if total_frames > 1 {
+        (active_frame + 1) % total_frames
+    } else {
+        active_frame
+    };
+    let enable_blending = store.get_enable_frame_blending();
+
     // Store state before asynchronous execution
-    TONEMAP_ENABLED.store(store.get_tonemap_enabled(), Ordering::Relaxed);
-    AUTO_EXPOSURE_ENABLED.store(store.get_tonemap_auto_exposure(), Ordering::Relaxed);
-    TONEMAP_OPERATOR.store(store.get_tonemap_operator() as usize, Ordering::Relaxed);
+    update_viewer_settings(|s| {
+        s.tonemap_enabled = store.get_tonemap_enabled();
+        s.auto_exposure_enabled = store.get_tonemap_auto_exposure();
+        s.tonemap_operator = store.get_tonemap_operator() as usize;
+    });
 
     tokio::spawn(async move {
-        let raw_orig =
+        // Fetch current frame previews
+        let mut raw_orig =
             utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await;
-        let raw_dup = utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await;
+        let mut raw_dup =
+            utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await;
+
+        // Fetch next frame previews for blending
+        let mut raw_orig_next = None;
+        let mut raw_dup_next = None;
+
+        if enable_blending && total_frames > 1 {
+            raw_orig_next =
+                utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await;
+            raw_dup_next =
+                utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await;
+        }
+
+        // Perform Spritesheet slicing for Frame N (Current)
+        if grid_cols > 1 || grid_rows > 1 {
+            if let Some(ref img) = raw_orig {
+                raw_orig = Some(utils::ui::slice_spritesheet_frame(
+                    img,
+                    grid_cols,
+                    grid_rows,
+                    active_frame,
+                ));
+            }
+            if let Some(ref img) = raw_dup {
+                raw_dup = Some(utils::ui::slice_spritesheet_frame(
+                    img,
+                    grid_cols,
+                    grid_rows,
+                    active_frame,
+                ));
+            }
+
+            // Perform Spritesheet slicing for Frame N+1 (Next)
+            if enable_blending {
+                if let Some(ref img) = raw_orig_next {
+                    raw_orig_next = Some(utils::ui::slice_spritesheet_frame(
+                        img, grid_cols, grid_rows, next_frame,
+                    ));
+                }
+                if let Some(ref img) = raw_dup_next {
+                    raw_dup_next = Some(utils::ui::slice_spritesheet_frame(
+                        img, grid_cols, grid_rows, next_frame,
+                    ));
+                }
+            }
+        }
+
+        // Apply manual Brightness, Contrast, and Gamma color corrections in parallel (Current Frame)
+        if let Some(ref mut img) = raw_orig {
+            crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
+        }
+        if let Some(ref mut img) = raw_dup {
+            crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
+        }
+
+        // Apply manual Brightness, Contrast, and Gamma color corrections in parallel (Next Frame)
+        if enable_blending {
+            if let Some(ref mut img) = raw_orig_next {
+                crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
+            }
+            if let Some(ref mut img) = raw_dup_next {
+                crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
+            }
+        }
+
+        // Apply aspect ratio scaling multipliers (Ratio Slider - Current Frame)
+        if let Some(ref img) = raw_orig {
+            raw_orig = Some(utils::ui::apply_aspect_ratio(img, ratio));
+        }
+        if let Some(ref img) = raw_dup {
+            raw_dup = Some(utils::ui::apply_aspect_ratio(img, ratio));
+        }
+
+        // Apply aspect ratio scaling multipliers (Ratio Slider - Next Frame)
+        if enable_blending {
+            if let Some(ref img) = raw_orig_next {
+                raw_orig_next = Some(utils::ui::apply_aspect_ratio(img, ratio));
+            }
+            if let Some(ref img) = raw_dup_next {
+                raw_dup_next = Some(utils::ui::apply_aspect_ratio(img, ratio));
+            }
+        }
+
+        // Pre-extract width and height before moving to event loop
+        let (sprite_w, sprite_h) = if let Some(ref img) = raw_orig {
+            (img.width() as i32, img.height() as i32)
+        } else {
+            (0, 0)
+        };
+
+        // Update the calculated metadata sizes (Sprite Width, Sprite Height, Sprites Count) based on the slice
+        let app_weak_meta = app_weak_clone.clone();
+        let _ = app_weak_meta.upgrade_in_event_loop(move |ui| {
+            let store = ui.global::<crate::app::Store>();
+            store.set_sprite_width(sprite_w);
+            store.set_sprite_height(sprite_h);
+            store.set_sprites_count((grid_cols * grid_rows) as i32);
+        });
 
         let raw_diff = if compare_mode == 3 {
             if let (Some(orig), Some(dup)) = (&raw_orig, &raw_dup) {
@@ -421,6 +686,7 @@ pub fn trigger_viewport_update(
             None
         };
 
+        // Dispatch Current Frames
         if let Some(img) = raw_orig {
             let app_weak_orig = app_weak_clone.clone();
             let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
@@ -434,6 +700,24 @@ pub fn trigger_viewport_update(
                 let store = ui.global::<crate::app::Store>();
                 store.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
             });
+        }
+
+        // Dispatch Next Frames for GPU-based alphablending transitions
+        if enable_blending {
+            if let Some(img) = raw_orig_next {
+                let app_weak_orig_next = app_weak_clone.clone();
+                let _ = app_weak_orig_next.upgrade_in_event_loop(move |ui| {
+                    let store = ui.global::<crate::app::Store>();
+                    store.set_image_original_next(utils::ui::convert_to_slint_image(&img));
+                });
+            }
+            if let Some(img) = raw_dup_next {
+                let app_weak_dup_next = app_weak_clone.clone();
+                let _ = app_weak_dup_next.upgrade_in_event_loop(move |ui| {
+                    let store = ui.global::<crate::app::Store>();
+                    store.set_image_duplicate_next(utils::ui::convert_to_slint_image(&img));
+                });
+            }
         }
 
         if let Some(diff) = raw_diff {

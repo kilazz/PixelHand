@@ -34,6 +34,15 @@ pub struct AppSettings {
     pub custom_model_dim: i32,
     pub tonemap_operator: i32,
     pub preview_quality: i32,
+    pub grid_cols: i32,
+    pub grid_rows: i32,
+    pub manual_brightness: f32,
+    pub manual_contrast: f32,
+    pub manual_gamma: f32,
+    pub aspect_ratio_modifier: f32,
+    pub background_mode: i32,
+    pub flipbook_fps: f32,
+    pub play_speed: f32,
 
     // 1-byte Logical Flags
     pub qc_mode: bool,
@@ -78,6 +87,8 @@ pub struct AppSettings {
     pub filter_only_uncompressed: bool,
     pub filter_only_missing_mips: bool,
     pub filter_only_cubemaps: bool,
+    pub fit_to_window: bool,
+    pub enable_frame_blending: bool,
 }
 
 impl Default for AppSettings {
@@ -109,6 +120,15 @@ impl Default for AppSettings {
             custom_model_dim: 512,
             tonemap_operator: 2,
             preview_quality: 1,
+            grid_cols: 1,
+            grid_rows: 1,
+            manual_brightness: 1.0,
+            manual_contrast: 1.0,
+            manual_gamma: 1.0,
+            aspect_ratio_modifier: 1.0,
+            background_mode: 0,
+            flipbook_fps: 12.0,
+            play_speed: 1.0,
 
             qc_mode: false,
             qc_npot: true,
@@ -152,6 +172,8 @@ impl Default for AppSettings {
             filter_only_uncompressed: false,
             filter_only_missing_mips: false,
             filter_only_cubemaps: false,
+            fit_to_window: true,
+            enable_frame_blending: false,
         }
     }
 }
