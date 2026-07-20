@@ -52,7 +52,7 @@ arrow-schema = "59.1.0"
 # Async and General Utilities
 futures = "0.3.33"
 futures-util = "0.3.33"
-tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
 uuid = { version = "1.24.0", features = ["v4"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "stream"] }
 trash = "5.2.6"
@@ -74,6 +74,7 @@ parking_lot = "0.12.5"
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }
 
 [build-dependencies]
+embed-resource = "3.0.11"
 slint-build = "1.17.1"
 
 [profile.release]
