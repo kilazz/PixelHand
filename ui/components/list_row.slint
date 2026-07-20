@@ -1,7 +1,7 @@
 // ui/components/list_row.slint
 
 import { CheckBox } from "std-widgets.slint";
-import { ResultsRow } from "../structs.slint";
+import { ResultsRow, SearchMethod } from "../structs.slint";
 import { InteractiveThumbnail } from "./thumbnail.slint";
 
 export component ListRow inherits Rectangle {
@@ -9,7 +9,7 @@ export component ListRow inherits Rectangle {
     in property <ResultsRow> row-data;
     in property <length> list-preview-size: 40px;
     in property <bool> enable-previews: true;
-    in property <int> search-method: 0;
+    in property <SearchMethod> search-method: SearchMethod.exact;
     in property <image> checkerboard-pattern;
 
     // Draggable Table Column Widths passed from the parent container
@@ -169,7 +169,7 @@ export component ListRow inherits Rectangle {
                     width: 8px;
                 }
 
-                if root.search-method != 3: HorizontalLayout {
+                if root.search-method != SearchMethod.inventory: HorizontalLayout {
                     spacing: 0px;
                     HorizontalLayout {
                         width: root.col-score-w;
@@ -214,7 +214,7 @@ export component ListRow inherits Rectangle {
                     }
                 }
 
-                if root.search-method == 3: HorizontalLayout {
+                if root.search-method == SearchMethod.inventory: HorizontalLayout {
                     spacing: 0px;
                     HorizontalLayout {
                         width: root.col-format-w;

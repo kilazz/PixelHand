@@ -7,7 +7,7 @@ use ustr::Ustr;
 /// A thread-safe, heap-allocated representation of Slint's ResultsRow structure.
 /// Enables background workers to populate and filter rows concurrently without holding
 /// the main Slint UI thread lock. Fields are grouped descending by memory footprint to minimize alignment padding.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct ResultsRowData {
     // 24-byte Pointer allocations (on 64-bit architectures)
     pub path: String,

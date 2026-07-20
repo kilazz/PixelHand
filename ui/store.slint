@@ -14,6 +14,9 @@ import {
     ResultsRow,
     SelectedFile,
     GridRow,
+    SearchMethod,
+    ExecutionProvider,
+    AiModelType,
 } from "./structs.slint";
 
 export global ScanConfig {
@@ -75,7 +78,12 @@ export global ScanConfig {
         qc_check_colorspace: true,
         qc_check_compression: true
     };
-    in-out property <AiSettings> ai: { ai_model: 0, custom_model_path: "", custom_model_arch: 0, custom_model_dim: 512 };
+    in-out property <AiSettings> ai: {
+        ai_model: AiModelType.clip-vit-b32,
+        custom_model_path: "",
+        custom_model_arch: 0,
+        custom_model_dim: 512
+    };
     in-out property <PreviewSettings> preview: {
         enable_previews: true,
         preview_quality: 1,
@@ -88,8 +96,8 @@ export global ScanConfig {
     // Global scanning parameters
     in-out property <float> similarity_threshold: 90.0;
     in-out property <int> batch_size: 128;
-    in-out property <int> search_method: 0; // 0: Exact, 1: Perceptual, 2: AI, 3: Inventory, 4: QC
-    in-out property <int> execution_provider: 0; // 0: CPU, 1: DirectML, 2: CUDA, 3: TensorRT, 4: CoreML
+    in-out property <SearchMethod> search_method: SearchMethod.exact;
+    in-out property <ExecutionProvider> execution_provider: ExecutionProvider.cpu;
     in-out property <int> search_precision: 1;
     in-out property <bool> show_advanced: false;
 

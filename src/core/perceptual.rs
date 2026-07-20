@@ -16,7 +16,7 @@ pub enum AnalysisType {
 
 /// Detects if an image has a fully transparent alpha channel but contains
 /// valid RGB visual data (common in game engines/packed textures).
-/// Processes sequentially to leverage CPU SIMD auto-vectorization on small sized blocks.
+/// Processes sequentially to leverage CPU SIMD auto-vectorization on small-sized blocks.
 pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
     let pixels = rgba.as_raw();
 
@@ -57,8 +57,8 @@ pub fn preprocess_image_channels(
             let mut min_val = 255u8;
             let mut max_val = 0u8;
 
-            // Stream pixels linearly into flat memory avoiding coordinates multiplication overhead
-            for pixel in rgba_img.pixels() {
+            // Stream pixels linearly from raw flat memory slice to avoid pixel-iter overhead
+            for pixel in rgba_img.as_raw().chunks_exact(4) {
                 let v = pixel[idx];
                 min_val = min_val.min(v);
                 max_val = max_val.max(v);
@@ -77,13 +77,20 @@ pub fn preprocess_image_channels(
                 DynamicImage::ImageRgb8(img.to_rgb8())
             } else {
                 let mut bg = RgbaImage::new(rgba_img.width(), rgba_img.height());
-                for (x, y, pixel) in rgba_img.enumerate_pixels() {
-                    let alpha = pixel[3] as f32 / 255.0;
-                    let r = (pixel[0] as f32 * alpha) as u8;
-                    let g = (pixel[1] as f32 * alpha) as u8;
-                    let b = (pixel[2] as f32 * alpha) as u8;
-                    bg.put_pixel(x, y, image::Rgba([r, g, b, 255]));
-                }
+
+                // Simplified assignment leveraging auto-deref coercion to prevent Clippy warnings
+                let bg_slice: &mut [u8] = &mut bg;
+                bg_slice
+                    .chunks_exact_mut(4)
+                    .zip(rgba_img.as_raw().chunks_exact(4))
+                    .for_each(|(dst, src)| {
+                        let alpha = src[3] as f32 / 255.0;
+                        dst[0] = (src[0] as f32 * alpha) as u8;
+                        dst[1] = (src[1] as f32 * alpha) as u8;
+                        dst[2] = (src[2] as f32 * alpha) as u8;
+                        dst[3] = 255;
+                    });
+
                 DynamicImage::ImageRgba8(bg)
             }
         }
@@ -106,7 +113,7 @@ pub fn calculate_perceptual_hash(
     let processed_image =
         preprocess_image_channels(&resized_img, analysis_type, ignore_solid_channels)?;
 
-    // Only compute the gradient hash (dHash) as phash is unused dead code
+    // Compute gradient hash (dHash) exclusively; phash remains unused
     let dhash_result = HasherConfig::new()
         .hash_alg(HashAlg::Gradient)
         .hash_size(8, 8)

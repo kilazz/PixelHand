@@ -13,7 +13,12 @@ import {
     CheckBox,
 } from "std-widgets.slint";
 
-import { ResultsRow, SelectedFile, GridRow } from "../structs.slint";
+import {
+    ResultsRow,
+    SelectedFile,
+    GridRow,
+    SearchMethod,
+} from "../structs.slint";
 import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
 import {
     TabButton,
@@ -93,7 +98,7 @@ export component FindTab inherits HorizontalLayout {
                     }
 
                     ComboBox {
-                        model: ScanConfig.search_method == 3 ? ["By Format Type", "By Size on Disk", "By Filename"] : ["By Duplicate Count", "By Size on Disk", "By Filename"];
+                        model: ScanConfig.search_method == SearchMethod.inventory ? ["By Format Type", "By Size on Disk", "By Filename"] : ["By Duplicate Count", "By Size on Disk", "By Filename"];
                         current-index <=> ScanConfig.results_sort_index;
                         height: 24px;
                         width: 145px;
@@ -135,7 +140,7 @@ export component FindTab inherits HorizontalLayout {
                         clicked => { Diagnostics.export_csv(); }
                     }
 
-                    if ScanConfig.search_method == 2: HorizontalLayout {
+                    if ScanConfig.search_method == SearchMethod.ai: HorizontalLayout {
                         spacing: 6px;
                         Text {
                             text: "Min Sim:";

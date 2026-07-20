@@ -2,35 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Strongly typed Enum for supported AI architectures.
-/// Eliminates "magic numbers" across the codebase.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum AiModelType {
-    ClipVitB32 = 0,
-    ClipVitL14 = 1,
-    SiglipBase = 2,
-    SiglipLarge = 3,
-    DinoV2Base = 4,
-    Siglip2Base = 5,
-    Llm2ClipBase = 6,
-    Custom = 7,
-}
+// Import the Slint-compiled typed enums to completely eliminate duplicate logic and magic numbers!
+pub use crate::app::{AiModelType, ExecutionProvider, SearchMethod};
 
 impl AiModelType {
-    /// Maps a raw integer index from the Slint ComboBox to the strong Enum type.
-    pub fn from_i32(val: i32) -> Self {
-        match val {
-            1 => Self::ClipVitL14,
-            2 => Self::SiglipBase,
-            3 => Self::SiglipLarge,
-            4 => Self::DinoV2Base,
-            5 => Self::Siglip2Base,
-            6 => Self::Llm2ClipBase,
-            7 => Self::Custom,
-            _ => Self::ClipVitB32,
-        }
-    }
-
     /// Returns the standard caching folder name for the model weights.
     pub fn folder_name(&self) -> &'static str {
         match self {
@@ -57,31 +32,7 @@ impl AiModelType {
     }
 }
 
-/// Strongly typed Enum for the selected search methodology.
-/// Eliminates raw integer indexing magic numbers like 0, 1, 2, 3, 4.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SearchMethod {
-    Exact = 0,
-    Perceptual = 1,
-    Ai = 2,
-    Inventory = 3,
-    Qc = 4,
-}
-
-impl SearchMethod {
-    /// Maps a raw integer index from the Slint ComboBox to the strong Enum type.
-    pub fn from_i32(val: i32) -> Self {
-        match val {
-            1 => Self::Perceptual,
-            2 => Self::Ai,
-            3 => Self::Inventory,
-            4 => Self::Qc,
-            _ => Self::Exact,
-        }
-    }
-}
-
-/// Strongly-typed sorting columns to replace magic strings.
+// Strongly-typed sorting columns to replace magic strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortColumn {
     Name,
@@ -132,8 +83,8 @@ pub struct AppSettings {
     // Global scanning parameters
     pub similarity_threshold: f32,
     pub batch_size: i32,
-    pub search_method: i32,
-    pub execution_provider: i32,
+    pub search_method: SearchMethod,
+    pub execution_provider: ExecutionProvider,
     pub search_precision: i32,
 }
 
@@ -204,7 +155,7 @@ impl Default for AppSettings {
                 qc_check_compression: true,
             },
             ai: crate::app::AiSettings {
-                ai_model: 0,
+                ai_model: AiModelType::ClipVitB32,
                 custom_model_path: "".into(),
                 custom_model_arch: 0,
                 custom_model_dim: 512,
@@ -237,8 +188,8 @@ impl Default for AppSettings {
             },
             similarity_threshold: 90.0,
             batch_size: 128,
-            search_method: 0,
-            execution_provider: 0,
+            search_method: SearchMethod::Exact,
+            execution_provider: ExecutionProvider::Cpu,
             search_precision: 1,
         }
     }

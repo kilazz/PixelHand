@@ -30,15 +30,23 @@ impl AppController {
         })
     }
 
+    /// Central callback registration dispatcher.
     pub fn register_callbacks(self: &Arc<Self>) {
         let ui = self
             .ui_weak
             .upgrade()
             .expect("Failed to bind callbacks: AppWindow is dead");
 
-        // ---------------------------------------------------------
-        // 1. SCANCONFIG SINGLETON BINDINGS
-        // ---------------------------------------------------------
+        self.register_scan_config_callbacks(&ui);
+        self.register_viewport_state_callbacks(&ui);
+        self.register_diagnostics_callbacks(&ui);
+    }
+
+    // ---------------------------------------------------------
+    // --- DECOMPOSED REGISTRATION HELPERS ---------------------
+    // ---------------------------------------------------------
+
+    fn register_scan_config_callbacks(self: &Arc<Self>, ui: &AppWindow) {
         let scan_config = ui.global::<ScanConfig>();
 
         let self_clone = self.clone();
@@ -145,10 +153,9 @@ impl AppController {
         scan_config.on_save_settings(move || {
             self_clone.save_settings();
         });
+    }
 
-        // ---------------------------------------------------------
-        // 2. VIEWPORTSTATE SINGLETON BINDINGS
-        // ---------------------------------------------------------
+    fn register_viewport_state_callbacks(self: &Arc<Self>, ui: &AppWindow) {
         let viewport_state = ui.global::<ViewportState>();
 
         let self_clone = self.clone();
@@ -180,10 +187,9 @@ impl AppController {
         viewport_state.on_tonemap_toggled(move || {
             self_clone.tonemap_toggled();
         });
+    }
 
-        // ---------------------------------------------------------
-        // 3. DIAGNOSTICS SINGLETON BINDINGS
-        // ---------------------------------------------------------
+    fn register_diagnostics_callbacks(self: &Arc<Self>, ui: &AppWindow) {
         let diagnostics = ui.global::<Diagnostics>();
 
         let self_clone = self.clone();
@@ -207,9 +213,103 @@ impl AppController {
         });
     }
 
-    // =========================================================
+    // ---------------------------------------------------------
+    // --- PRIVATE SORTING HELPERS -----------------------------
+    // ---------------------------------------------------------
+
+    fn compare_duplicate_files(
+        &self,
+        col: SortColumn,
+        a: &crate::state::DuplicateFileSummary,
+        b: &crate::state::DuplicateFileSummary,
+        asc: bool,
+    ) -> std::cmp::Ordering {
+        let order = match col {
+            SortColumn::Name | SortColumn::Path => {
+                a.path.to_lowercase().cmp(&b.path.to_lowercase())
+            }
+            SortColumn::Size => a.size.cmp(&b.size),
+            SortColumn::Score => a
+                .similarity
+                .partial_cmp(&b.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            _ => std::cmp::Ordering::Equal,
+        };
+        if asc { order } else { order.reverse() }
+    }
+
+    fn compare_duplicate_groups(
+        &self,
+        col: SortColumn,
+        a: &crate::state::DuplicateGroupSummary,
+        b: &crate::state::DuplicateGroupSummary,
+        asc: bool,
+    ) -> std::cmp::Ordering {
+        let order = match col {
+            SortColumn::Name | SortColumn::Path => {
+                let p_a = a
+                    .files
+                    .first()
+                    .map(|f| f.path.to_lowercase())
+                    .unwrap_or_default();
+                let p_b = b
+                    .files
+                    .first()
+                    .map(|f| f.path.to_lowercase())
+                    .unwrap_or_default();
+                p_a.cmp(&p_b)
+            }
+            SortColumn::Size => {
+                let s_a = a.files.first().map(|f| f.size).unwrap_or(0);
+                let s_b = b.files.first().map(|f| f.size).unwrap_or(0);
+                s_a.cmp(&s_b)
+            }
+            SortColumn::Score => {
+                let sim_a = a.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
+                let sim_b = b.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
+                sim_a
+                    .partial_cmp(&sim_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            }
+            _ => std::cmp::Ordering::Equal,
+        };
+        if asc { order } else { order.reverse() }
+    }
+
+    fn compare_results_rows(
+        &self,
+        col: SortColumn,
+        a: &crate::state::ResultsRowData,
+        b: &crate::state::ResultsRowData,
+        asc: bool,
+    ) -> std::cmp::Ordering {
+        let order = match col {
+            SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            SortColumn::Format => a
+                .format_str
+                .to_lowercase()
+                .cmp(&b.format_str.to_lowercase()),
+            SortColumn::Dimensions => a.pixels_count.cmp(&b.pixels_count),
+            SortColumn::Mipmaps => {
+                let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
+                let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
+                m_a.cmp(&m_b)
+            }
+            SortColumn::Cubemap => a.cubemap_str.cmp(&b.cubemap_str),
+            SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
+            SortColumn::Path => a.path.to_lowercase().cmp(&b.path.to_lowercase()),
+            SortColumn::Score => a
+                .similarity
+                .partial_cmp(&b.similarity)
+                .unwrap_or(std::cmp::Ordering::Equal),
+            _ => std::cmp::Ordering::Equal,
+        };
+        if asc { order } else { order.reverse() }
+    }
+
+    // ---------------------------------------------------------
     // --- PRIVATE IMPLEMENTATION METHODS ----------------------
-    // =========================================================
+    // ---------------------------------------------------------
 
     fn select_folder_a(&self) {
         if let Some(folder) = rfd::FileDialog::new()
@@ -261,7 +361,7 @@ impl AppController {
                 let mut paths = scan_config.get_paths();
                 paths.query_text = path_str.into();
                 scan_config.set_paths(paths);
-                scan_config.set_search_method(2); // AI Mode
+                scan_config.set_search_method(SearchMethod::Ai); // Configured directly with typed Slint Enum
                 utils::settings::save_settings(&scan_config, &ui.global::<ViewportState>());
             }
         }
@@ -430,6 +530,7 @@ impl AppController {
 
         tokio::spawn(async move {
             let (checked_files, pairs) = {
+                // Keep the Mutex lock brief to avoid starvation or thread contention during I/O
                 let lock = state_clone.lock();
                 utils::fs::extract_selected_files(&lock)
             };
@@ -668,81 +769,20 @@ impl AppController {
             for group in &mut lock.groups {
                 if group.files.len() > 1 {
                     let (_, duplicates) = group.files.split_at_mut(1);
-                    duplicates.sort_by(|a, b| {
-                        let order = match col_type {
-                            SortColumn::Name | SortColumn::Path => {
-                                a.path.to_lowercase().cmp(&b.path.to_lowercase())
-                            }
-                            SortColumn::Size => a.size.cmp(&b.size),
-                            SortColumn::Score => a
-                                .similarity
-                                .partial_cmp(&b.similarity)
-                                .unwrap_or(std::cmp::Ordering::Equal),
-                            _ => std::cmp::Ordering::Equal,
-                        };
-                        if asc { order } else { order.reverse() }
-                    });
+                    // Deduplicated: sorting of duplicate items inside groups
+                    duplicates.sort_by(|a, b| self.compare_duplicate_files(col_type, a, b, asc));
                 }
             }
 
-            lock.groups.sort_by(|a, b| {
-                let order = match col_type {
-                    SortColumn::Name | SortColumn::Path => {
-                        let p_a = a
-                            .files
-                            .first()
-                            .map(|f| f.path.to_lowercase())
-                            .unwrap_or_default();
-                        let p_b = b
-                            .files
-                            .first()
-                            .map(|f| f.path.to_lowercase())
-                            .unwrap_or_default();
-                        p_a.cmp(&p_b)
-                    }
-                    SortColumn::Size => {
-                        let s_a = a.files.first().map(|f| f.size).unwrap_or(0);
-                        let s_b = b.files.first().map(|f| f.size).unwrap_or(0);
-                        s_a.cmp(&s_b)
-                    }
-                    SortColumn::Score => {
-                        let sim_a = a.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
-                        let sim_b = b.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
-                        sim_a
-                            .partial_cmp(&sim_b)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    }
-                    _ => std::cmp::Ordering::Equal,
-                };
-                if asc { order } else { order.reverse() }
-            });
+            // Deduplicated: sorting of duplicate groups
+            lock.groups
+                .sort_by(|a, b| self.compare_duplicate_groups(col_type, a, b, asc));
 
             lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
         } else if !lock.results.is_empty() {
-            lock.results.sort_by(|a, b| {
-                let order = match col_type {
-                    SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-                    SortColumn::Format => a
-                        .format_str
-                        .to_lowercase()
-                        .cmp(&b.format_str.to_lowercase()),
-                    SortColumn::Dimensions => a.pixels_count.cmp(&b.pixels_count),
-                    SortColumn::Mipmaps => {
-                        let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
-                        let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
-                        m_a.cmp(&m_b)
-                    }
-                    SortColumn::Cubemap => a.cubemap_str.cmp(&b.cubemap_str),
-                    SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
-                    SortColumn::Path => a.path.to_lowercase().cmp(&b.path.to_lowercase()),
-                    SortColumn::Score => a
-                        .similarity
-                        .partial_cmp(&b.similarity)
-                        .unwrap_or(std::cmp::Ordering::Equal),
-                    _ => std::cmp::Ordering::Equal,
-                };
-                if asc { order } else { order.reverse() }
-            });
+            // Deduplicated: sorting of results rows in flat list mode
+            lock.results
+                .sort_by(|a, b| self.compare_results_rows(col_type, a, b, asc));
         }
 
         if let Some(ui) = self.ui_weak.upgrade() {
@@ -951,6 +991,7 @@ impl AppController {
                 let channel_img = cached_thumb.get_channel(&channel_std);
 
                 {
+                    // Confining the Mutex lock strictly to the index-insertion logic to avoid long lockups
                     let mut lock = state_clone.lock();
                     if let Some(&idx) = lock.path_to_idx.get(&normalized_path_fs) {
                         lock.results[idx].thumbnail_data = Some(channel_img.clone());
@@ -1012,13 +1053,6 @@ impl AppController {
             let viewport_state = ui.global::<ViewportState>();
 
             utils::settings::save_settings(&scan_config, &viewport_state);
-
-            crate::app::update_viewer_settings(|s| {
-                let tonemap = viewport_state.get_tonemap();
-                s.tonemap_enabled = tonemap.tonemap_enabled;
-                s.auto_exposure_enabled = tonemap.tonemap_auto_exposure;
-                s.tonemap_operator = tonemap.tonemap_operator as usize;
-            });
 
             let manager = crate::utils::cache::get_cache_manager();
             manager.decoded_images.invalidate_all();

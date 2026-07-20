@@ -1,5 +1,6 @@
 // ui/components/table_header.slint
 
+import { SearchMethod } from "../structs.slint";
 import { ScanConfig } from "../store.slint";
 
 export component TableHeader inherits Rectangle {
@@ -41,7 +42,7 @@ export component TableHeader inherits Rectangle {
             }
         }
 
-        if ScanConfig.search_method != 3: HorizontalLayout {
+        if ScanConfig.search_method != SearchMethod.inventory: HorizontalLayout {
             spacing: 0px;
             HorizontalLayout {
                 width: ScanConfig.col_score_w;
@@ -109,7 +110,7 @@ export component TableHeader inherits Rectangle {
             }
         }
 
-        if ScanConfig.search_method == 3: HorizontalLayout {
+        if ScanConfig.search_method == SearchMethod.inventory: HorizontalLayout {
             spacing: 0px;
             HorizontalLayout {
                 width: ScanConfig.col_format_w;

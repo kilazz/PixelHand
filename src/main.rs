@@ -70,13 +70,9 @@ fn setup_panic_hook() {
 async fn main() -> Result<()> {
     setup_panic_hook();
 
-    // Mute loud ONNX Runtime logging warnings (CPU fallbacks, DirectML diagnostic hints)
-    // std::env::set_var is unsafe starting from Rust 1.81.0 due to multi-threading safety guarantees.
-    // We safely execute this on the main thread at early startup before spawning any pools.
-    unsafe {
-        env::set_var("ORT_LOGGING_LEVEL", "WARNING");
-        env::set_var("ORT_LOG_LEVEL", "WARNING");
-    }
+    // Safely initialize the global ONNX Runtime environment process-wide.
+    // This replaces unsafe environment variable modification (which is unsafe in multi-threaded contexts).
+    let _ = ort::init().with_name("PixelHand").commit();
 
     let args: Vec<String> = env::args().collect();
 

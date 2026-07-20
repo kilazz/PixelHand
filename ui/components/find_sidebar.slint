@@ -9,6 +9,7 @@ import {
     SpinBox,
 } from "std-widgets.slint";
 import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
+import { SearchMethod, ExecutionProvider, AiModelType } from "../structs.slint";
 import { PanelSection, FormRow } from "./common.slint";
 import { CustomButton, ChannelButton } from "./buttons.slint";
 
@@ -41,10 +42,18 @@ export component FindSidebar inherits Rectangle {
                             "Asset Inventory (Detailed Audit)",
                             "Technical QC Audit"
                         ];
-                        current-index <=> ScanConfig.search_method;
+                        current-index: ScanConfig.search_method == SearchMethod.exact ? 0 : (
+                            ScanConfig.search_method == SearchMethod.perceptual ? 1 : (
+                            ScanConfig.search_method == SearchMethod.ai ? 2 : (
+                            ScanConfig.search_method == SearchMethod.inventory ? 3 : 4)));
                         height: 32px;
                         selected(val) => {
-                            ScanConfig.qc.qc_mode = ScanConfig.search_method == 4;
+                            if (self.current-index == 0) { ScanConfig.search_method = SearchMethod.exact; }
+                            else if (self.current-index == 1) { ScanConfig.search_method = SearchMethod.perceptual; }
+                            else if (self.current-index == 2) { ScanConfig.search_method = SearchMethod.ai; }
+                            else if (self.current-index == 3) { ScanConfig.search_method = SearchMethod.inventory; }
+                            else if (self.current-index == 4) { ScanConfig.search_method = SearchMethod.qc; }
+                            ScanConfig.qc.qc_mode = ScanConfig.search_method == SearchMethod.qc;
                             ScanConfig.save_settings();
                         }
                     }
@@ -74,7 +83,7 @@ export component FindSidebar inherits Rectangle {
                             }
                         }
 
-                        if ScanConfig.search_method == 4: FormRow {
+                        if ScanConfig.search_method == SearchMethod.qc: FormRow {
                             title: "Folder B:";
                             HorizontalLayout {
                                 spacing: 4px;
@@ -120,12 +129,12 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
 
-                if ScanConfig.search_method == 0 || ScanConfig.search_method == 1: PanelSection {
+                if ScanConfig.search_method == SearchMethod.exact || ScanConfig.search_method == SearchMethod.perceptual: PanelSection {
                     title: "Duplicates Finder Options";
                     VerticalLayout {
                         spacing: 4px;
 
-                        if ScanConfig.search_method == 1: FormRow {
+                        if ScanConfig.search_method == SearchMethod.perceptual: FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
                                 spacing: 6px;
@@ -239,19 +248,19 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
                         }
-                        if ScanConfig.search_method == 1: CheckBox {
+                        if ScanConfig.search_method == SearchMethod.perceptual: CheckBox {
                             text: "Compare by luminance only";
                             checked <=> ScanConfig.prep.prep_luminance;
                             height: 20px;
                             toggled => { ScanConfig.save_settings(); }
                         }
-                        if ScanConfig.search_method == 1: CheckBox {
+                        if ScanConfig.search_method == SearchMethod.perceptual: CheckBox {
                             text: "Compare by specific channels";
                             checked <=> ScanConfig.prep.prep_channels;
                             height: 20px;
                             toggled => { ScanConfig.save_settings(); }
                         }
-                        if ScanConfig.search_method == 1 && ScanConfig.prep.prep_channels: VerticalLayout {
+                        if ScanConfig.search_method == SearchMethod.perceptual && ScanConfig.prep.prep_channels: VerticalLayout {
                             spacing: 4px;
                             padding-left: 12px;
                             FormRow {
@@ -312,7 +321,7 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
 
-                if ScanConfig.search_method == 2: PanelSection {
+                if ScanConfig.search_method == SearchMethod.ai: PanelSection {
                     title: "AI Semantic Search Options";
                     VerticalLayout {
                         spacing: 4px;
@@ -323,8 +332,8 @@ export component FindSidebar inherits Rectangle {
                                 LineEdit {
                                     text <=> ScanConfig.paths.query_text;
                                     height: 32px;
-                                    placeholder-text: ScanConfig.ai.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
-                                    enabled: ScanConfig.ai.ai_model != 4;
+                                    placeholder-text: ScanConfig.ai.ai_model == AiModelType.dino-v2-base ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                    enabled: ScanConfig.ai.ai_model != AiModelType.dino-v2-base;
                                     edited => { ScanConfig.save_settings(); }
                                 }
 
@@ -333,7 +342,7 @@ export component FindSidebar inherits Rectangle {
                                     icon-type: 1;
                                     width: 32px;
                                     height: 32px;
-                                    enabled: ScanConfig.ai.ai_model != 4;
+                                    enabled: ScanConfig.ai.ai_model != AiModelType.dino-v2-base;
                                     clicked => { ScanConfig.select_reference_image(); }
                                 }
                             }
@@ -374,13 +383,29 @@ export component FindSidebar inherits Rectangle {
                                     "LLM2CLIP OpenAI-B-16",
                                     "Custom (Local ONNX)"
                                 ];
-                                current-index <=> ScanConfig.ai.ai_model;
+                                current-index: ScanConfig.ai.ai_model == AiModelType.clip-vit-b32 ? 0 : (
+                                    ScanConfig.ai.ai_model == AiModelType.clip-vit-l14 ? 1 : (
+                                    ScanConfig.ai.ai_model == AiModelType.siglip-base ? 2 : (
+                                    ScanConfig.ai.ai_model == AiModelType.siglip-large ? 3 : (
+                                    ScanConfig.ai.ai_model == AiModelType.dino-v2-base ? 4 : (
+                                    ScanConfig.ai.ai_model == AiModelType.siglip2-base ? 5 : (
+                                    ScanConfig.ai.ai_model == AiModelType.llm2-clip-base ? 6 : 7))))));
                                 height: 32px;
-                                selected(val) => { ScanConfig.save_settings(); }
+                                selected(val) => {
+                                    if (self.current-index == 0) { ScanConfig.ai.ai_model = AiModelType.clip-vit-b32; }
+                                    else if (self.current-index == 1) { ScanConfig.ai.ai_model = AiModelType.clip-vit-l14; }
+                                    else if (self.current-index == 2) { ScanConfig.ai.ai_model = AiModelType.siglip-base; }
+                                    else if (self.current-index == 3) { ScanConfig.ai.ai_model = AiModelType.siglip-large; }
+                                    else if (self.current-index == 4) { ScanConfig.ai.ai_model = AiModelType.dino-v2-base; }
+                                    else if (self.current-index == 5) { ScanConfig.ai.ai_model = AiModelType.siglip2-base; }
+                                    else if (self.current-index == 6) { ScanConfig.ai.ai_model = AiModelType.llm2-clip-base; }
+                                    else if (self.current-index == 7) { ScanConfig.ai.ai_model = AiModelType.custom; }
+                                    ScanConfig.save_settings();
+                                }
                             }
                         }
 
-                        if ScanConfig.ai.ai_model == 7: VerticalLayout {
+                        if ScanConfig.ai.ai_model == AiModelType.custom: VerticalLayout {
                             spacing: 4px;
                             FormRow {
                                 title: "Local Path:";
@@ -531,7 +556,7 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
 
-                if ScanConfig.search_method == 4: PanelSection {
+                if ScanConfig.search_method == SearchMethod.qc: PanelSection {
                     title: "QC Criteria List";
                     VerticalLayout {
                         spacing: 6px;
@@ -667,7 +692,7 @@ export component FindSidebar inherits Rectangle {
                             spacing: 4px;
                             padding-top: 6px;
 
-                            if ScanConfig.search_method == 2: FormRow {
+                            if ScanConfig.search_method == SearchMethod.ai: FormRow {
                                 title: "Batch Size:";
                                 SpinBox {
                                     value <=> ScanConfig.batch_size;
@@ -678,7 +703,7 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            if ScanConfig.search_method == 2: FormRow {
+                            if ScanConfig.search_method == SearchMethod.ai: FormRow {
                                 title: "LanceDB Prec:";
                                 ComboBox {
                                     model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
@@ -688,13 +713,23 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            if ScanConfig.search_method == 2: FormRow {
+                            if ScanConfig.search_method == SearchMethod.ai: FormRow {
                                 title: "Provider:";
                                 ComboBox {
                                     model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
-                                    current-index <=> ScanConfig.execution_provider;
+                                    current-index: ScanConfig.execution_provider == ExecutionProvider.cpu ? 0 : (
+                                        ScanConfig.execution_provider == ExecutionProvider.direct-ml ? 1 : (
+                                        ScanConfig.execution_provider == ExecutionProvider.cuda ? 2 : (
+                                        ScanConfig.execution_provider == ExecutionProvider.tensor-rt ? 3 : 4)));
                                     height: 32px;
-                                    selected(val) => { ScanConfig.save_settings(); }
+                                    selected(val) => {
+                                        if (self.current-index == 0) { ScanConfig.execution_provider = ExecutionProvider.cpu; }
+                                        else if (self.current-index == 1) { ScanConfig.execution_provider = ExecutionProvider.direct-ml; }
+                                        else if (self.current-index == 2) { ScanConfig.execution_provider = ExecutionProvider.cuda; }
+                                        else if (self.current-index == 3) { ScanConfig.execution_provider = ExecutionProvider.tensor-rt; }
+                                        else if (self.current-index == 4) { ScanConfig.execution_provider = ExecutionProvider.core-ml; }
+                                        ScanConfig.save_settings();
+                                    }
                                 }
                             }
 

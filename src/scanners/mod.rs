@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
-use crate::state::models::{AiModelType, SearchMethod};
+use crate::state::models::{AiModelType, ExecutionProvider, SearchMethod};
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
@@ -167,12 +167,13 @@ impl ScanParams {
             extensions.push(".avif".to_string());
         }
 
+        // Strongly-typed execution provider mapping from Slint Enum
         let execution_provider = match scan_config.get_execution_provider() {
-            1 => "DirectML".to_string(),
-            2 => "CUDA".to_string(),
-            3 => "TensorRT".to_string(),
-            4 => "CoreML".to_string(),
-            _ => "CPU".to_string(),
+            ExecutionProvider::DirectMl => "DirectML".to_string(),
+            ExecutionProvider::Cuda => "CUDA".to_string(),
+            ExecutionProvider::TensorRt => "TensorRT".to_string(),
+            ExecutionProvider::CoreMl => "CoreML".to_string(),
+            ExecutionProvider::Cpu => "CPU".to_string(),
         };
 
         Self {
@@ -183,7 +184,7 @@ impl ScanParams {
                 excluded_folders: paths.excluded_folders.to_string(),
             },
             qc: ScanQcRules {
-                qc_mode: scan_config.get_search_method() == 4,
+                qc_mode: scan_config.get_search_method() == SearchMethod::Qc,
                 qc_npot: qc.qc_npot,
                 qc_mipmaps: qc.qc_mipmaps,
                 qc_block_align: qc.qc_block_align,
@@ -217,7 +218,7 @@ impl ScanParams {
             },
             ai: ScanAiSettings {
                 search_precision: scan_config.get_search_precision(),
-                ai_model: AiModelType::from_i32(ai.ai_model),
+                ai_model: ai.ai_model,
                 custom_model_path: ai.custom_model_path.to_string(),
                 custom_model_arch: ai.custom_model_arch,
                 custom_model_dim: ai.custom_model_dim,
@@ -225,7 +226,7 @@ impl ScanParams {
 
             similarity: scan_config.get_similarity_threshold(),
             batch_size: scan_config.get_batch_size() as usize,
-            search_method: SearchMethod::from_i32(scan_config.get_search_method()),
+            search_method: scan_config.get_search_method(),
             execution_provider,
             extensions,
             cancel_token,
@@ -473,35 +474,13 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
         // Add Group Cluster Header row
         rows.push(ResultsRowData {
             is_header: true,
-            is_qc: false,
-            is_ai: false,
             group_index: g_idx as i32,
             hash_or_issue: group.hash.clone(),
-            path: String::new(),
-            name: String::new(),
-            score_or_detail: String::new(),
-
-            format_str: String::new(),
-            dimensions_str: String::new(),
-            mipmaps_str: String::new(),
-            cubemap_str: String::new(),
-
             size_str: crate::utils::helpers::format_size(
                 group.files.first().map(|f| f.size).unwrap_or(0),
             ),
-            meta_str: String::new(),
-            is_best: false,
-            is_checked: false,
-            thumbnail_data: None,
             similarity: 100.0,
-
-            size_bytes: 0,
-            pixels_count: 0,
-
-            is_npot: false,
-            is_uncompressed: false,
-            is_missing_mips: false,
-            is_cubemap_bool: false,
+            ..Default::default()
         });
 
         // Add Child file rows belonging to this cluster
@@ -510,11 +489,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             let thumbnail_data = load_thumbnail_for_path(&file.path);
 
             rows.push(ResultsRowData {
-                is_header: false,
-                is_qc: false,
-                is_ai: false,
                 group_index: g_idx as i32,
-                hash_or_issue: String::new(),
                 path: file.path.clone(),
                 name: Path::new(&file.path)
                     .file_name()
@@ -553,7 +528,6 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
                     )
                 },
                 is_best,
-                is_checked: false,
                 thumbnail_data,
                 similarity: file.similarity,
 
@@ -567,6 +541,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
                     .contains("uncompressed"),
                 is_missing_mips: file.mipmap_count <= 1,
                 is_cubemap_bool: file.is_cubemap,
+                ..Default::default()
             });
         }
     }
@@ -596,41 +571,17 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
         rows.push(ResultsRowData {
             is_header: true,
             is_qc: true,
-            is_ai: false,
             group_index: g_idx as i32,
             hash_or_issue: issue_type.clone(),
-            path: String::new(),
-            name: String::new(),
-            score_or_detail: String::new(),
-
-            format_str: String::new(),
-            dimensions_str: String::new(),
-            mipmaps_str: String::new(),
-            cubemap_str: String::new(),
-
             size_str: format!("{} files", group_issues.len()),
-            meta_str: String::new(),
-            is_best: false,
-            is_checked: false,
-            thumbnail_data: None,
-            similarity: 0.0,
-
-            size_bytes: 0,
-            pixels_count: 0,
-
-            is_npot: false,
-            is_uncompressed: false,
-            is_missing_mips: false,
-            is_cubemap_bool: false,
+            ..Default::default()
         });
 
         // Add Child Rows belonging to this issue category
         for issue in group_issues {
             let thumbnail_data = load_thumbnail_for_path(&issue.path);
             rows.push(ResultsRowData {
-                is_header: false,
                 is_qc: true,
-                is_ai: false,
                 group_index: g_idx as i32,
                 hash_or_issue: issue.issue.clone(),
                 path: issue.path.clone(),
@@ -640,26 +591,9 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
                     .to_string_lossy()
                     .into_owned(),
                 score_or_detail: issue.issue.clone(),
-
-                format_str: String::new(),
-                dimensions_str: String::new(),
-                mipmaps_str: String::new(),
-                cubemap_str: String::new(),
-
-                size_str: String::new(),
                 meta_str: issue.details.clone(),
-                is_best: false,
-                is_checked: false,
                 thumbnail_data,
-                similarity: 0.0,
-
-                size_bytes: 0,
-                pixels_count: 0,
-
-                is_npot: false,
-                is_uncompressed: false,
-                is_missing_mips: false,
-                is_cubemap_bool: false,
+                ..Default::default()
             });
         }
     }
@@ -674,11 +608,8 @@ pub fn map_ai_search_to_rows(
     matches
         .iter()
         .map(|res| ResultsRowData {
-            is_header: false,
-            is_qc: false,
             is_ai: true,
             group_index: -1,
-            hash_or_issue: String::new(),
             path: res.path.clone(),
             name: Path::new(&res.path)
                 .file_name()
@@ -686,22 +617,9 @@ pub fn map_ai_search_to_rows(
                 .to_string_lossy()
                 .into_owned(),
             score_or_detail: format!("{:.1}%", res.similarity),
-            format_str: String::new(),
-            dimensions_str: String::new(),
-            mipmaps_str: String::new(),
-            cubemap_str: String::new(),
-            size_str: String::new(),
-            meta_str: String::new(),
-            is_best: false,
-            is_checked: false,
             thumbnail_data: load_thumbnail_for_path(&res.path),
             similarity: res.similarity,
-            size_bytes: 0,
-            pixels_count: 0,
-            is_npot: false,
-            is_uncompressed: false,
-            is_missing_mips: false,
-            is_cubemap_bool: false,
+            ..Default::default()
         })
         .collect()
 }
