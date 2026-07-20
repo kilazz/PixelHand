@@ -24,7 +24,6 @@ memmap2 = "0.9.11"
 # Image Processing and Specialized Loaders
 image = { version = "0.25.10", features = ["png", "jpeg", "tga", "bmp", "tiff", "webp", "avif"] }
 exr = "1.74.2"
-ddsfile = "0.6.0"
 image_dds = { version = "0.7.2", features = ["image"] }
 imagesize = "0.14.0"
 psd = "0.3.5"
@@ -43,21 +42,15 @@ ort = { version = "2.0.0-rc.12", features = ["ndarray", "directml", "cuda", "ten
 ndarray = "0.17.2"
 tokenizers = "0.23.1"
 
-# Embedded Database and Arrow Format Structures
+# Embedded Database
 lancedb = "0.31.0"
-arrow = "59.1.0"
-arrow-array = "59.1.0"
-arrow-schema = "59.1.0"
 
 # Async and General Utilities
 futures = "0.3.33"
-futures-util = "0.3.33"
 tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "time"] }
-uuid = { version = "1.24.0", features = ["v4"] }
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls", "stream"] }
 trash = "5.2.6"
 rfd = "0.17.2"
-base64 = "0.22.1"
 reflink-copy = "0.1.30"
 open = "5.4.0"
 

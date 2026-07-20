@@ -118,6 +118,7 @@ export global Store {
     in-out property <int> search_method: 0; // 0: Exact, 1: Perceptual, 2: AI, 3: Inventory, 4: QC
     in-out property <int> execution_provider: 0; // 0: CPU, 1: DirectML, 2: CUDA, 3: TensorRT, 4: CoreML
     in-out property <int> search_precision: 1;
+    in-out property <bool> show_advanced: false;
 
     // ==========================================
     // --- RUNTIME STATE & DATA MODELS ----------
@@ -219,9 +220,6 @@ export global Store {
     in-out property <string> results_search_query: "";
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
-
-    // Advanced toggles
-    in-out property <bool> show_advanced: false;
 
     // Dynamic UI Columns Widths
     in-out property <length> col_file_w: 320px;

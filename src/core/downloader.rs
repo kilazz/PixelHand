@@ -1,7 +1,7 @@
 // src/core/downloader.rs
 
 use anyhow::{Context, Result};
-use futures_util::StreamExt;
+use futures::StreamExt;
 use reqwest::Client;
 use slint::ComponentHandle;
 use std::path::Path;
