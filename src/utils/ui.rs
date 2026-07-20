@@ -72,7 +72,6 @@ pub fn generate_histogram_image(
     let mut hist_orig = [0u32; 256];
     let mut hist_dup = [0u32; 256];
 
-    // Calculate luminance bins sequentially using Rec. 709 luma coefficients
     for p in orig.pixels() {
         let r = p[0] as f32;
         let g = p[1] as f32;
@@ -93,11 +92,9 @@ pub fn generate_histogram_image(
         }
     }
 
-    // Determine peaks for normalization
     let max_orig = *hist_orig.iter().max().unwrap_or(&1).max(&1) as f32;
     let max_dup = *hist_dup.iter().max().unwrap_or(&1).max(&1) as f32;
 
-    // Dark Slate canvas background
     let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([20, 20, 21, 255]));
 
     for x in 0..256 {
@@ -110,13 +107,10 @@ pub fn generate_histogram_image(
             let is_dup = y < val_dup;
 
             if is_orig && is_dup {
-                // Overlap: Blended Slate-purple
                 img.put_pixel(x as u32, inv_y, image::Rgba([140, 140, 180, 255]));
             } else if is_orig {
-                // Original: Cornflower Blue
                 img.put_pixel(x as u32, inv_y, image::Rgba([100, 149, 237, 255]));
             } else if is_dup {
-                // Duplicate: Golden Orange
                 img.put_pixel(x as u32, inv_y, image::Rgba([240, 177, 50, 255]));
             }
         }
@@ -139,12 +133,10 @@ pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
         path: slint::SharedString::from(&rd.path),
         name: slint::SharedString::from(&rd.name),
         score_or_detail: slint::SharedString::from(&rd.score_or_detail),
-
         format_str: slint::SharedString::from(&rd.format_str),
         dimensions_str: slint::SharedString::from(&rd.dimensions_str),
         mipmaps_str: slint::SharedString::from(&rd.mipmaps_str),
         cubemap_str: slint::SharedString::from(&rd.cubemap_str),
-
         size_str: slint::SharedString::from(&rd.size_str),
         meta_str: slint::SharedString::from(&rd.meta_str),
         is_best: rd.is_best,
@@ -153,25 +145,20 @@ pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
     }
 }
 
-/// Maps the visible row index selected in the Slint list back to its absolute index in the state vector.
+/// NEW: Returns the absolute vector index from visible Slint row offset in O(1)
 pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize> {
-    let mut current_visible = 0;
-    for (abs_idx, row) in state.results.iter().enumerate() {
-        if row.is_header || !state.collapsed_groups.contains(&row.group_index) {
-            if current_visible == visible_idx {
-                return Some(abs_idx);
-            }
-            current_visible += 1;
-        }
-    }
-    None
+    state.visible_to_abs.get(visible_idx).copied()
 }
 
 /// Synchronizes the active Slint list results and grid representations based on filters and collapse states.
-pub fn update_results_ui(store: &Store, state: &AppState) {
-    // Determine if there is actual scanned data (files or issues), ignoring pure headers
+/// NOW: Requires &mut AppState to rebuild lookup tables in a single transaction
+pub fn update_results_ui(store: &Store, state: &mut AppState) {
     let has_any = state.results.iter().any(|r| !r.is_header);
     store.set_has_results(has_any);
+
+    // Rebuild lookup tables and tracking vectors in one transaction
+    state.rebuild_path_to_idx();
+    state.visible_to_abs.clear();
 
     let search_query = store.get_results_search_query().to_string().to_lowercase();
     let min_sim = store.get_results_min_similarity();
@@ -187,7 +174,6 @@ pub fn update_results_ui(store: &Store, state: &AppState) {
         || filter_missing_mips
         || filter_cubemaps;
 
-    // Local filter evaluator to prevent duplicate validation logic
     let matches_filters = |row: &ResultsRowData| -> bool {
         let matches_query =
             search_query.is_empty() || row.name.to_lowercase().contains(&search_query);
@@ -203,7 +189,6 @@ pub fn update_results_ui(store: &Store, state: &AppState) {
             && matches_cubemaps
     };
 
-    // Prefilter groups to identify which headers contain visible elements
     let mut visible_groups = std::collections::HashSet::new();
     if has_filter {
         for row in &state.results {
@@ -216,40 +201,37 @@ pub fn update_results_ui(store: &Store, state: &AppState) {
     let mut slint_rows = Vec::with_capacity(state.results.len());
     let mut grid_items = Vec::new();
 
-    for row in &state.results {
-        // Skip entire duplicate clusters if none of their members conform to active filters
+    for (abs_idx, row) in state.results.iter().enumerate() {
         if has_filter && !visible_groups.contains(&row.group_index) {
             continue;
         }
-
         if !row.is_header && has_filter && !matches_filters(row) {
             continue;
         }
-
         if !row.is_header && !row.is_best && row.similarity > 0.0 && row.similarity < min_sim {
             continue;
         }
 
-        // Aggregate top-ranked group items for Grid presentations
         if !row.is_header && row.is_best {
             grid_items.push(convert_to_slint_row(row));
         }
 
-        // Standard List update processing collapsed headers
         if row.is_header {
             let mut slint_row = convert_to_slint_row(row);
             slint_row.is_checked = state.collapsed_groups.contains(&row.group_index);
             slint_rows.push(slint_row);
+
+            // Map index for visible list
+            state.visible_to_abs.push(abs_idx);
         } else if !state.collapsed_groups.contains(&row.group_index) {
             slint_rows.push(convert_to_slint_row(row));
+
+            // Map index for visible list
+            state.visible_to_abs.push(abs_idx);
         }
     }
 
-    // --- ADAPTIVE GRID COLUMNS ---
-    // Extract calculated responsive columns count from Slint Store property
     let cols = store.get_grid_columns().max(1) as usize;
-
-    // Chunk the flat grid_items list into rows dynamically to leverage native Slint ListView virtualization
     let mut grid_row_results = Vec::with_capacity(grid_items.len().div_ceil(cols));
     for chunk in grid_items.chunks(cols) {
         let row = GridRow {
@@ -262,7 +244,6 @@ pub fn update_results_ui(store: &Store, state: &AppState) {
     store.set_grid_row_results(ModelRc::from(Rc::new(VecModel::from(grid_row_results))));
 }
 
-/// Evaluates which radio/toggle channel matches active pixel viewport options.
 pub fn get_current_active_channel(store: &Store) -> &'static str {
     if store.get_active_r() {
         "R"
@@ -277,17 +258,7 @@ pub fn get_current_active_channel(store: &Store) -> &'static str {
     }
 }
 
-/// Applies selective checkbox operations across the results array.
 pub fn apply_selection_rule(state: &mut AppState, rule: &str) {
-    let mut visible_indices = Vec::new();
-
-    // Track visible non-header indices to restrict selection adjustments strictly to the visible list view state
-    for (abs_idx, row) in state.results.iter().enumerate() {
-        if !row.is_header && !state.collapsed_groups.contains(&row.group_index) {
-            visible_indices.push(abs_idx);
-        }
-    }
-
     match rule {
         "all" => {
             for row in &mut state.results {
@@ -321,19 +292,16 @@ pub fn apply_selection_rule(state: &mut AppState, rule: &str) {
     }
 }
 
-/// Constructs the detail panel SelectedFile metadata schema for Compare tab inspection.
 pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) -> SelectedFile {
     let name = Path::new(&file.path)
         .file_name()
         .unwrap_or_default()
         .to_string_lossy();
-
     let mipmaps_str = if file.mipmap_count <= 1 {
         "No".to_string()
     } else {
         file.mipmap_count.to_string()
     };
-
     let similarity_str = if is_original {
         "-".to_string()
     } else {
@@ -347,7 +315,6 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
         file.mipmap_count,
         file.is_cubemap,
     );
-
     let vram_formatted = crate::utils::helpers::format_size(vram);
     let file_size_formatted = crate::utils::helpers::format_size(file.size);
 
@@ -368,7 +335,6 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
     }
 }
 
-/// Extracts a specific frame from a spritesheet texture using grid subdivisions (columns and rows).
 pub fn slice_spritesheet_frame(
     img: &image::RgbaImage,
     cols: u32,
@@ -382,7 +348,6 @@ pub fn slice_spritesheet_frame(
 
     let original_width = img.width();
     let original_height = img.height();
-
     let sprite_w = original_width / cols;
     let sprite_h = original_height / rows;
 
@@ -393,19 +358,14 @@ pub fn slice_spritesheet_frame(
     let frame_x = (frame % cols) * sprite_w;
     let frame_y = (frame / cols) * sprite_h;
 
-    // Crops the frame cleanly without allocating any extra buffers
     image::imageops::crop_imm(img, frame_x, frame_y, sprite_w, sprite_h).to_image()
 }
 
-/// Simulates non-square pixels or customized aspect ratios by dynamically scaling the width.
 pub fn apply_aspect_ratio(img: &image::RgbaImage, ratio: f32) -> image::RgbaImage {
     if (ratio - 1.0).abs() < 1e-2 {
         return img.clone();
     }
-
     let new_w = (img.width() as f32 * ratio).max(1.0) as u32;
     let new_h = img.height();
-
-    // Uses fast triangle/bilinear resizing to simulate aspect ratios in real-time
     image::imageops::resize(img, new_w, new_h, image::imageops::FilterType::Triangle)
 }

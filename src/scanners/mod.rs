@@ -544,8 +544,9 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
     };
 
     // Fallback: Parse the actual texture and downscale
+    // Decoupled fix: Pass `None` since thumbnails use fast SDR scaling without loading UI contexts.
     if let Ok(mut img) =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(target_size))
+        crate::format_loaders::open_image_with_dds_fallback(&path, Some(target_size), None)
     {
         if img.width() > target_size || img.height() > target_size {
             img = img.resize(target_size, target_size, filter);
@@ -773,10 +774,9 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
 pub fn map_ai_search_to_rows(
     matches: &[crate::state::AiSearchResultSummary],
 ) -> Vec<ResultsRowData> {
-    let mut rows = Vec::new();
-    for res in matches {
-        let thumbnail_data = load_thumbnail_for_path(&res.path);
-        rows.push(ResultsRowData {
+    matches
+        .iter()
+        .map(|res| ResultsRowData {
             is_header: false,
             is_qc: false,
             is_ai: true,
@@ -789,27 +789,61 @@ pub fn map_ai_search_to_rows(
                 .to_string_lossy()
                 .into_owned(),
             score_or_detail: format!("{:.1}%", res.similarity),
-
             format_str: String::new(),
             dimensions_str: String::new(),
             mipmaps_str: String::new(),
             cubemap_str: String::new(),
-
             size_str: String::new(),
             meta_str: String::new(),
             is_best: false,
             is_checked: false,
-            thumbnail_data,
+            thumbnail_data: load_thumbnail_for_path(&res.path),
             similarity: res.similarity,
-
             size_bytes: 0,
             pixels_count: 0,
-
             is_npot: false,
             is_uncompressed: false,
             is_missing_mips: false,
             is_cubemap_bool: false,
-        });
+        })
+        .collect()
+}
+
+/// A unified pipeline for all scanners. Handles path validation, file discovery, filtering, and cancel token management.
+pub fn run_scan_pipeline<F, R>(params: &ScanParams, process_files: F) -> Result<R>
+where
+    F: FnOnce(
+        Vec<PathBuf>,
+        std::sync::Arc<std::sync::atomic::AtomicBool>,
+        std::sync::Arc<dyn Fn(f32, usize, usize) + Send + Sync>,
+    ) -> Result<R>,
+{
+    let path = PathBuf::from(&params.paths.dir_a);
+    if !path.is_dir() {
+        return Err(anyhow::anyhow!(
+            "The specified path is not a valid directory"
+        ));
     }
-    rows
+
+    let ex_folders: Vec<String> = params
+        .paths
+        .excluded_folders
+        .split(',')
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let (paths, warnings) =
+        crate::utils::helpers::discover_files(&path, &params.extensions, &ex_folders);
+    for warn in warnings {
+        crate::app::append_to_console_log(&warn);
+    }
+
+    let cancel_token = params.cancel_token.clone();
+
+    // Fallback to a dummy callback if no progress reporter is attached
+    let dummy_progress: Arc<dyn Fn(f32, usize, usize) + Send + Sync> = Arc::new(|_, _, _| {});
+    let progress_cb = params.on_progress.clone().unwrap_or(dummy_progress);
+
+    process_files(paths, cancel_token, progress_cb)
 }

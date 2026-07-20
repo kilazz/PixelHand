@@ -128,7 +128,8 @@ pub fn bind_scan_execution(
                         state_lock.groups = groups;
                         state_lock.results = rows;
 
-                        utils::ui::update_results_ui(&store, &state_lock);
+                        // Passed as mutable borrow to rebuild indices on finish
+                        utils::ui::update_results_ui(&store, &mut state_lock);
 
                         let msg = if params_for_task.visuals.save_visuals {
                             "Scan and visual reports finished successfully!"

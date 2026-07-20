@@ -103,9 +103,9 @@ pub fn calculate_perceptual_hashes(
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
 ) -> Option<PerceptualHashes> {
-    // Request a downscaled 128px mipmap during parsing to conserve CPU cycles and RAM
-    let img =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
+    // Request a downscaled 128px mipmap during parsing to conserve CPU cycles and RAM.
+    // Passed `None` for tonemap_config as perceptual hashing operates on raw/default SDR mapping.
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
 
     let processed_image =

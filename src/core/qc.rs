@@ -4,7 +4,6 @@ use std::fs;
 use std::path::Path;
 use thiserror::Error;
 
-/// Strongly typed errors for Quality Control operations.
 #[derive(Error, Debug)]
 pub enum QcError {
     #[error("Failed to read DDS file structure: {0}")]
@@ -15,11 +14,10 @@ pub enum QcError {
     ImageSizeError(#[from] imagesize::ImageError),
 }
 
-/// Represents the texture normal map encoding format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NormalMapFormat {
-    TangentSpaceRgb, // Standard TS (X in Red, Y in Green, Z in Blue)
-    Bc5RxGy,         // Two-channel (Z is reconstructed on the GPU: Z = sqrt(1 - X^2 - Y^2))
+    TangentSpaceRgb,
+    Bc5RxGy,
 }
 
 #[derive(Debug, Clone)]
@@ -38,8 +36,6 @@ pub struct QcImageMetadata {
 }
 
 impl QcImageMetadata {
-    /// A unified entry point for extracting file metadata with robust fallback defaults.
-    /// This eliminates DRY violations across different scanning modules.
     pub fn extract_or_fallback(path: &Path) -> Self {
         let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let (width, height) = match imagesize::size(path) {
@@ -52,14 +48,13 @@ impl QcImageMetadata {
                 .extension()
                 .map(|e| e.to_string_lossy().to_string())
                 .unwrap_or_default();
-
             QcImageMetadata {
                 width,
                 height,
                 file_size: size,
                 format_str: ext.clone(),
                 compression_format: ext,
-                color_space: "sRGB".into(),
+                color_space: "sRGB".to_string(),
                 has_alpha: false,
                 bit_depth: 8,
                 mipmap_count: 1,
@@ -70,53 +65,8 @@ impl QcImageMetadata {
     }
 }
 
-/// Safely reads a little-endian u32 integer from a byte slice at the given offset with bounds checking.
-fn safe_read_u32_le(bytes: &[u8], offset: usize) -> u32 {
-    bytes
-        .get(offset..offset + 4)
-        .and_then(|sub| sub.try_into().ok())
-        .map(u32::from_le_bytes)
-        .unwrap_or(0)
-}
-
-/// Maps DXGI format integers to user-friendly block compression or uncompressed names.
-fn map_dxgi_format_to_string(dxgi_format: u32) -> String {
-    match dxgi_format {
-        2 => "RGBA32 Float".to_string(),
-        10 => "RGBA16 Float".to_string(),
-        11 => "RGBA16 UNORM".to_string(),
-        24 => "RGB10A2 UNORM".to_string(),
-        28 => "RGBA8 UNORM".to_string(),
-        29 => "RGBA8 sRGB".to_string(),
-        54 => "R16 Float".to_string(),
-        56 => "R16 UNORM".to_string(),
-        61 => "R8 UNORM".to_string(),
-        70 | 71 => "BC1 (DXT1)".to_string(),
-        72 => "BC1 sRGB (DXT1)".to_string(),
-        73 | 74 => "BC2 (DXT3)".to_string(),
-        75 => "BC2 sRGB (DXT3)".to_string(),
-        76 | 77 => "BC3 (DXT5)".to_string(),
-        78 => "BC3 sRGB (DXT5)".to_string(),
-        79 | 80 => "BC4 (ATI1)".to_string(),
-        81 => "BC4 SNORM".to_string(),
-        82 | 83 => "BC5 (ATI2)".to_string(),
-        84 => "BC5 SNORM".to_string(),
-        87 => "BGRA8 UNORM".to_string(),
-        91 => "BGRA8 sRGB".to_string(),
-        94 | 95 => "BC6H (UF16)".to_string(),
-        96 => "BC6H (SF16)".to_string(),
-        97 | 98 => "BC7".to_string(),
-        99 => "BC7 sRGB".to_string(),
-        _ => format!("DX10 (DXGI {})", dxgi_format),
-    }
-}
-
-/// Calculates estimated GPU VRAM usage based on width, height, compression format, mipmap count, and cubemap flag.
-/// Incorporates hardware Row Pitch alignment (256 bytes) for a realistic memory footprint calculation.
 pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cubemap: bool) -> u64 {
     let format_upper = format.to_uppercase();
-
-    // Determine if it's a block compression format and its block size in bytes
     let block_compressed =
         format_upper.contains("BC") || format_upper.contains("DXT") || format_upper.contains("ATI");
 
@@ -142,7 +92,6 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
         _ => 0,
     };
 
-    // Calculate bytes per pixel for uncompressed formats
     let bytes_per_pixel: u64 = if !block_compressed {
         match format_upper.as_str() {
             cf if cf.contains("RGBA8")
@@ -154,7 +103,7 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
             cf if cf.contains("RGB8") || cf.contains("BGR8") || cf.contains("UNCOMPRESSED") => 3,
             cf if cf.contains("RGBA16") => 8,
             cf if cf.contains("RGBA32") => 16,
-            _ => 4, // Standard 32-bit fallback
+            _ => 4,
         }
     } else {
         0
@@ -162,9 +111,6 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
 
     let mut total_bytes = 0;
     let mips = mipmaps.max(1);
-
-    // Modern GPUs map memory in blocks. A standard hardware row pitch alignment is 256 bytes.
-    // E.g., D3D12_TEXTURE_DATA_PITCH_ALIGNMENT is exactly 256.
     let pitch_alignment: u64 = 256;
 
     for i in 0..mips {
@@ -172,27 +118,16 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
         let h = (height >> i).max(1) as u64;
 
         let mip_bytes = if block_compressed {
-            // Number of 4x4 blocks (rounded up)
             let blocks_w = w.div_ceil(4);
             let blocks_h = h.div_ceil(4);
-
-            // Raw bytes per row of blocks
             let raw_row_pitch = blocks_w * bytes_per_block;
-
-            // Hardware aligns the row pitch to the nearest multiple of 256
             let aligned_row_pitch = (raw_row_pitch + pitch_alignment - 1) & !(pitch_alignment - 1);
-
             aligned_row_pitch * blocks_h
         } else {
-            // Raw bytes per pixel row
             let raw_row_pitch = w * bytes_per_pixel;
-
-            // Hardware aligns the row pitch to the nearest multiple of 256
             let aligned_row_pitch = (raw_row_pitch + pitch_alignment - 1) & !(pitch_alignment - 1);
-
             aligned_row_pitch * h
         };
-
         total_bytes += mip_bytes;
     }
 
@@ -203,141 +138,27 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
     }
 }
 
-/// Extracts technical image specifications, format metrics, and metadata layout from target path.
+/// NEW: Polymorphic Entry point for technical metadata extraction
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, QcError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let size = fs::metadata(path)?.len();
 
-    let dim = imagesize::size(path)?;
-    let (mut w, mut h) = (dim.width as u32, dim.height as u32);
-
-    let format_str = ext.clone();
-    let mut compression_format = ext.to_uppercase();
-    let mut color_space = "sRGB".to_string();
-    let mut has_alpha = false;
-    let mut bit_depth = 8;
-    let mut mipmap_count = 1;
-    let mut is_cubemap = false;
-
-    if ext == "dds" {
-        let bytes = fs::read(path)?;
-
-        // Explicitly validate minimum required DDS file size
-        if bytes.len() < 128 {
-            return Err(QcError::DdsReadFailed(format!(
-                "File size is {} bytes, which is too small to contain a valid 128-byte DDS header",
-                bytes.len()
-            )));
-        }
-
-        // Explicitly validate the mandatory "DDS " magic bytes
-        if bytes.get(0..4) != Some(b"DDS ") {
-            return Err(QcError::DdsReadFailed(
-                "Missing or invalid DDS magic bytes (expected 'DDS ')".to_string(),
-            ));
-        }
-
-        // Explicitly validate standard DDS header size field (offset 4, dwSize must be 124)
-        let dw_size = safe_read_u32_le(&bytes, 4);
-        if dw_size != 124 {
-            return Err(QcError::DdsReadFailed(format!(
-                "Invalid standard DDS header size field (dwSize is {}, expected 124)",
-                dw_size
-            )));
-        }
-
-        h = safe_read_u32_le(&bytes, 12);
-        w = safe_read_u32_le(&bytes, 16);
-
-        // Read the mipmap count directly from dwMipMapCount header field
-        let mips = safe_read_u32_le(&bytes, 28);
-        mipmap_count = if mips > 0 { mips } else { 1 };
-
-        // dwCaps2 is located at offset 112. The flag 0x0000FE00 indicates a Cubemap.
-        let dw_caps2 = safe_read_u32_le(&bytes, 112);
-        is_cubemap = (dw_caps2 & 0x0000FE00) != 0;
-
-        let pf_flags = safe_read_u32_le(&bytes, 80);
-        if (pf_flags & 0x1) != 0 || (pf_flags & 0x2) != 0 {
-            has_alpha = true;
-        }
-
-        let pf_fourcc = safe_read_u32_le(&bytes, 84);
-        if pf_fourcc != 0 {
-            if let Some(fourcc_slice) = bytes.get(84..88) {
-                compression_format = String::from_utf8_lossy(fourcc_slice).trim().to_string();
-            }
-            if compression_format == "DXT3" || compression_format == "DXT5" {
-                has_alpha = true;
-            }
-
-            if pf_fourcc == u32::from_le_bytes(*b"DX10") && bytes.len() >= 148 {
-                let dxgi_format = safe_read_u32_le(&bytes, 128);
-                compression_format = map_dxgi_format_to_string(dxgi_format);
-                if matches!(dxgi_format, 74 | 75 | 77 | 78 | 98 | 99) {
-                    has_alpha = true;
-                }
-                if matches!(dxgi_format, 71 | 74 | 77 | 80 | 83 | 98) {
-                    color_space = "Linear".to_string();
-                }
-            }
-        } else {
-            compression_format = "Uncompressed".to_string();
-            let rgb_bit_count = safe_read_u32_le(&bytes, 88);
-            bit_depth = if rgb_bit_count / 4 == 0 {
-                8
-            } else {
-                rgb_bit_count / 4
-            };
-        }
-    } else if ext == "exr" {
-        if let Ok(meta) = exr::prelude::MetaData::read_from_file(path, false)
-            && let Some(header) = meta.headers.first()
-        {
-            w = header.shared_attributes.display_window.size.width() as u32;
-            h = header.shared_attributes.display_window.size.height() as u32;
-            bit_depth = 16;
-            color_space = "Linear".to_string();
-            compression_format = format!("{:?}", header.compression);
-            has_alpha = header
-                .channels
-                .list
-                .iter()
-                .any(|c| c.name.to_string() == "A" || c.name.to_string() == "alpha");
-        }
-    } else if ext == "hdr" {
-        bit_depth = 32;
-        color_space = "Linear".to_string();
-        compression_format = "Radiance HDR".to_string();
+    // Query our newly introduced Polymorphic Loader Registry
+    let registry = crate::format_loaders::get_registry();
+    if let Some(loader) = registry.find_loader(&ext) {
+        loader
+            .extract_metadata(path)
+            .map_err(|e| QcError::DdsReadFailed(e.to_string()))
     } else {
-        if let Ok(img) = image::open(path) {
-            let color = img.color();
-            has_alpha = color.has_alpha();
-            bit_depth = color.bits_per_pixel() as u32 / if has_alpha { 4 } else { 3 };
-        }
+        Err(QcError::DdsReadFailed(format!(
+            "No registry loader mapped for extension: {}",
+            ext
+        )))
     }
-
-    let estimated_vram = estimate_vram(w, h, &compression_format, mipmap_count, is_cubemap);
-
-    Ok(QcImageMetadata {
-        width: w,
-        height: h,
-        file_size: size,
-        format_str,
-        compression_format,
-        color_space,
-        has_alpha,
-        bit_depth,
-        mipmap_count,
-        is_cubemap,
-        estimated_vram,
-    })
 }
 
-/// Evaluates absolute single-asset constraints including NPOT dimensions, block align bounds, and bit depth limits.
 pub fn check_absolute(
     meta: &QcImageMetadata,
     check_npot: bool,
@@ -364,7 +185,6 @@ pub fn check_absolute(
     issues
 }
 
-/// Evaluates relative constraints on file parameter changes between source (original) and destination (duplicate) assets.
 pub fn check_relative(
     source: &QcImageMetadata,
     target: &QcImageMetadata,
@@ -401,16 +221,13 @@ pub fn check_relative(
     issues
 }
 
-/// Evaluates if the texture is a flat single-color block within a threshold tolerance.
 pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
-    let img =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let processed_img = if img.width() > 128 || img.height() > 128 {
         img.resize(128, 128, image::imageops::FilterType::Nearest)
     } else {
         img
     };
-
     let rgba_img = processed_img.to_rgba8();
     let mut pixels = rgba_img.pixels();
     let first = pixels.next()?;
@@ -423,7 +240,6 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
             }
         }
     }
-
     Some((
         "Solid Color Texture".to_string(),
         format!(
@@ -433,18 +249,14 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
     ))
 }
 
-/// Analyzes RMA/ORM pack channels sequentially to detect if an individual channel (R, G, B, or A) is entirely black/white.
 pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
-    let img =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(128)).ok()?;
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let has_alpha = img.color().has_alpha();
-
     let processed_img = if img.width() > 128 || img.height() > 128 {
         img.resize(128, 128, image::imageops::FilterType::Nearest)
     } else {
         img
     };
-
     let rgba_img = processed_img.to_rgba8();
     if rgba_img.pixels().len() == 0 {
         return None;
@@ -466,11 +278,11 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
         "Blue (Metalness)",
         "Alpha (Glossiness)",
     ];
-    let threshold = 5; // A channel with variance < 5 is treated as flat/empty
+    let threshold = 5;
 
     for i in 0..4 {
         if i == 3 && !has_alpha {
-            continue; // Skip alpha if texture has no alpha channel
+            continue;
         }
         if max_val[i] - min_val[i] < threshold {
             return Some((
@@ -485,10 +297,8 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
     None
 }
 
-/// Analyzes standard normal map shading directions in G channel to warn of potential Y-axis inversion (DirectX vs OpenGL).
 pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
-    let img =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(256)).ok()?;
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(256), None).ok()?;
     let rgb = img.to_rgb8();
 
     let mut top_lights = 0u64;
@@ -503,16 +313,13 @@ pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
     let raw = rgb.as_raw();
     let stride = w as usize * 3;
 
-    // Sample pixels in the inner grid to estimate shading orientation
     for y in 1..(h - 1) {
         let y_idx = y as usize * stride;
         let prev_y_idx = (y - 1) as usize * stride;
         let next_y_idx = (y + 1) as usize * stride;
 
         for x in 1..(w - 1) {
-            let x_offset = x as usize * 3 + 1; // Green channel offset
-
-            // Standard boundary references. LLVM will safely optimize bounds checks away in release mode.
+            let x_offset = x as usize * 3 + 1;
             let cur_g = raw[y_idx + x_offset] as f32;
             let prev_g = raw[prev_y_idx + x_offset] as f32;
             let next_g = raw[next_y_idx + x_offset] as f32;
@@ -531,34 +338,25 @@ pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
         let total = top_lights + bottom_lights;
         let ratio = top_lights as f32 / total as f32;
         if ratio > 0.65 {
-            return Some((
-                "Normal Map Y-Axis Orientation".to_string(),
-                "OpenGL layout detected (+Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string(),
-            ));
+            return Some(("Normal Map Y-Axis Orientation".to_string(), "OpenGL layout detected (+Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string()));
         } else if ratio < 0.35 {
-            return Some((
-                "Normal Map Y-Axis Orientation".to_string(),
-                "DirectX layout detected (-Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string(),
-            ));
+            return Some(("Normal Map Y-Axis Orientation".to_string(), "DirectX layout detected (-Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string()));
         }
     }
     None
 }
 
-/// Computes normal map vector bounds, verifies normalize properties, and screens for invalid normal length directions.
 pub fn check_normal_map_integrity(
     path: &Path,
     threshold: f32,
     format: NormalMapFormat,
 ) -> Option<(String, String)> {
-    let img =
-        crate::format_loaders::dds_loader::open_image_with_dds_fallback(path, Some(512)).ok()?;
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(512), None).ok()?;
     let processed_img = if img.width() > 512 || img.height() > 512 {
         img.resize(512, 512, image::imageops::FilterType::Nearest)
     } else {
         img
     };
-
     let rgb_img = processed_img.to_rgb8();
     let total_pixels = (rgb_img.width() * rgb_img.height()) as usize;
     if total_pixels == 0 {
@@ -577,7 +375,6 @@ pub fn check_normal_map_integrity(
             let mean_z = sum_z / total_pixels as f32;
 
             if mean_z > 0.98 {
-                // Flat normal maps (clipping check on XY unit boundary circle)
                 for pixel in rgb_img.pixels() {
                     let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
                     let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
@@ -598,7 +395,6 @@ pub fn check_normal_map_integrity(
                     ));
                 }
             } else {
-                // Standard normal maps (unit vector scale validations)
                 for pixel in rgb_img.pixels() {
                     let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
                     let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
@@ -628,12 +424,9 @@ pub fn check_normal_map_integrity(
             }
         }
         NormalMapFormat::Bc5RxGy => {
-            // Two-channel BC5/RG format: Blue channel is empty, Z must be reconstructed: Z = sqrt(max(0, 1 - X^2 - Y^2))
             for pixel in rgb_img.pixels() {
                 let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
                 let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
-
-                // Verify if the 2D vector lies inside or reasonably close to the unit circle
                 let sq_len = x * x + y * y;
                 if sq_len > (1.0 + threshold) {
                     bad_pixels += 1;

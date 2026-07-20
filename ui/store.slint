@@ -85,7 +85,10 @@ export global Store {
     // Previews & Quality Configurations
     in-out property <bool> enable_previews: true;
     in-out property <int> preview_quality: 1;
-    in-out property <bool> fit_to_window: true;
+    in-out property <bool> filter_only_npot: false;
+    in-out property <bool> filter_only_uncompressed: false;
+    in-out property <bool> filter_only_missing_mips: false;
+    in-out property <bool> filter_only_cubemaps: false;
 
     // ==========================================
     // --- SPRITESHEET & FLIPBOOK CONFIGS -------
@@ -107,6 +110,7 @@ export global Store {
     in-out property <float> manual_gamma: 1.0;
     in-out property <float> aspect_ratio_modifier: 1.0;
     in-out property <int> background_mode: 0; // 0: Checkerboard, 1: Solid Black, 2: Solid White
+    in-out property <bool> fit_to_window: true;
 
     // ==========================================
     // --- UI DRAG & LAYOUT STATES --------------
@@ -217,11 +221,6 @@ export global Store {
     in-out property <string> results_search_query: "";
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
-
-    in-out property <bool> filter_only_npot: false;
-    in-out property <bool> filter_only_uncompressed: false;
-    in-out property <bool> filter_only_missing_mips: false;
-    in-out property <bool> filter_only_cubemaps: false;
 
     // Trace Logs Diagnostics Console
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";

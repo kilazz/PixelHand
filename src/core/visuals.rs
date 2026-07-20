@@ -114,69 +114,68 @@ pub async fn generate_visual_reports(
                         + row * (layout.thumb_size + layout.text_area + layout.padding);
 
                     // Decode high-resolution textures with fast_image_resize fallback
-                    let thumb =
-                        match crate::format_loaders::dds_loader::open_image_with_dds_fallback(
-                            Path::new(&file.path),
-                            Some(layout.thumb_size),
-                        ) {
-                            Ok(img) => {
-                                let mut rgba_img = img.to_rgba8();
+                    let thumb = match crate::format_loaders::open_image_with_dds_fallback(
+                        Path::new(&file.path),
+                        Some(layout.thumb_size),
+                        None,
+                    ) {
+                        Ok(img) => {
+                            let mut rgba_img = img.to_rgba8();
 
-                                // fast_image_resize v6.0.0 API: directly pass u32 dimensions and borrow mutably
-                                let src_image = fr::images::Image::from_slice_u8(
-                                    rgba_img.width(),
-                                    rgba_img.height(),
-                                    rgba_img.as_mut(),
-                                    fr::PixelType::U8x4,
-                                )
+                            // fast_image_resize v6.0.0 API: directly pass u32 dimensions and borrow mutably
+                            let src_image = fr::images::Image::from_slice_u8(
+                                rgba_img.width(),
+                                rgba_img.height(),
+                                rgba_img.as_mut(),
+                                fr::PixelType::U8x4,
+                            )
+                            .unwrap();
+
+                            // Construct destination image with direct u32 dimensions
+                            let mut dst_image = fr::images::Image::new(
+                                layout.thumb_size,
+                                layout.thumb_size,
+                                fr::PixelType::U8x4,
+                            );
+
+                            // Execute resizing using processor-optimized SIMD architectures
+                            let mut options = fr::ResizeOptions::new();
+                            options = options
+                                .resize_alg(fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3));
+                            resizer
+                                .resize(&src_image, &mut dst_image, Some(&options))
                                 .unwrap();
 
-                                // Construct destination image with direct u32 dimensions
-                                let mut dst_image = fr::images::Image::new(
-                                    layout.thumb_size,
-                                    layout.thumb_size,
-                                    fr::PixelType::U8x4,
-                                );
-
-                                // Execute resizing using processor-optimized SIMD architectures
-                                let mut options = fr::ResizeOptions::new();
-                                options = options.resize_alg(fr::ResizeAlg::Interpolation(
-                                    fr::FilterType::Lanczos3,
-                                ));
-                                resizer
-                                    .resize(&src_image, &mut dst_image, Some(&options))
-                                    .unwrap();
-
-                                RgbaImage::from_raw(
-                                    layout.thumb_size,
-                                    layout.thumb_size,
-                                    dst_image.into_vec(),
-                                )
-                                .unwrap()
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Visual Report: Failed to load thumbnail for '{}': {}",
-                                    file.path,
-                                    e
-                                );
-                                let mut err_img = RgbaImage::from_pixel(
-                                    layout.thumb_size,
-                                    layout.thumb_size,
-                                    color_err_bg,
-                                );
-                                draw_text_mut(
-                                    &mut err_img,
-                                    color_text_white,
-                                    10,
-                                    10,
-                                    layout.scale_bold,
-                                    &font,
-                                    "Error Loading Image",
-                                );
-                                err_img
-                            }
-                        };
+                            RgbaImage::from_raw(
+                                layout.thumb_size,
+                                layout.thumb_size,
+                                dst_image.into_vec(),
+                            )
+                            .unwrap()
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Visual Report: Failed to load thumbnail for '{}': {}",
+                                file.path,
+                                e
+                            );
+                            let mut err_img = RgbaImage::from_pixel(
+                                layout.thumb_size,
+                                layout.thumb_size,
+                                color_err_bg,
+                            );
+                            draw_text_mut(
+                                &mut err_img,
+                                color_text_white,
+                                10,
+                                10,
+                                layout.scale_bold,
+                                &font,
+                                "Error Loading Image",
+                            );
+                            err_img
+                        }
+                    };
 
                     let offset_x = x + (layout.thumb_size.saturating_sub(thumb.width())) / 2;
                     let offset_y = y + (layout.thumb_size.saturating_sub(thumb.height())) / 2;

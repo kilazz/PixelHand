@@ -205,10 +205,10 @@ pub fn run_gui() -> Result<()> {
     let _ = APP_HANDLE.set(app.as_weak());
 
     let store = app.global::<crate::app::Store>(); // Retrieve the global Store handle
+
     let loaded_settings = utils::settings::load_settings().unwrap_or_default();
     apply_settings_to_ui(&app, &loaded_settings);
 
-    // Generate both dark and light checkerboard patterns
     let checkerboard_dark = utils::ui::generate_checkerboard(false);
     let checkerboard_light = utils::ui::generate_checkerboard(true);
     store.set_checkerboard_pattern(checkerboard_dark);
@@ -222,6 +222,11 @@ pub fn run_gui() -> Result<()> {
         s.play_speed = loaded_settings.viewer.play_speed;
         s.enable_frame_blending = loaded_settings.viewer.enable_frame_blending;
     });
+
+    crate::scanners::ENABLE_PREVIEWS
+        .store(loaded_settings.preview.enable_previews, Ordering::Relaxed);
+    crate::scanners::PREVIEW_QUALITY
+        .store(loaded_settings.preview.preview_quality, Ordering::Relaxed);
 
     // Flush initial startup logs queued before UI loop initialization
     if let Some(queue_mutex) = LOG_MESSAGES.get()
@@ -419,22 +424,20 @@ pub fn run_gui() -> Result<()> {
     Ok(())
 }
 
-// Declares the clean mapping macro to automate the repetitive app.set_... calls
 macro_rules! sync_to_ui {
-    ($app:expr, {
+    ($store:expr, {
         strings: [ $($str_setter:ident => $str_val:expr),* $(,)? ],
         values: [ $($val_setter:ident => $val_val:expr),* $(,)? ],
     }) => {
         $(
-            $app.$str_setter($str_val.clone().into());
+            $store.$str_setter($str_val.clone().into());
         )*
         $(
-            $app.$val_setter($val_val);
+            $store.$val_setter($val_val);
         )*
     };
 }
 
-/// Maps serializable application settings structs into Slint component properties.
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     let search_method = if settings.qc.qc_mode {
         4
@@ -442,8 +445,11 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
         settings.search_method
     };
 
-    // Clean declarative synchronization mapping block replacing 80 lines of manual setters
-    sync_to_ui!(app, {
+    // ОПТИМИЗАЦИЯ: Достаем синглтон Store и пишем настройки напрямую в него,
+    // минуя окно AppWindow и полностью избавляясь от цепочечного бага оптимизатора
+    let store = app.global::<Store>();
+
+    sync_to_ui!(store, {
         strings: [
             set_dir_a => settings.paths.dir_a,
             set_dir_b => settings.paths.dir_b,
@@ -544,7 +550,24 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     crate::scanners::PREVIEW_QUALITY.store(settings.preview.preview_quality, Ordering::Relaxed);
 }
 
-/// Helper function to push decoded graphics buffers to Slint preview targets.
+// ---------------------------------------------------------
+// HIGH-PERFORMANCE VIEWPORT PIPELINE (Fixed Rayon/Tokio Thread Starvation)
+// ---------------------------------------------------------
+
+struct ViewportState {
+    channel: String,
+    compare_mode: i32,
+    mip_level: u32,
+    brightness: f32,
+    contrast: f32,
+    gamma: f32,
+    ratio: f32,
+    grid_cols: u32,
+    grid_rows: u32,
+    active_frame: u32,
+    enable_blending: bool,
+}
+
 pub fn trigger_viewport_update(
     app_weak: slint::Weak<AppWindow>,
     orig_path: String,
@@ -555,29 +578,28 @@ pub fn trigger_viewport_update(
         None => return,
     };
     let store = ui.global::<crate::app::Store>(); // Obtained the global Store handle
-    let channel = utils::ui::get_current_active_channel(&store).to_string();
-    let compare_mode = store.get_compare_mode();
-    let mip_level = store.get_active_mip_level() as u32;
-    let app_weak_clone = app_weak.clone();
 
-    // Capture the interactive parameters from the store
-    let brightness = store.get_manual_brightness();
-    let contrast = store.get_manual_contrast();
-    let gamma = store.get_manual_gamma();
-    let ratio = store.get_aspect_ratio_modifier();
-
-    let grid_cols = store.get_grid_cols() as u32;
-    let grid_rows = store.get_grid_rows() as u32;
-    let active_frame = store.get_active_frame() as u32;
-
-    // Decides indices of original and blending frames prior to dispatching tasks
-    let total_frames = grid_cols * grid_rows;
-    let next_frame = if total_frames > 1 {
-        (active_frame + 1) % total_frames
-    } else {
-        active_frame
+    // Extract thread-safe viewport settings to avoid capturing Slint handles inside async tasks
+    let params = ViewportState {
+        channel: utils::ui::get_current_active_channel(&store).to_string(),
+        compare_mode: store.get_compare_mode(),
+        mip_level: store.get_active_mip_level() as u32,
+        brightness: store.get_manual_brightness(),
+        contrast: store.get_manual_contrast(),
+        gamma: store.get_manual_gamma(),
+        ratio: store.get_aspect_ratio_modifier(),
+        grid_cols: store.get_grid_cols() as u32,
+        grid_rows: store.get_grid_rows() as u32,
+        active_frame: store.get_active_frame() as u32,
+        enable_blending: store.get_enable_frame_blending(),
     };
-    let enable_blending = store.get_enable_frame_blending();
+
+    let total_frames = params.grid_cols * params.grid_rows;
+    let next_frame = if total_frames > 1 {
+        (params.active_frame + 1) % total_frames
+    } else {
+        params.active_frame
+    };
 
     // Store state before asynchronous execution
     update_viewer_settings(|s| {
@@ -586,180 +608,206 @@ pub fn trigger_viewport_update(
         s.tonemap_operator = store.get_tonemap_operator() as usize;
     });
 
+    let app_weak_clone = app_weak.clone();
+
     tokio::spawn(async move {
-        // Fetch current frame previews
-        let mut raw_orig =
-            utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await;
-        let mut raw_dup =
-            utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await;
+        // Fetch current frame previews asynchronously (disk/memory bound)
+        let raw_orig =
+            utils::cache::get_channel_preview_image(&orig_path, &params.channel, params.mip_level)
+                .await;
+        let raw_dup =
+            utils::cache::get_channel_preview_image(&dup_path, &params.channel, params.mip_level)
+                .await;
 
         // Fetch next frame previews for blending
-        let mut raw_orig_next = None;
-        let mut raw_dup_next = None;
-
-        if enable_blending && total_frames > 1 {
-            raw_orig_next =
-                utils::cache::get_channel_preview_image(&orig_path, &channel, mip_level).await;
-            raw_dup_next =
-                utils::cache::get_channel_preview_image(&dup_path, &channel, mip_level).await;
-        }
-
-        // Perform Spritesheet slicing for Frame N (Current)
-        if grid_cols > 1 || grid_rows > 1 {
-            if let Some(ref img) = raw_orig {
-                raw_orig = Some(utils::ui::slice_spritesheet_frame(
-                    img,
-                    grid_cols,
-                    grid_rows,
-                    active_frame,
-                ));
-            }
-            if let Some(ref img) = raw_dup {
-                raw_dup = Some(utils::ui::slice_spritesheet_frame(
-                    img,
-                    grid_cols,
-                    grid_rows,
-                    active_frame,
-                ));
-            }
-
-            // Perform Spritesheet slicing for Frame N+1 (Next)
-            if enable_blending {
-                if let Some(ref img) = raw_orig_next {
-                    raw_orig_next = Some(utils::ui::slice_spritesheet_frame(
-                        img, grid_cols, grid_rows, next_frame,
-                    ));
-                }
-                if let Some(ref img) = raw_dup_next {
-                    raw_dup_next = Some(utils::ui::slice_spritesheet_frame(
-                        img, grid_cols, grid_rows, next_frame,
-                    ));
-                }
-            }
-        }
-
-        // Apply manual Brightness, Contrast, and Gamma color corrections in parallel (Current Frame)
-        if let Some(ref mut img) = raw_orig {
-            crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
-        }
-        if let Some(ref mut img) = raw_dup {
-            crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
-        }
-
-        // Apply manual Brightness, Contrast, and Gamma color corrections in parallel (Next Frame)
-        if enable_blending {
-            if let Some(ref mut img) = raw_orig_next {
-                crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
-            }
-            if let Some(ref mut img) = raw_dup_next {
-                crate::core::tonemapper::apply_manual_corrections(img, brightness, contrast, gamma);
-            }
-        }
-
-        // Apply aspect ratio scaling multipliers (Ratio Slider - Current Frame)
-        if let Some(ref img) = raw_orig {
-            raw_orig = Some(utils::ui::apply_aspect_ratio(img, ratio));
-        }
-        if let Some(ref img) = raw_dup {
-            raw_dup = Some(utils::ui::apply_aspect_ratio(img, ratio));
-        }
-
-        // Apply aspect ratio scaling multipliers (Ratio Slider - Next Frame)
-        if enable_blending {
-            if let Some(ref img) = raw_orig_next {
-                raw_orig_next = Some(utils::ui::apply_aspect_ratio(img, ratio));
-            }
-            if let Some(ref img) = raw_dup_next {
-                raw_dup_next = Some(utils::ui::apply_aspect_ratio(img, ratio));
-            }
-        }
-
-        // Pre-extract width and height before moving to event loop
-        let (sprite_w, sprite_h) = if let Some(ref img) = raw_orig {
-            (img.width() as i32, img.height() as i32)
+        let (raw_orig_next, raw_dup_next) = if params.enable_blending && total_frames > 1 {
+            (
+                utils::cache::get_channel_preview_image(
+                    &orig_path,
+                    &params.channel,
+                    params.mip_level,
+                )
+                .await,
+                utils::cache::get_channel_preview_image(
+                    &dup_path,
+                    &params.channel,
+                    params.mip_level,
+                )
+                .await,
+            )
         } else {
-            (0, 0)
+            (None, None)
         };
 
-        // The calculated metadata sizes (Sprite Width, Sprite Height, Sprites Count) based on the slice
-        let app_weak_meta = app_weak_clone.clone();
-        let _ = app_weak_meta.upgrade_in_event_loop(move |ui| {
+        // Offload ALL CPU-bound image operations (Rayon iteration loops, slicing, resizing)
+        // to a dedicated blocking worker thread. This eliminates Tokio starvation and UI stutter.
+        let result = tokio::task::spawn_blocking(move || {
+            let mut o = raw_orig;
+            let mut d = raw_dup;
+            let mut o_n = raw_orig_next;
+            let mut d_n = raw_dup_next;
+
+            // Perform Spritesheet slicing for Frame N (Current)
+            if params.grid_cols > 1 || params.grid_rows > 1 {
+                if let Some(ref img) = o {
+                    o = Some(utils::ui::slice_spritesheet_frame(
+                        img,
+                        params.grid_cols,
+                        params.grid_rows,
+                        params.active_frame,
+                    ));
+                }
+                if let Some(ref img) = d {
+                    d = Some(utils::ui::slice_spritesheet_frame(
+                        img,
+                        params.grid_cols,
+                        params.grid_rows,
+                        params.active_frame,
+                    ));
+                }
+
+                // Perform Spritesheet slicing for Frame N+1 (Next)
+                if params.enable_blending {
+                    if let Some(ref img) = o_n {
+                        o_n = Some(utils::ui::slice_spritesheet_frame(
+                            img,
+                            params.grid_cols,
+                            params.grid_rows,
+                            next_frame,
+                        ));
+                    }
+                    if let Some(ref img) = d_n {
+                        d_n = Some(utils::ui::slice_spritesheet_frame(
+                            img,
+                            params.grid_cols,
+                            params.grid_rows,
+                            next_frame,
+                        ));
+                    }
+                }
+            }
+
+            // Apply manual Brightness, Contrast, and Gamma color corrections (Current Frame)
+            if let Some(ref mut img) = o {
+                crate::core::tonemapper::apply_manual_corrections(
+                    img,
+                    params.brightness,
+                    params.contrast,
+                    params.gamma,
+                );
+            }
+            if let Some(ref mut img) = d {
+                crate::core::tonemapper::apply_manual_corrections(
+                    img,
+                    params.brightness,
+                    params.contrast,
+                    params.gamma,
+                );
+            }
+
+            // Apply manual Brightness, Contrast, and Gamma color corrections (Next Frame)
+            if params.enable_blending {
+                if let Some(ref mut img) = o_n {
+                    crate::core::tonemapper::apply_manual_corrections(
+                        img,
+                        params.brightness,
+                        params.contrast,
+                        params.gamma,
+                    );
+                }
+                if let Some(ref mut img) = d_n {
+                    crate::core::tonemapper::apply_manual_corrections(
+                        img,
+                        params.brightness,
+                        params.contrast,
+                        params.gamma,
+                    );
+                }
+            }
+
+            // Apply aspect ratio scaling multipliers (Ratio Slider - Current Frame)
+            if let Some(ref img) = o {
+                o = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+            }
+            if let Some(ref img) = d {
+                d = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+            }
+
+            // Apply aspect ratio scaling multipliers (Ratio Slider - Next Frame)
+            if params.enable_blending {
+                if let Some(ref img) = o_n {
+                    o_n = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+                }
+                if let Some(ref img) = d_n {
+                    d_n = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+                }
+            }
+
+            // Pre-extract width and height before moving to event loop
+            let (sprite_w, sprite_h) = if let Some(ref img) = o {
+                (img.width() as i32, img.height() as i32)
+            } else {
+                (0, 0)
+            };
+
+            let raw_diff = if params.compare_mode == 3 {
+                if let (Some(orig), Some(dup)) = (&o, &d) {
+                    crate::core::tonemapper::calculate_difference_map(orig, dup, true).ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            let hist_img = if let (Some(orig), Some(dup)) = (&o, &d) {
+                Some(utils::ui::generate_histogram_image(orig, dup))
+            } else {
+                None
+            };
+
+            (sprite_w, sprite_h, o, d, o_n, d_n, raw_diff, hist_img)
+        })
+        .await
+        .unwrap();
+
+        // 5. Unpack results and dispatch UI updates in a single unified thread transaction
+        let (sprite_w, sprite_h, o, d, o_n, d_n, raw_diff, hist_img) = result;
+
+        let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
             let store = ui.global::<crate::app::Store>();
             store.set_sprite_width(sprite_w);
             store.set_sprite_height(sprite_h);
-            store.set_sprites_count((grid_cols * grid_rows) as i32);
-        });
+            store.set_sprites_count(total_frames as i32);
 
-        let raw_diff = if compare_mode == 3 {
-            if let (Some(orig), Some(dup)) = (&raw_orig, &raw_dup) {
-                crate::core::tonemapper::calculate_difference_map(orig, dup, true).ok()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        let hist_img = if let (Some(orig), Some(dup)) = (&raw_orig, &raw_dup) {
-            Some(utils::ui::generate_histogram_image(orig, dup))
-        } else {
-            None
-        };
-
-        // Dispatch Current Frames
-        if let Some(img) = raw_orig {
-            let app_weak_orig = app_weak_clone.clone();
-            let _ = app_weak_orig.upgrade_in_event_loop(move |ui| {
-                let store = ui.global::<crate::app::Store>();
+            if let Some(img) = o {
                 store.set_image_original(utils::ui::convert_to_slint_image(&img));
-            });
-        }
-        if let Some(img) = raw_dup {
-            let app_weak_dup = app_weak_clone.clone();
-            let _ = app_weak_dup.upgrade_in_event_loop(move |ui| {
-                let store = ui.global::<crate::app::Store>();
+            }
+            if let Some(img) = d {
                 store.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
-            });
-        }
+            }
 
-        // Dispatch Next Frames for GPU-based alphablending transitions
-        if enable_blending {
-            if let Some(img) = raw_orig_next {
-                let app_weak_orig_next = app_weak_clone.clone();
-                let _ = app_weak_orig_next.upgrade_in_event_loop(move |ui| {
-                    let store = ui.global::<crate::app::Store>();
+            if params.enable_blending {
+                if let Some(img) = o_n {
                     store.set_image_original_next(utils::ui::convert_to_slint_image(&img));
-                });
-            }
-            if let Some(img) = raw_dup_next {
-                let app_weak_dup_next = app_weak_clone.clone();
-                let _ = app_weak_dup_next.upgrade_in_event_loop(move |ui| {
-                    let store = ui.global::<crate::app::Store>();
+                }
+                if let Some(img) = d_n {
                     store.set_image_duplicate_next(utils::ui::convert_to_slint_image(&img));
-                });
+                }
             }
-        }
 
-        if let Some(diff) = raw_diff {
-            let app_weak_diff = app_weak_clone.clone();
-            let _ = app_weak_diff.upgrade_in_event_loop(move |ui| {
-                let store = ui.global::<crate::app::Store>();
+            if let Some(diff) = raw_diff {
                 store.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
-            });
-        }
-
-        if let Some(hist) = hist_img {
-            let app_weak_hist = app_weak_clone.clone();
-            let _ = app_weak_hist.upgrade_in_event_loop(move |ui| {
-                let store = ui.global::<crate::app::Store>();
+            }
+            if let Some(hist) = hist_img {
                 store.set_histogram_image(utils::ui::convert_to_slint_image(&hist));
-            });
-        }
+            }
+        });
     });
 }
 
 // Thread-safe fast intermediate queue implementation for incoming console log pipelines
-static PENDING_LOGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+pub static PENDING_LOGS: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
 
 // Thread-safe active log file handle mapping
 pub static LOG_FILE: OnceLock<Mutex<Option<fs::File>>> = OnceLock::new();

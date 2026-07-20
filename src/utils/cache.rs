@@ -57,8 +57,11 @@ pub async fn get_channel_preview_image(
     // If another thread is already loading this exact file, the current thread will wait for it to finish.
     let cached_item_res =
         cache.try_get_with(cache_key.clone(), || -> Result<DecodedCacheItem, String> {
+            // Fetch UI settings right at the boundary here.
+            let t_config = crate::app::get_active_tonemap_config();
+
             if let Ok(img) =
-                crate::format_loaders::dds_loader::open_image_with_specific_mip(&p, mip_level)
+                crate::format_loaders::open_image_with_specific_mip(&p, mip_level, Some(t_config))
             {
                 Ok(DecodedCacheItem {
                     mtime: current_mtime,

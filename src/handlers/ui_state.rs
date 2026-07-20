@@ -109,7 +109,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
         utils::ui::apply_selection_rule(&mut lock, rule.as_str());
         if let Some(ui) = app_weak_rule.upgrade() {
             let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 
@@ -121,7 +121,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
         lock.collapsed_groups.clear();
         if let Some(ui) = app_weak_expand.upgrade() {
             let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 
@@ -145,7 +145,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
         if let Some(ui) = app_weak_collapse.upgrade() {
             let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 
@@ -339,7 +339,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
             let store = ui.global::<Store>();
             store.set_active_sort_column(lock.sort_column.clone().into());
             store.set_sort_ascending(lock.sort_ascending);
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 
@@ -355,7 +355,6 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
     let store = app.global::<Store>();
     store.on_clear_cache(move || {
-        // Clear in-memory caches immediately using Moka API
         if let Some(cache) = crate::utils::cache::DECODED_CACHE.get() {
             cache.invalidate_all();
         }
@@ -364,7 +363,6 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
             cache.invalidate_all();
         }
 
-        // Safely delete database files in a background thread
         tokio::spawn(async move {
             if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
                 let lancedb_dir = app_dir.join(".lancedb_cache");
@@ -403,9 +401,9 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let store = app.global::<Store>();
     store.on_results_filter_changed(move || {
         if let Some(ui) = app_weak_filter.upgrade() {
-            let lock = state_clone_filt.safe_lock();
+            let mut lock = state_clone_filt.safe_lock();
             let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 
@@ -442,7 +440,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
         }
         if let Some(ui) = app_weak_sort.upgrade() {
             let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 
@@ -508,9 +506,9 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let store = app.global::<Store>();
     store.on_grid_columns_changed(move || {
         if let Some(ui) = app_weak_grid.upgrade() {
-            let lock = state_grid.safe_lock();
+            let mut lock = state_grid.safe_lock();
             let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+            utils::ui::update_results_ui(&store, &mut lock);
         }
     });
 }

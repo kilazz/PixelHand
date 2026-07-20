@@ -11,7 +11,6 @@ use crate::state::AppState;
 use crate::utils;
 use crate::utils::helpers::MutexExt;
 
-/// Binds UI handlers responsible for folder, reference image, and custom model selection.
 pub fn bind_directory_selection(app: &AppWindow) {
     let app_weak_a = app.as_weak();
     let store = app.global::<Store>();
@@ -90,7 +89,6 @@ pub fn bind_directory_selection(app: &AppWindow) {
     });
 }
 
-/// Binds UI handlers for files interactions, double clicks, checklist updates, and viewport previews.
 pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let app_weak_ctx = app.as_weak();
     let state_clone_ctx = state.clone();
@@ -104,13 +102,11 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
         match action.as_str() {
             "open" => {
-                tracing::info!("Context Menu: Opening file {}", path_str);
                 if let Err(e) = open::that(&path_str) {
                     tracing::error!("Failed to open file: {}", e);
                 }
             }
             "explore" => {
-                tracing::info!("Context Menu: Showing in explorer {}", path_str);
                 if let Some(parent_dir) = std::path::Path::new(&path_str).parent()
                     && let Err(e) = open::that(parent_dir)
                 {
@@ -122,7 +118,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 if p.exists() {
                     match trash::delete(&p) {
                         Ok(_) => {
-                            tracing::info!("Moved to trash via context menu: {}", path_str);
                             if let Some(ui) = app_weak_ctx.upgrade() {
                                 let store = ui.global::<Store>();
                                 store.set_status_text(
@@ -132,15 +127,15 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                                     )
                                     .into(),
                                 );
-                                let mut lock = state_clone_ctx.safe_lock();
 
-                                // Unified path normalization to prevent list mismatch on deletion
+                                let mut lock = state_clone_ctx.safe_lock();
                                 let normalized_target = utils::fs::normalize_path(&path_str);
                                 lock.results.retain(|r| {
                                     utils::fs::normalize_path(&r.path) != normalized_target
                                 });
 
-                                utils::ui::update_results_ui(&store, &lock);
+                                // Opt: Pass mutable state borrow to let UI rebuild indices
+                                utils::ui::update_results_ui(&store, &mut lock);
                             }
                         }
                         Err(e) => tracing::error!("Failed to move to trash: {}", e),
@@ -149,12 +144,10 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
             "trash_group" => {
                 if let Ok(group_idx) = path_str.parse::<i32>() {
-                    tracing::info!("Context Menu: Trashing entire group index {}", group_idx);
                     let mut lock = state_clone_ctx.safe_lock();
                     let mut paths_to_delete = Vec::new();
 
                     if lock.groups.is_empty() {
-                        // Technical QC or Flat mode (categorized via group_index mappings)
                         for row in &lock.results {
                             if row.group_index == group_idx && !row.is_header {
                                 paths_to_delete.push(std::path::PathBuf::from(&row.path));
@@ -168,7 +161,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         }
                         lock.results.retain(|r| r.group_index != group_idx);
                     } else {
-                        // Duplicate clusters mode
                         let group_idx_us = group_idx as usize;
                         if let Some(g) = lock.groups.get(group_idx_us) {
                             paths_to_delete = g
@@ -177,7 +169,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                                 .map(|f| std::path::PathBuf::from(&f.path))
                                 .filter(|p| p.exists())
                                 .collect();
-
                             if !paths_to_delete.is_empty()
                                 && let Err(e) = trash::delete_all(&paths_to_delete)
                             {
@@ -199,7 +190,9 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                             )
                             .into(),
                         );
-                        utils::ui::update_results_ui(&store, &lock);
+
+                        // Opt: Pass mutable state borrow to let UI rebuild indices
+                        utils::ui::update_results_ui(&store, &mut lock);
                     }
                 }
             }
@@ -210,11 +203,10 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let store = app.global::<Store>();
     store.on_open_file_in_viewer(move |path| {
         let path_str = path.to_string();
-        if !path_str.is_empty() {
-            tracing::info!("Opening file in default viewer: {}", path_str);
-            if let Err(e) = open::that(&path_str) {
-                tracing::error!("Failed to open file: {}", e);
-            }
+        if !path_str.is_empty()
+            && let Err(e) = open::that(&path_str)
+        {
+            tracing::error!("Failed to open file: {}", e);
         }
     });
 
@@ -223,19 +215,16 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let store = app.global::<Store>();
     store.on_row_checkbox_toggled(move |idx| {
         let mut lock = state_clone_cb.safe_lock();
+        // Opt: Visible indexing now happens in O(1) via cached mapping table
         if let Some(abs_idx) = utils::ui::get_absolute_index(&lock, idx as usize)
             && let Some(row) = lock.results.get_mut(abs_idx)
         {
-            // Toggle backing state
             row.is_checked = !row.is_checked;
 
-            // Micro-optimization: update the row-data inline inside Slint Model directly
-            // instead of triggering a full redraw of the entire list model!
             if let Some(ui) = app_weak_checkbox.upgrade() {
                 let store = ui.global::<Store>();
                 let results_model = store.get_results();
 
-                // Downcast ModelRc to mutable VecModel with collapsed condition chains
                 if let Some(vec_model) = results_model
                     .as_any()
                     .downcast_ref::<VecModel<crate::app::ResultsRow>>()
@@ -263,14 +252,15 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
             if let Some(ui) = app_copy.upgrade() {
                 let store = ui.global::<Store>();
-                utils::ui::update_results_ui(&store, &lock);
+
+                // Opt: Pass mutable state borrow to let UI rebuild indices
+                utils::ui::update_results_ui(&store, &mut lock);
             }
             return;
         }
 
         let path_str = path.to_string();
         let lock = state_clone_click.safe_lock();
-
         let group = lock.groups.get(group_idx as usize);
 
         let ui = match app_copy.upgrade() {
@@ -288,7 +278,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy();
-
                     let mipmaps_str = if meta.mipmap_count <= 1 {
                         "No".to_string()
                     } else {
@@ -324,7 +313,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 store.set_selected_group_files(ModelRc::from(std::rc::Rc::new(VecModel::from(
                     Vec::new(),
                 ))));
-
                 crate::app::trigger_viewport_update(
                     app_weak_clicked.clone(),
                     path_str.clone(),
@@ -339,8 +327,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             Some(f) => f,
             None => return,
         };
-
-        // Unified path normalization to resolve potential comparison issues in the compare matrix
         let normalized_target = utils::fs::normalize_path(&path_str);
         let duplicate = match group
             .files
@@ -390,10 +376,10 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
 
             let _ = app_copy.upgrade_in_event_loop({
-                let r#act = action.clone();
+                let act = action.clone();
                 move |ui| {
                     let store = ui.global::<Store>();
-                    store.set_status_text(format!("Processing selection: {}...", r#act).into());
+                    store.set_status_text(format!("Processing selection: {}...", act).into());
                 }
             });
 
@@ -409,11 +395,14 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         store.set_results(ModelRc::from(std::rc::Rc::new(VecModel::from(
                             Vec::new(),
                         ))));
-                        store.set_has_results(false); // Reset persistence flag on clear
+                        store.set_has_results(false);
+
                         let mut lock = state_copy_inner.safe_lock();
                         lock.results.clear();
                         lock.groups.clear();
                         lock.collapsed_groups.clear();
+                        lock.path_to_idx.clear();
+                        lock.visible_to_abs.clear();
                     }
                     Err(e) => {
                         store.set_status_text(format!("Action failed: {}", e).into());
@@ -426,8 +415,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let app_weak_hover = app.as_weak();
     let state_hover = state.clone();
-
-    // Thread-safe async debouncing handle to capture rapid mouse hovering and eliminate event loop flooding
     let last_hover_task = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<()>>));
 
     let store = app.global::<Store>();
@@ -439,43 +426,35 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
         let mut lock = last_hover_task.lock().unwrap();
         if let Some(handle) = lock.take() {
-            handle.abort(); // Cancel any rapid intermediate hover tasks to protect the Slint event loop
+            handle.abort();
         }
 
-        // Spawn debounced hover processing task with an 80ms delay
         let handle = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-
-            // Unified helper inside utils::fs
             let normalized_path = utils::fs::normalize_path_key(&path_std);
 
-            // Fetch the cached item directly from Moka sync cache (no explicit locking needed)
             let cached_img = {
                 let cache = scanners::THUMBNAIL_MEMORY_CACHE.get();
                 cache.and_then(|c| c.get(&normalized_path))
             };
 
             if let Some(cached_thumb) = cached_img {
-                // Highly optimized: fetch pre-computed (or lazily initialized once) channel-isolated buffer
                 let channel_img = cached_thumb.get_channel(&channel_std);
 
-                // Sync the shared state representation under isolated scope
+                // --- OPTIMIZATION (O(1) Hashmap Lookup) ---
+                // Eliminates sequential O(N) string-matching loops on state modification
                 {
                     let mut lock = state_clone.safe_lock();
-                    for row in &mut lock.results {
-                        if utils::fs::normalize_path_key(&row.path) == normalized_path {
-                            row.thumbnail_data = Some(channel_img.clone());
-                        }
+                    if let Some(&idx) = lock.path_to_idx.get(&normalized_path) {
+                        lock.results[idx].thumbnail_data = Some(channel_img.clone());
                     }
                 }
 
-                // UI components dynamically inside the event loop
                 let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
                     use slint::Model;
                     let store = ui.global::<Store>();
                     let slint_img = utils::ui::convert_to_slint_image(&channel_img);
 
-                    // List Results
                     let results_model = store.get_results();
                     for i in 0..results_model.row_count() {
                         if let Some(mut r) = results_model.row_data(i)
@@ -486,7 +465,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         }
                     }
 
-                    // Grid Results (mapping dynamically into virtualized GridRow columns)
                     let grid_model = store.get_grid_row_results();
                     for i in 0..grid_model.row_count() {
                         if let Some(mut r) = grid_model.row_data(i) {
@@ -509,7 +487,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         }
                     }
 
-                    // Selected Group Files (Compare Panel)
                     let group_model = store.get_selected_group_files();
                     for i in 0..group_model.row_count() {
                         if let Some(mut r) = group_model.row_data(i)
@@ -526,7 +503,6 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     });
 }
 
-/// Binds standard window OS events, such as native drag and drop files/directories drop targets.
 pub fn bind_drag_and_drop(app: &AppWindow) {
     let app_weak_dnd = app.as_weak();
     app.window().on_winit_window_event(move |_window, event| {
