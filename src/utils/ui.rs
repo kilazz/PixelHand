@@ -145,7 +145,7 @@ pub fn convert_to_slint_row(rd: &ResultsRowData) -> ResultsRow {
     }
 }
 
-/// NEW: Returns the absolute vector index from visible Slint row offset in O(1)
+/// Returns the absolute vector index from visible Slint row offset in O(1)
 pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize> {
     state.visible_to_abs.get(visible_idx).copied()
 }
@@ -163,10 +163,12 @@ pub fn update_results_ui(store: &Store, state: &mut AppState) {
     let search_query = store.get_results_search_query().to_string().to_lowercase();
     let min_sim = store.get_results_min_similarity();
 
-    let filter_only_npot = store.get_filter_only_npot();
-    let filter_uncompressed = store.get_filter_only_uncompressed();
-    let filter_missing_mips = store.get_filter_only_missing_mips();
-    let filter_cubemaps = store.get_filter_only_cubemaps();
+    // Extract smart filters from the nested `preview` configuration structure
+    let preview = store.get_preview();
+    let filter_only_npot = preview.filter_only_npot;
+    let filter_uncompressed = preview.filter_only_uncompressed;
+    let filter_missing_mips = preview.filter_only_missing_mips;
+    let filter_cubemaps = preview.filter_only_cubemaps;
 
     let has_filter = !search_query.is_empty()
         || filter_only_npot

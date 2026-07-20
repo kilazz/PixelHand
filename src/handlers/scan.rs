@@ -1,20 +1,19 @@
 // src/handlers/scan.rs
 
 use slint::ComponentHandle;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Mutex};
 
 use crate::app::{AppWindow, Store};
 use crate::scanners;
 use crate::state::AppState;
 use crate::state::models::SearchMethod;
 use crate::utils;
-use crate::utils::helpers::MutexExt;
 
 /// Binds the core background scanning orchestration loop and downloader verification steps.
 pub fn bind_scan_execution(
     app: &AppWindow,
-    state: Arc<Mutex<AppState>>,
+    state: Arc<parking_lot::Mutex<AppState>>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let app_weak_scan = app.as_weak();
@@ -78,9 +77,10 @@ pub fn bind_scan_execution(
             if let Some(ref_ui) = app_weak_download.upgrade() {
                 let store = ref_ui.global::<Store>();
                 crate::app::update_viewer_settings(|s| {
-                    s.tonemap_enabled = store.get_tonemap_enabled();
-                    s.auto_exposure_enabled = store.get_tonemap_auto_exposure();
-                    s.tonemap_operator = store.get_tonemap_operator() as usize;
+                    let tonemap = store.get_tonemap();
+                    s.tonemap_enabled = tonemap.tonemap_enabled;
+                    s.auto_exposure_enabled = tonemap.tonemap_auto_exposure;
+                    s.tonemap_operator = tonemap.tonemap_operator as usize;
                 });
             }
 
@@ -123,7 +123,7 @@ pub fn bind_scan_execution(
                 store.set_progress(1.0);
                 match scan_result {
                     Ok((groups, rows)) => {
-                        let mut state_lock = state_clone_inner.safe_lock();
+                        let mut state_lock = state_clone_inner.lock();
                         state_lock.collapsed_groups.clear();
                         state_lock.groups = groups;
                         state_lock.results = rows;

@@ -5,8 +5,37 @@ import {
     Palette,
 } from "std-widgets.slint";
 
-import { ResultsRow, SelectedFile, GridRow } from "./structs.slint";
-export { ResultsRow, SelectedFile, GridRow }from "./structs.slint";
+import {
+    ResultsRow,
+    SelectedFile,
+    GridRow,
+    PathSettings,
+    ExtensionSettings,
+    UiLayoutSettings,
+    VisualReportSettings,
+    PreprocessingSettings,
+    QcSettings,
+    AiSettings,
+    TonemapSettings,
+    ViewerConfig,
+    PreviewSettings,
+} from "./structs.slint";
+
+export {
+    ResultsRow,
+    SelectedFile,
+    GridRow,
+    PathSettings,
+    ExtensionSettings,
+    UiLayoutSettings,
+    VisualReportSettings,
+    PreprocessingSettings,
+    QcSettings,
+    AiSettings,
+    TonemapSettings,
+    ViewerConfig,
+    PreviewSettings,
+}from "./structs.slint";
 
 import { Store } from "./store.slint";
 export { Store }
@@ -35,7 +64,7 @@ export component AppWindow inherits Window {
     background: #1e1e1e;
 
     // --- ADAPTIVE GRID BEHAVIOR ---
-    property <int> calc_cols: Math.max(1, Math.round(Math.floor((self.width - Store.sidebar_width - 40px) / (Store.grid_card_size + 12px))));
+    property <int> calc_cols: Math.max(1, Math.round(Math.floor((self.width - Store.ui.sidebar_width - 40px) / (Store.ui.grid_card_size + 12px))));
     changed calc_cols => {
         Store.grid_columns = self.calc_cols;
         Store.grid_columns_changed();

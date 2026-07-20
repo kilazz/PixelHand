@@ -1,15 +1,15 @@
 // src/handlers/ui_state.rs
 
 use slint::ComponentHandle;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::app::{AppWindow, Store};
 use crate::state::AppState;
+use crate::state::models::SortColumn;
 use crate::utils;
-use crate::utils::helpers::MutexExt;
 
 /// Binds UI utility parameters, tonemapping options, sorting/filtering engines, and column resizers.
-pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) {
+pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<parking_lot::Mutex<AppState>>) {
     let app_weak_comp = app.as_weak();
     let store = app.global::<Store>();
 
@@ -35,15 +35,17 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
             utils::settings::save_settings(&store);
 
+            // Sync updated tonemapping nested configurations to the active viewer settings
             crate::app::update_viewer_settings(|s| {
-                s.tonemap_enabled = store.get_tonemap_enabled();
-                s.auto_exposure_enabled = store.get_tonemap_auto_exposure();
-                s.tonemap_operator = store.get_tonemap_operator() as usize;
+                let tonemap = store.get_tonemap();
+                s.tonemap_enabled = tonemap.tonemap_enabled;
+                s.auto_exposure_enabled = tonemap.tonemap_auto_exposure;
+                s.tonemap_operator = tonemap.tonemap_operator as usize;
             });
 
-            if let Some(cache) = utils::cache::DECODED_CACHE.get() {
-                cache.invalidate_all();
-            }
+            // Evict decoded image cache to force tonemapped redraws
+            let manager = crate::utils::cache::get_cache_manager();
+            manager.decoded_images.invalidate_all();
 
             let orig_path = store.get_original_meta().path.to_string();
             let dup_path = store.get_duplicate_meta().path.to_string();
@@ -105,7 +107,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let state_clone_rule = state.clone();
     let store = app.global::<Store>();
     store.on_trigger_selection_rule(move |rule| {
-        let mut lock = state_clone_rule.safe_lock();
+        let mut lock = state_clone_rule.lock();
         utils::ui::apply_selection_rule(&mut lock, rule.as_str());
         if let Some(ui) = app_weak_rule.upgrade() {
             let store = ui.global::<Store>();
@@ -117,7 +119,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let state_clone_exp = state.clone();
     let store = app.global::<Store>();
     store.on_expand_all_groups(move || {
-        let mut lock = state_clone_exp.safe_lock();
+        let mut lock = state_clone_exp.lock();
         lock.collapsed_groups.clear();
         if let Some(ui) = app_weak_expand.upgrade() {
             let store = ui.global::<Store>();
@@ -129,7 +131,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let state_clone_col = state.clone();
     let store = app.global::<Store>();
     store.on_collapse_all_groups(move || {
-        let mut lock = state_clone_col.safe_lock();
+        let mut lock = state_clone_col.lock();
         lock.collapsed_groups.clear();
 
         let header_indices: Vec<i32> = lock
@@ -164,7 +166,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let state_clone_col_sort = state.clone();
     let store = app.global::<Store>();
     store.on_sort_by_column(move |col| {
-        let mut lock = state_clone_col_sort.safe_lock();
+        let mut lock = state_clone_col_sort.lock();
         let col_str = col.to_string();
 
         if lock.sort_column == col_str {
@@ -175,84 +177,34 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
         }
 
         let asc = lock.sort_ascending;
+        let col_type = SortColumn::from(col_str.as_str());
 
         if !lock.groups.is_empty() {
-            // Sort duplicates INSIDE each group (keeping index 0 intact)
+            // Sort duplicates INSIDE each group (keeping index 0 / best representation intact)
             for group in &mut lock.groups {
                 if group.files.len() > 1 {
                     let (_, duplicates) = group.files.split_at_mut(1);
-                    match col_str.as_str() {
-                        "name" => duplicates.sort_by(|a, b| {
-                            if asc {
+                    duplicates.sort_by(|a, b| {
+                        let order = match col_type {
+                            SortColumn::Name | SortColumn::Path => {
                                 a.path.to_lowercase().cmp(&b.path.to_lowercase())
-                            } else {
-                                b.path.to_lowercase().cmp(&a.path.to_lowercase())
                             }
-                        }),
-                        "size" => duplicates.sort_by(|a, b| {
-                            if asc {
-                                a.size.cmp(&b.size)
-                            } else {
-                                b.size.cmp(&a.size)
-                            }
-                        }),
-                        "score" => duplicates.sort_by(|a, b| {
-                            let res = a
+                            SortColumn::Size => a.size.cmp(&b.size),
+                            SortColumn::Score => a
                                 .similarity
                                 .partial_cmp(&b.similarity)
-                                .unwrap_or(std::cmp::Ordering::Equal);
-                            if asc { res } else { res.reverse() }
-                        }),
-                        "path" => duplicates.sort_by(|a, b| {
-                            if asc {
-                                a.path.to_lowercase().cmp(&b.path.to_lowercase())
-                            } else {
-                                b.path.to_lowercase().cmp(&a.path.to_lowercase())
-                            }
-                        }),
-                        _ => {}
-                    }
+                                .unwrap_or(std::cmp::Ordering::Equal),
+                            _ => std::cmp::Ordering::Equal,
+                        };
+                        if asc { order } else { order.reverse() }
+                    });
                 }
             }
 
             // Sort the groups themselves
-            match col_str.as_str() {
-                "name" => {
-                    lock.groups.sort_by(|a, b| {
-                        let n_a = a
-                            .files
-                            .first()
-                            .map(|f| f.path.to_lowercase())
-                            .unwrap_or_default();
-                        let n_b = b
-                            .files
-                            .first()
-                            .map(|f| f.path.to_lowercase())
-                            .unwrap_or_default();
-                        let res = n_a.cmp(&n_b);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "size" => {
-                    lock.groups.sort_by(|a, b| {
-                        let s_a = a.files.first().map(|f| f.size).unwrap_or(0);
-                        let s_b = b.files.first().map(|f| f.size).unwrap_or(0);
-                        let res = s_a.cmp(&s_b);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "score" => {
-                    lock.groups.sort_by(|a, b| {
-                        let sim_a = a.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
-                        let sim_b = b.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
-                        let res = sim_a
-                            .partial_cmp(&sim_b)
-                            .unwrap_or(std::cmp::Ordering::Equal);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                "path" => {
-                    lock.groups.sort_by(|a, b| {
+            lock.groups.sort_by(|a, b| {
+                let order = match col_type {
+                    SortColumn::Name | SortColumn::Path => {
                         let p_a = a
                             .files
                             .first()
@@ -263,76 +215,52 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
                             .first()
                             .map(|f| f.path.to_lowercase())
                             .unwrap_or_default();
-                        let res = p_a.cmp(&p_b);
-                        if asc { res } else { res.reverse() }
-                    });
-                }
-                _ => {}
-            }
+                        p_a.cmp(&p_b)
+                    }
+                    SortColumn::Size => {
+                        let s_a = a.files.first().map(|f| f.size).unwrap_or(0);
+                        let s_b = b.files.first().map(|f| f.size).unwrap_or(0);
+                        s_a.cmp(&s_b)
+                    }
+                    SortColumn::Score => {
+                        let sim_a = a.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
+                        let sim_b = b.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
+                        sim_a
+                            .partial_cmp(&sim_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    _ => std::cmp::Ordering::Equal,
+                };
+                if asc { order } else { order.reverse() }
+            });
+
             lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
         } else if !lock.results.is_empty() {
             // Flat list sorting
-            match col_str.as_str() {
-                "name" => lock.results.sort_by(|a, b| {
-                    if asc {
-                        a.name.to_lowercase().cmp(&b.name.to_lowercase())
-                    } else {
-                        b.name.to_lowercase().cmp(&a.name.to_lowercase())
+            lock.results.sort_by(|a, b| {
+                let order = match col_type {
+                    SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    SortColumn::Format => a
+                        .format_str
+                        .to_lowercase()
+                        .cmp(&b.format_str.to_lowercase()),
+                    SortColumn::Dimensions => a.pixels_count.cmp(&b.pixels_count),
+                    SortColumn::Mipmaps => {
+                        let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
+                        let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
+                        m_a.cmp(&m_b)
                     }
-                }),
-                "format" => lock.results.sort_by(|a, b| {
-                    if asc {
-                        a.format_str
-                            .to_lowercase()
-                            .cmp(&b.format_str.to_lowercase())
-                    } else {
-                        b.format_str
-                            .to_lowercase()
-                            .cmp(&a.format_str.to_lowercase())
-                    }
-                }),
-                "dimensions" => lock.results.sort_by(|a, b| {
-                    if asc {
-                        a.pixels_count.cmp(&b.pixels_count)
-                    } else {
-                        b.pixels_count.cmp(&a.pixels_count)
-                    }
-                }),
-                "mipmaps" => lock.results.sort_by(|a, b| {
-                    let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
-                    let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
-                    if asc { m_a.cmp(&m_b) } else { m_b.cmp(&m_a) }
-                }),
-                "cubemap" => lock.results.sort_by(|a, b| {
-                    if asc {
-                        a.cubemap_str.cmp(&b.cubemap_str)
-                    } else {
-                        b.cubemap_str.cmp(&a.cubemap_str)
-                    }
-                }),
-                "size" => lock.results.sort_by(|a, b| {
-                    if asc {
-                        a.size_bytes.cmp(&b.size_bytes)
-                    } else {
-                        b.size_bytes.cmp(&a.size_bytes)
-                    }
-                }),
-                "path" => lock.results.sort_by(|a, b| {
-                    if asc {
-                        a.path.to_lowercase().cmp(&b.path.to_lowercase())
-                    } else {
-                        b.path.to_lowercase().cmp(&a.path.to_lowercase())
-                    }
-                }),
-                "score" => lock.results.sort_by(|a, b| {
-                    let res = a
+                    SortColumn::Cubemap => a.cubemap_str.cmp(&b.cubemap_str),
+                    SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
+                    SortColumn::Path => a.path.to_lowercase().cmp(&b.path.to_lowercase()),
+                    SortColumn::Score => a
                         .similarity
                         .partial_cmp(&b.similarity)
-                        .unwrap_or(std::cmp::Ordering::Equal);
-                    if asc { res } else { res.reverse() }
-                }),
-                _ => {}
-            }
+                        .unwrap_or(std::cmp::Ordering::Equal),
+                    _ => std::cmp::Ordering::Equal,
+                };
+                if asc { order } else { order.reverse() }
+            });
         }
 
         if let Some(ui) = app_weak_col_sort.upgrade() {
@@ -355,13 +283,10 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
     let store = app.global::<Store>();
     store.on_clear_cache(move || {
-        if let Some(cache) = crate::utils::cache::DECODED_CACHE.get() {
-            cache.invalidate_all();
-        }
-
-        if let Some(cache) = crate::scanners::THUMBNAIL_MEMORY_CACHE.get() {
-            cache.invalidate_all();
-        }
+        // Evict both image cache buckets from RAM via the centralized CacheManager
+        let manager = crate::utils::cache::get_cache_manager();
+        manager.decoded_images.invalidate_all();
+        manager.thumbnails.invalidate_all();
 
         tokio::spawn(async move {
             if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
@@ -401,7 +326,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let store = app.global::<Store>();
     store.on_results_filter_changed(move || {
         if let Some(ui) = app_weak_filter.upgrade() {
-            let mut lock = state_clone_filt.safe_lock();
+            let mut lock = state_clone_filt.lock();
             let store = ui.global::<Store>();
             utils::ui::update_results_ui(&store, &mut lock);
         }
@@ -411,7 +336,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let state_clone_sort = state.clone();
     let store = app.global::<Store>();
     store.on_results_sort_changed(move |sort_idx| {
-        let mut lock = state_clone_sort.safe_lock();
+        let mut lock = state_clone_sort.lock();
         if !lock.groups.is_empty() {
             match sort_idx {
                 0 => lock
@@ -449,7 +374,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let store = app.global::<Store>();
     store.on_auto_size_columns(move || {
         if let Some(ui) = app_weak_auto.upgrade() {
-            let lock = state_auto.safe_lock();
+            let lock = state_auto.lock();
             if lock.results.is_empty() {
                 return;
             }
@@ -506,7 +431,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
     let store = app.global::<Store>();
     store.on_grid_columns_changed(move || {
         if let Some(ui) = app_weak_grid.upgrade() {
-            let mut lock = state_grid.safe_lock();
+            let mut lock = state_grid.lock();
             let store = ui.global::<Store>();
             utils::ui::update_results_ui(&store, &mut lock);
         }

@@ -1,147 +1,123 @@
 // ui/store.slint
 
-import { ResultsRow, SelectedFile, GridRow } from "./structs.slint";
+import {
+    PathSettings,
+    ExtensionSettings,
+    UiLayoutSettings,
+    VisualReportSettings,
+    PreprocessingSettings,
+    QcSettings,
+    AiSettings,
+    TonemapSettings,
+    ViewerConfig,
+    PreviewSettings,
+    ResultsRow,
+    SelectedFile,
+    GridRow,
+} from "./structs.slint";
 
 export global Store {
     // ==========================================
-    // --- APP CONFIGURATION & SETTINGS ---------
+    // --- GROUPED PERSISTENT CONFIGURATIONS ----
     // ==========================================
-    in-out property <string> dir_a: "";
-    in-out property <string> dir_b: "";
-    in-out property <string> query_text: "";
-    in-out property <float> similarity_threshold: 90;
+    in-out property <PathSettings> paths: { dir_a: "", dir_b: "", excluded_folders: ".git, .svn, cache, temp", query_text: "" };
+
+    in-out property <ExtensionSettings> extensions: {
+        ext_png: true,
+        ext_jpg: true,
+        ext_tga: true,
+        ext_dds: true,
+        ext_bmp: true,
+        ext_exr: true,
+        ext_hdr: true,
+        ext_tif: true,
+        ext_webp: true,
+        ext_gif: true,
+        ext_psd: true,
+        ext_jxl: true,
+        ext_heic: true,
+        ext_avif: true
+    };
+
+    in-out property <UiLayoutSettings> ui: {
+        duplicates_panel_height: 180px,
+        sidebar_width: 380px,
+        compare_sidebar_width: 440px,
+        list_preview_size: 40px,
+        grid_card_size: 135px
+    };
+
+    in-out property <VisualReportSettings> visuals: {
+        save_visuals: false,
+        visuals_columns: 6,
+        visuals_max_count: 100,
+        visuals_font_size: 14,
+        visuals_scale: 1.5
+    };
+
+    in-out property <PreprocessingSettings> prep: {
+        prep_luminance: false,
+        prep_channels: false,
+        prep_r: true,
+        prep_g: true,
+        prep_b: true,
+        prep_a: true,
+        prep_tags: "",
+        prep_ignore_solid: true
+    };
+
+    in-out property <QcSettings> qc: {
+        qc_mode: false,
+        qc_npot: true,
+        qc_mipmaps: true,
+        qc_block_align: true,
+        qc_bit_depth: true,
+        qc_solid_colors: true,
+        qc_normals: true,
+        qc_normals_tags: "",
+        qc_match_by_stem: true,
+        qc_hide_same_resolution: false,
+        qc_check_bloat: true,
+        qc_check_alpha: true,
+        qc_check_colorspace: true,
+        qc_check_compression: true
+    };
+
+    in-out property <AiSettings> ai: { ai_model: 0, custom_model_path: "", custom_model_arch: 0, custom_model_dim: 512 };
+
+    in-out property <TonemapSettings> tonemap: { tonemap_enabled: true, tonemap_auto_exposure: true, tonemap_operator: 2 };
+
+    in-out property <ViewerConfig> viewer: {
+        grid_cols: 1,
+        grid_rows: 1,
+        manual_brightness: 1.0,
+        manual_contrast: 1.0,
+        manual_gamma: 1.0,
+        aspect_ratio_modifier: 1.0,
+        background_mode: 0,
+        flipbook_fps: 12.0,
+        fit_to_window: true,
+        play_speed: 1.0,
+        enable_frame_blending: false
+    };
+
+    in-out property <PreviewSettings> preview: {
+        enable_previews: true,
+        preview_quality: 1,
+        filter_only_npot: false,
+        filter_only_uncompressed: false,
+        filter_only_missing_mips: false,
+        filter_only_cubemaps: false
+    };
+
+    // ==========================================
+    // --- GLOBAL SCANNING CONSTANTS ------------
+    // ==========================================
+    in-out property <float> similarity_threshold: 90.0;
     in-out property <int> batch_size: 128;
-    in-out property <int> search_method: 0; // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI, 3: Inventory, 4: QC
+    in-out property <int> search_method: 0; // 0: Exact, 1: Perceptual, 2: AI, 3: Inventory, 4: QC
     in-out property <int> execution_provider: 0; // 0: CPU, 1: DirectML, 2: CUDA, 3: TensorRT, 4: CoreML
-
-    // File Format Extensions
-    in-out property <bool> ext_png: true;
-    in-out property <bool> ext_jpg: true;
-    in-out property <bool> ext_tga: true;
-    in-out property <bool> ext_dds: true;
-    in-out property <bool> ext_bmp: true;
-    in-out property <bool> ext_exr: true;
-    in-out property <bool> ext_hdr: true;
-    in-out property <bool> ext_tif: true;
-    in-out property <bool> ext_webp: true;
-    in-out property <bool> ext_gif: true;
-    in-out property <bool> ext_psd: true;
-    in-out property <bool> ext_jxl: true;
-    in-out property <bool> ext_heic: true;
-    in-out property <bool> ext_avif: true;
-
-    // Contact Sheet / Visual Reports Configurations
-    in-out property <bool> save_visuals: false;
-    in-out property <int> visuals_columns: 6;
-    in-out property <int> visuals_max_count: 100;
-    in-out property <int> visuals_font_size: 14;
-    in-out property <float> visuals_scale: 1.5;
-
-    // Image Pre-processing Options
-    in-out property <bool> prep_luminance: false;
-    in-out property <bool> prep_channels: false;
-    in-out property <bool> prep_r: true;
-    in-out property <bool> prep_g: true;
-    in-out property <bool> prep_b: true;
-    in-out property <bool> prep_a: true;
-    in-out property <string> prep_tags: "";
-    in-out property <bool> prep_ignore_solid: true;
-
-    // General Exclusion & Scanning Filters
-    in-out property <string> excluded_folders: ".git, .svn, cache, temp";
-    in-out property <bool> show_advanced: false;
-
-    // Technical QC Audit Criteria
-    in-out property <bool> qc_mode: false;
-    in-out property <bool> qc_npot: true;
-    in-out property <bool> qc_mipmaps: true;
-    in-out property <bool> qc_block_align: true;
-    in-out property <bool> qc_bit_depth: true;
-    in-out property <bool> qc_solid_colors: true;
-    in-out property <bool> qc_normals: true;
-    in-out property <string> qc_normals_tags: "";
-    in-out property <bool> qc_match_by_stem: true;
-    in-out property <bool> qc_hide_same_resolution: false;
-
-    // Relative Quality Control parameters
-    in-out property <bool> qc_check_bloat: true;
-    in-out property <bool> qc_check_alpha: true;
-    in-out property <bool> qc_check_colorspace: true;
-    in-out property <bool> qc_check_compression: true;
-
-    // AI Semantic Models Configurations
     in-out property <int> search_precision: 1;
-    in-out property <int> ai_model: 0; // 0: CLIP-B/32, 1: CLIP-L/14, 2: SigLIP-B, 3: SigLIP-L, 4: DINOv2-B, 5: SigLIP2-B, 6: LLM2CLIP, 7: Custom
-    in-out property <string> custom_model_path: "";
-    in-out property <int> custom_model_arch: 0;
-    in-out property <int> custom_model_dim: 512;
-
-    // HDR Tonemapping Options
-    in-out property <bool> tonemap_enabled: true;
-    in-out property <bool> tonemap_auto_exposure: true;
-    // 0: None, 1: False Color, 2: AcesFilmic, 3: Aces2Fit, 4: PbrNeutral, 5: ICtCpPerceptual
-    in-out property <int> tonemap_operator: 2;
-
-    // Previews & Quality Configurations
-    in-out property <bool> enable_previews: true;
-    in-out property <int> preview_quality: 1;
-    in-out property <bool> filter_only_npot: false;
-    in-out property <bool> filter_only_uncompressed: false;
-    in-out property <bool> filter_only_missing_mips: false;
-    in-out property <bool> filter_only_cubemaps: false;
-
-    // ==========================================
-    // --- SPRITESHEET & FLIPBOOK CONFIGS -------
-    // ==========================================
-    in-out property <int> grid_cols: 1;
-    in-out property <int> grid_rows: 1;
-    in-out property <int> active_frame: 0;
-    in-out property <int> sprites_count: 1;
-    in-out property <int> sprite_width: 0;
-    in-out property <int> sprite_height: 0;
-    in-out property <bool> play_flipbook: false;
-    in-out property <float> flipbook_fps: 12.0;
-
-    // ==========================================
-    // --- MANUAL COLOR & ASPECT CORRECTIONS ----
-    // ==========================================
-    in-out property <float> manual_brightness: 1.0;
-    in-out property <float> manual_contrast: 1.0;
-    in-out property <float> manual_gamma: 1.0;
-    in-out property <float> aspect_ratio_modifier: 1.0;
-    in-out property <int> background_mode: 0; // 0: Checkerboard, 1: Solid Black, 2: Solid White
-    in-out property <bool> fit_to_window: true;
-
-    // ==========================================
-    // --- UI DRAG & LAYOUT STATES --------------
-    // ==========================================
-    in-out property <length> sidebar_width: 380px;
-    in-out property <length> compare_sidebar_width: 440px;
-    in-out property <length> duplicates_panel_height: 180px;
-    in-out property <length> grid_card_size: 135px;
-    in-out property <length> list_preview_size: 40px;
-
-    // Dynamic Columns Widths
-    in-out property <length> col_file_w: 320px;
-    in-out property <length> col_score_w: 80px;
-    in-out property <length> col_path_w: 380px;
-    in-out property <length> col_format_w: 110px;
-    in-out property <length> col_dimensions_w: 110px;
-    in-out property <length> col_mipmaps_w: 75px;
-    in-out property <length> col_cubemap_w: 75px;
-    in-out property <length> col_size_w: 85px;
-
-    // Draggable columns for the Comparison Specifications Matrix
-    in-out property <length> col_spec_name_w: 130px;
-    in-out property <length> col_spec_val1_w: 140px;
-
-    // Popup Coordinates
-    in-out property <length> ext_popup_x: 0px;
-    in-out property <length> ext_popup_y: 0px;
-    in-out property <length> skipped_popup_x: 0px;
-    in-out property <length> skipped_popup_y: 0px;
-    in-out property <length> menu_x: 0px;
-    in-out property <length> menu_y: 0px;
 
     // ==========================================
     // --- RUNTIME STATE & DATA MODELS ----------
@@ -157,7 +133,43 @@ export global Store {
     in-out property <[GridRow]> grid_row_results: [];
     in-out property <[ResultsRow]> selected_group_files: [];
 
-    // Selected Assets Specifications (Compare Tab)
+    // ==========================================
+    // --- VIEWPORT IMAGE AND RENDERING BUFFERS --
+    // ==========================================
+    in-out property <image> image_original;
+    in-out property <image> image_duplicate;
+    in-out property <image> image_heatmap;
+    in-out property <image> histogram_image;
+    in-out property <image> checkerboard_pattern;
+    in-out property <image> checkerboard_pattern_light;
+
+    // Viewport interactive parameters
+    in-out property <int> compare_mode: 0; // 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference, 4: Flicker
+    in-out property <float> wipe_slider_val: 0.5;
+    in-out property <float> bg_alpha: 1.0;
+    in-out property <float> zoom_factor: 1.0;
+    in-out property <length> pan_x: 0px;
+    in-out property <length> pan_y: 0px;
+
+    // Viewport channel-isolation layers
+    in-out property <bool> active_r: false;
+    in-out property <bool> active_g: false;
+    in-out property <bool> active_b: false;
+    in-out property <bool> active_a: false;
+
+    // Multi-frame Spritesheet/Flipbook runtime state
+    in-out property <int> active_frame: 0;
+    in-out property <int> sprites_count: 1;
+    in-out property <int> sprite_width: 0;
+    in-out property <int> sprite_height: 0;
+    in-out property <bool> play_flipbook: false;
+
+    // Multi-frame frame blending preview buffers
+    in-out property <image> image_original_next;
+    in-out property <image> image_duplicate_next;
+    in-out property <float> blend_factor: 0.0;
+
+    // Selected metadata files specifications (Compare Matrix)
     in-out property <SelectedFile> original_meta: {
         name: "-",
         size_str: "-",
@@ -183,35 +195,21 @@ export global Store {
         path: ""
     };
 
-    // Cached Decoded Graphics targets
-    in-out property <image> image_original;
-    in-out property <image> image_duplicate;
-    in-out property <image> image_heatmap;
-    in-out property <image> histogram_image;
-    in-out property <image> checkerboard_pattern;
-    in-out property <image> checkerboard_pattern_light;
-
-    // Compare Viewport Parameters
-    in-out property <int> compare_mode: 0; // 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference, 4: Flicker
-    in-out property <float> wipe_slider_val: 0.5;
-    in-out property <float> bg_alpha: 1.0;
-    in-out property <float> zoom_factor: 1.0;
-    in-out property <length> pan_x: 0px;
-    in-out property <length> pan_y: 0px;
-
-    // Channel-Isolated selections
-    in-out property <bool> active_r: false;
-    in-out property <bool> active_g: false;
-    in-out property <bool> active_b: false;
-    in-out property <bool> active_a: false;
-
-    // Mipmap navigation bounds
+    // Mipmap resolution layers navigation
     in-out property <int> active_mip_level: 0;
     in-out property <int> max_available_mips: 1;
 
-    // Flicker loop states
+    // Interactive flicker loop state flags
     in-out property <bool> flicker_show_duplicate: false;
-    in-out property <float> flicker_interval_val: 333;
+    in-out property <float> flicker_interval_val: 333.0;
+
+    // Diagnostics logs console output
+    in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
+
+    // Active hovered item variables
+    in-out property <string> context_hovered_path: "";
+    in-out property <bool> results_grid_mode: false;
+    in-out property <bool> has_results: false;
 
     // Column sorting dynamics
     in-out property <string> active_sort_column: "";
@@ -222,20 +220,30 @@ export global Store {
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
 
-    // Trace Logs Diagnostics Console
-    in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
-    in-out property <string> context_hovered_path: "";
+    // Advanced toggles
+    in-out property <bool> show_advanced: false;
 
-    // Smart Filter state variables
-    in-out property <bool> results_grid_mode: false;
-    in-out property <bool> has_results: false;
+    // Dynamic UI Columns Widths
+    in-out property <length> col_file_w: 320px;
+    in-out property <length> col_score_w: 80px;
+    in-out property <length> col_path_w: 380px;
+    in-out property <length> col_format_w: 110px;
+    in-out property <length> col_dimensions_w: 110px;
+    in-out property <length> col_mipmaps_w: 75px;
+    in-out property <length> col_cubemap_w: 75px;
+    in-out property <length> col_size_w: 85px;
 
-    // PREVIEW SYSTEM FOR BLENDING ANIMATIONS
-    in-out property <image> image_original_next;
-    in-out property <image> image_duplicate_next;
-    in-out property <float> blend_factor: 0.0;
-    in-out property <bool> enable_frame_blending: false;
-    in-out property <float> play_speed: 1.0;
+    // Draggable columns for the Comparison Specifications Matrix
+    in-out property <length> col_spec_name_w: 130px;
+    in-out property <length> col_spec_val1_w: 140px;
+
+    // Popup Coordinate alignments
+    in-out property <length> ext_popup_x: 0px;
+    in-out property <length> ext_popup_y: 0px;
+    in-out property <length> skipped_popup_x: 0px;
+    in-out property <length> skipped_popup_y: 0px;
+    in-out property <length> menu_x: 0px;
+    in-out property <length> menu_y: 0px;
 
     // ==========================================
     // --- OPERATIONAL ACTIONS CALLBACKS --------

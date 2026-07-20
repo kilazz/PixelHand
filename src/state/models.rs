@@ -81,8 +81,38 @@ impl SearchMethod {
     }
 }
 
+/// Strongly-typed sorting columns to replace magic strings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortColumn {
+    Name,
+    Size,
+    Score,
+    Path,
+    Format,
+    Dimensions,
+    Mipmaps,
+    Cubemap,
+    Unknown,
+}
+
+impl From<&str> for SortColumn {
+    fn from(s: &str) -> Self {
+        match s {
+            "name" => Self::Name,
+            "size" => Self::Size,
+            "score" => Self::Score,
+            "path" => Self::Path,
+            "format" => Self::Format,
+            "dimensions" => Self::Dimensions,
+            "mipmaps" => Self::Mipmaps,
+            "cubemap" => Self::Cubemap,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 // ==========================================
-// --- DECOMPOSED SETTINGS SUB-STRUCTS ------
+// --- CONFIGURATION SETTINGS STRUCTS -------
 // ==========================================
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -149,6 +179,7 @@ pub struct UiLayoutSettings {
     pub sidebar_width: f32,
     pub compare_sidebar_width: f32,
     pub list_preview_size: f32,
+    pub grid_card_size: f32,
 }
 
 impl Default for UiLayoutSettings {
@@ -158,6 +189,7 @@ impl Default for UiLayoutSettings {
             sidebar_width: 380.0,
             compare_sidebar_width: 440.0,
             list_preview_size: 40.0,
+            grid_card_size: 135.0,
         }
     }
 }
@@ -408,4 +440,296 @@ pub struct QcIssueSummary {
 pub struct AiSearchResultSummary {
     pub path: String,
     pub similarity: f32,
+}
+
+// ==========================================
+// --- SLINT AUTO-CONVERSIONS BRIDGE --------
+// ==========================================
+
+// Paths
+impl From<PathSettings> for crate::app::PathSettings {
+    fn from(s: PathSettings) -> Self {
+        Self {
+            dir_a: s.dir_a.into(),
+            dir_b: s.dir_b.into(),
+            excluded_folders: s.excluded_folders.into(),
+            query_text: s.query_text.into(),
+        }
+    }
+}
+impl From<crate::app::PathSettings> for PathSettings {
+    fn from(s: crate::app::PathSettings) -> Self {
+        Self {
+            dir_a: s.dir_a.to_string(),
+            dir_b: s.dir_b.to_string(),
+            excluded_folders: s.excluded_folders.to_string(),
+            query_text: s.query_text.to_string(),
+        }
+    }
+}
+
+// Extensions
+impl From<ExtensionSettings> for crate::app::ExtensionSettings {
+    fn from(s: ExtensionSettings) -> Self {
+        Self {
+            ext_png: s.ext_png,
+            ext_jpg: s.ext_jpg,
+            ext_tga: s.ext_tga,
+            ext_dds: s.ext_dds,
+            ext_bmp: s.ext_bmp,
+            ext_exr: s.ext_exr,
+            ext_hdr: s.ext_hdr,
+            ext_tif: s.ext_tif,
+            ext_webp: s.ext_webp,
+            ext_gif: s.ext_gif,
+            ext_psd: s.ext_psd,
+            ext_jxl: s.ext_jxl,
+            ext_heic: s.ext_heic,
+            ext_avif: s.ext_avif,
+        }
+    }
+}
+impl From<crate::app::ExtensionSettings> for ExtensionSettings {
+    fn from(s: crate::app::ExtensionSettings) -> Self {
+        Self {
+            ext_png: s.ext_png,
+            ext_jpg: s.ext_jpg,
+            ext_tga: s.ext_tga,
+            ext_dds: s.ext_dds,
+            ext_bmp: s.ext_bmp,
+            ext_exr: s.ext_exr,
+            ext_hdr: s.ext_hdr,
+            ext_tif: s.ext_tif,
+            ext_webp: s.ext_webp,
+            ext_gif: s.ext_gif,
+            ext_psd: s.ext_psd,
+            ext_jxl: s.ext_jxl,
+            ext_heic: s.ext_heic,
+            ext_avif: s.ext_avif,
+        }
+    }
+}
+
+// UI
+impl From<UiLayoutSettings> for crate::app::UiLayoutSettings {
+    fn from(s: UiLayoutSettings) -> Self {
+        Self {
+            duplicates_panel_height: s.duplicates_panel_height,
+            sidebar_width: s.sidebar_width,
+            compare_sidebar_width: s.compare_sidebar_width,
+            list_preview_size: s.list_preview_size,
+            grid_card_size: s.grid_card_size,
+        }
+    }
+}
+impl From<crate::app::UiLayoutSettings> for UiLayoutSettings {
+    fn from(s: crate::app::UiLayoutSettings) -> Self {
+        Self {
+            duplicates_panel_height: s.duplicates_panel_height,
+            sidebar_width: s.sidebar_width,
+            compare_sidebar_width: s.compare_sidebar_width,
+            list_preview_size: s.list_preview_size,
+            grid_card_size: s.grid_card_size,
+        }
+    }
+}
+
+// Visuals
+impl From<VisualReportSettings> for crate::app::VisualReportSettings {
+    fn from(s: VisualReportSettings) -> Self {
+        Self {
+            save_visuals: s.save_visuals,
+            visuals_columns: s.visuals_columns,
+            visuals_max_count: s.visuals_max_count,
+            visuals_font_size: s.visuals_font_size,
+            visuals_scale: s.visuals_scale,
+        }
+    }
+}
+impl From<crate::app::VisualReportSettings> for VisualReportSettings {
+    fn from(s: crate::app::VisualReportSettings) -> Self {
+        Self {
+            save_visuals: s.save_visuals,
+            visuals_columns: s.visuals_columns,
+            visuals_max_count: s.visuals_max_count,
+            visuals_font_size: s.visuals_font_size,
+            visuals_scale: s.visuals_scale,
+        }
+    }
+}
+
+// Preprocessing
+impl From<PreprocessingSettings> for crate::app::PreprocessingSettings {
+    fn from(s: PreprocessingSettings) -> Self {
+        Self {
+            prep_luminance: s.prep_luminance,
+            prep_channels: s.prep_channels,
+            prep_r: s.prep_r,
+            prep_g: s.prep_g,
+            prep_b: s.prep_b,
+            prep_a: s.prep_a,
+            prep_tags: s.prep_tags.into(),
+            prep_ignore_solid: s.prep_ignore_solid,
+        }
+    }
+}
+impl From<crate::app::PreprocessingSettings> for PreprocessingSettings {
+    fn from(s: crate::app::PreprocessingSettings) -> Self {
+        Self {
+            prep_luminance: s.prep_luminance,
+            prep_channels: s.prep_channels,
+            prep_r: s.prep_r,
+            prep_g: s.prep_g,
+            prep_b: s.prep_b,
+            prep_a: s.prep_a,
+            prep_tags: s.prep_tags.to_string(),
+            prep_ignore_solid: s.prep_ignore_solid,
+        }
+    }
+}
+
+// QC
+impl From<QcSettings> for crate::app::QcSettings {
+    fn from(s: QcSettings) -> Self {
+        Self {
+            qc_mode: s.qc_mode,
+            qc_npot: s.qc_npot,
+            qc_mipmaps: s.qc_mipmaps,
+            qc_block_align: s.qc_block_align,
+            qc_bit_depth: s.qc_bit_depth,
+            qc_solid_colors: s.qc_solid_colors,
+            qc_normals: s.qc_normals,
+            qc_normals_tags: s.qc_normals_tags.into(),
+            qc_match_by_stem: s.qc_match_by_stem,
+            qc_hide_same_resolution: s.qc_hide_same_resolution,
+            qc_check_bloat: s.qc_check_bloat,
+            qc_check_alpha: s.qc_check_alpha,
+            qc_check_colorspace: s.qc_check_colorspace,
+            qc_check_compression: s.qc_check_compression,
+        }
+    }
+}
+impl From<crate::app::QcSettings> for QcSettings {
+    fn from(s: crate::app::QcSettings) -> Self {
+        Self {
+            qc_mode: s.qc_mode,
+            qc_npot: s.qc_npot,
+            qc_mipmaps: s.qc_mipmaps,
+            qc_block_align: s.qc_block_align,
+            qc_bit_depth: s.qc_bit_depth,
+            qc_solid_colors: s.qc_solid_colors,
+            qc_normals: s.qc_normals,
+            qc_normals_tags: s.qc_normals_tags.to_string(),
+            qc_match_by_stem: s.qc_match_by_stem,
+            qc_hide_same_resolution: s.qc_hide_same_resolution,
+            qc_check_bloat: s.qc_check_bloat,
+            qc_check_alpha: s.qc_check_alpha,
+            qc_check_colorspace: s.qc_check_colorspace,
+            qc_check_compression: s.qc_check_compression,
+        }
+    }
+}
+
+// AI
+impl From<AiSettings> for crate::app::AiSettings {
+    fn from(s: AiSettings) -> Self {
+        Self {
+            ai_model: s.ai_model,
+            custom_model_path: s.custom_model_path.into(),
+            custom_model_arch: s.custom_model_arch,
+            custom_model_dim: s.custom_model_dim,
+        }
+    }
+}
+impl From<crate::app::AiSettings> for AiSettings {
+    fn from(s: crate::app::AiSettings) -> Self {
+        Self {
+            ai_model: s.ai_model,
+            custom_model_path: s.custom_model_path.to_string(),
+            custom_model_arch: s.custom_model_arch,
+            custom_model_dim: s.custom_model_dim,
+        }
+    }
+}
+
+// Tonemap
+impl From<TonemapSettings> for crate::app::TonemapSettings {
+    fn from(s: TonemapSettings) -> Self {
+        Self {
+            tonemap_enabled: s.tonemap_enabled,
+            tonemap_auto_exposure: s.tonemap_auto_exposure,
+            tonemap_operator: s.tonemap_operator,
+        }
+    }
+}
+impl From<crate::app::TonemapSettings> for TonemapSettings {
+    fn from(s: crate::app::TonemapSettings) -> Self {
+        Self {
+            tonemap_enabled: s.tonemap_enabled,
+            tonemap_auto_exposure: s.tonemap_auto_exposure,
+            tonemap_operator: s.tonemap_operator,
+        }
+    }
+}
+
+// Viewer (Slint-side is ViewerConfig, Rust-side is ViewerSettings)
+impl From<ViewerSettings> for crate::app::ViewerConfig {
+    fn from(s: ViewerSettings) -> Self {
+        Self {
+            grid_cols: s.grid_cols,
+            grid_rows: s.grid_rows,
+            manual_brightness: s.manual_brightness,
+            manual_contrast: s.manual_contrast,
+            manual_gamma: s.manual_gamma,
+            aspect_ratio_modifier: s.aspect_ratio_modifier,
+            background_mode: s.background_mode,
+            flipbook_fps: s.flipbook_fps,
+            fit_to_window: s.fit_to_window,
+            play_speed: s.play_speed,
+            enable_frame_blending: s.enable_frame_blending,
+        }
+    }
+}
+impl From<crate::app::ViewerConfig> for ViewerSettings {
+    fn from(s: crate::app::ViewerConfig) -> Self {
+        Self {
+            grid_cols: s.grid_cols,
+            grid_rows: s.grid_rows,
+            manual_brightness: s.manual_brightness,
+            manual_contrast: s.manual_contrast,
+            manual_gamma: s.manual_gamma,
+            aspect_ratio_modifier: s.aspect_ratio_modifier,
+            background_mode: s.background_mode,
+            flipbook_fps: s.flipbook_fps,
+            fit_to_window: s.fit_to_window,
+            play_speed: s.play_speed,
+            enable_frame_blending: s.enable_frame_blending,
+        }
+    }
+}
+
+// Previews
+impl From<PreviewSettings> for crate::app::PreviewSettings {
+    fn from(s: PreviewSettings) -> Self {
+        Self {
+            enable_previews: s.enable_previews,
+            preview_quality: s.preview_quality,
+            filter_only_npot: s.filter_only_npot,
+            filter_only_uncompressed: s.filter_only_uncompressed,
+            filter_only_missing_mips: s.filter_only_missing_mips,
+            filter_only_cubemaps: s.filter_only_cubemaps,
+        }
+    }
+}
+impl From<crate::app::PreviewSettings> for PreviewSettings {
+    fn from(s: crate::app::PreviewSettings) -> Self {
+        Self {
+            enable_previews: s.enable_previews,
+            preview_quality: s.preview_quality,
+            filter_only_npot: s.filter_only_npot,
+            filter_only_uncompressed: s.filter_only_uncompressed,
+            filter_only_missing_mips: s.filter_only_missing_mips,
+            filter_only_cubemaps: s.filter_only_cubemaps,
+        }
+    }
 }

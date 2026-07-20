@@ -8,7 +8,7 @@ import {
     LineEdit,
     CheckBox,
     ScrollView,
-    ListView, // Added ListView to the import list from standard widgets
+    ListView,
 } from "std-widgets.slint";
 
 import { ResultsRow, SelectedFile, GridRow } from "../structs.slint";
@@ -124,19 +124,19 @@ export component CompareTab inherits HorizontalLayout {
 
             CheckBox {
                 text: "HDR";
-                checked <=> Store.tonemap_enabled;
+                checked <=> Store.tonemap.tonemap_enabled;
                 height: 24px;
                 toggled => { Store.tonemap_toggled(); }
             }
 
-            if Store.tonemap_enabled: CheckBox {
+            if Store.tonemap.tonemap_enabled: CheckBox {
                 text: "Auto Exp";
-                checked <=> Store.tonemap_auto_exposure;
+                checked <=> Store.tonemap.tonemap_auto_exposure;
                 height: 24px;
                 toggled => { Store.tonemap_toggled(); }
             }
 
-            if Store.tonemap_enabled: ComboBox {
+            if Store.tonemap.tonemap_enabled: ComboBox {
                 model: [
                     "None",
                     "False Color",
@@ -146,7 +146,7 @@ export component CompareTab inherits HorizontalLayout {
                     "ICtCp BT.2446c",
                     "ICtCp Lumina"
                 ];
-                current-index <=> Store.tonemap_operator;
+                current-index <=> Store.tonemap.tonemap_operator;
                 height: 24px;
                 width: 165px;
                 selected(val) => { Store.tonemap_toggled(); }
@@ -184,9 +184,9 @@ export component CompareTab inherits HorizontalLayout {
                     text: "Fit";
                     height: 24px;
                     width: 45px;
-                    primary-color: Store.fit_to_window ? #3e6a90 : #474747;
+                    primary-color: Store.viewer.fit_to_window ? #3e6a90 : #474747;
                     clicked => {
-                        Store.fit_to_window = true;
+                        Store.viewer.fit_to_window = true;
                         Store.zoom_factor = 1.0;
                         Store.pan_x = 0px;
                         Store.pan_y = 0px;
@@ -198,9 +198,9 @@ export component CompareTab inherits HorizontalLayout {
                     text: "1:1";
                     height: 24px;
                     width: 45px;
-                    primary-color: !Store.fit_to_window ? #3e6a90 : #474747;
+                    primary-color: !Store.viewer.fit_to_window ? #3e6a90 : #474747;
                     clicked => {
-                        Store.fit_to_window = false;
+                        Store.viewer.fit_to_window = false;
                         Store.zoom_factor = 1.0;
                         Store.pan_x = 0px;
                         Store.pan_y = 0px;
@@ -213,7 +213,7 @@ export component CompareTab inherits HorizontalLayout {
                     height: 24px;
                     primary-color: #474747;
                     clicked => {
-                        Store.fit_to_window = true;
+                        Store.viewer.fit_to_window = true;
                         Store.zoom_factor = 1.0;
                         Store.pan_x = 0px;
                         Store.pan_y = 0px;
@@ -235,12 +235,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             SpinBox {
-                value <=> Store.grid_cols;
+                value <=> Store.viewer.grid_cols;
                 minimum: 1;
                 maximum: 64;
                 height: 24px;
                 width: 90px;
-                edited(val) => { Store.grid_cols = val; Store.active_frame_changed(); }
+                edited(val) => { Store.viewer.grid_cols = val; Store.active_frame_changed(); }
             }
 
             Text {
@@ -251,12 +251,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             SpinBox {
-                value <=> Store.grid_rows;
+                value <=> Store.viewer.grid_rows;
                 minimum: 1;
                 maximum: 64;
                 height: 24px;
                 width: 90px;
-                edited(val) => { Store.grid_rows = val; Store.active_frame_changed(); }
+                edited(val) => { Store.viewer.grid_rows = val; Store.active_frame_changed(); }
             }
 
             Rectangle {
@@ -278,7 +278,7 @@ export component CompareTab inherits HorizontalLayout {
 
             ComboBox {
                 model: ["Dark Checkerboard", "Light Checkerboard", "Solid Black", "Solid White"];
-                current-index <=> Store.background_mode;
+                current-index <=> Store.viewer.background_mode;
                 height: 24px;
                 width: 135px;
                 selected(val) => { Store.active_frame_changed(); }
@@ -292,7 +292,7 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.manual_brightness;
+                value <=> Store.viewer.manual_brightness;
                 minimum: 0.1;
                 maximum: 3.0;
                 height: 24px;
@@ -308,7 +308,7 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.manual_contrast;
+                value <=> Store.viewer.manual_contrast;
                 minimum: 0.1;
                 maximum: 3.0;
                 height: 24px;
@@ -324,7 +324,7 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.manual_gamma;
+                value <=> Store.viewer.manual_gamma;
                 minimum: 0.1;
                 maximum: 3.0;
                 height: 24px;
@@ -340,7 +340,7 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.aspect_ratio_modifier;
+                value <=> Store.viewer.aspect_ratio_modifier;
                 minimum: 0.2;
                 maximum: 3.0;
                 height: 24px;
@@ -353,10 +353,10 @@ export component CompareTab inherits HorizontalLayout {
                 height: 24px;
                 primary-color: #474747;
                 clicked => {
-                    Store.manual_brightness = 1.0;
-                    Store.manual_contrast = 1.0;
-                    Store.manual_gamma = 1.0;
-                    Store.aspect_ratio_modifier = 1.0;
+                    Store.viewer.manual_brightness = 1.0;
+                    Store.viewer.manual_contrast = 1.0;
+                    Store.viewer.manual_gamma = 1.0;
+                    Store.viewer.aspect_ratio_modifier = 1.0;
                     Store.active_frame_changed();
                 }
             }
@@ -370,7 +370,7 @@ export component CompareTab inherits HorizontalLayout {
         InteractiveCompareViewport { }
 
         // FIXED BOTTOM TIMELINE PLAYER
-        if Store.grid_cols > 1 || Store.grid_rows > 1: Rectangle {
+        if Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1: Rectangle {
             height: 38px;
             background: #1e1e1e;
             border-color: #353535;
@@ -381,13 +381,13 @@ export component CompareTab inherits HorizontalLayout {
                 padding-left: 10px;
                 padding-right: 10px;
                 spacing: 12px;
-                cross-axis-alignment: center; // Vertically center all layout items
+                cross-axis-alignment: center;
 
                 // Playback buttons
                 HorizontalLayout {
                     spacing: 4px;
                     alignment: start;
-                    cross-axis-alignment: center; // Vertically center transport buttons
+                    cross-axis-alignment: center;
 
                     // Go to Start
                     CustomButton {
@@ -435,7 +435,7 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            let total_frames = Store.grid_cols * Store.grid_rows;
+                            let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
                             Store.active_frame = Math.min(total_frames - 1, Store.active_frame + 1);
                             Store.active_frame_changed();
                         }
@@ -449,7 +449,7 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            let total_frames = Store.grid_cols * Store.grid_rows;
+                            let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
                             Store.active_frame = total_frames - 1;
                             Store.active_frame_changed();
                         }
@@ -460,7 +460,7 @@ export component CompareTab inherits HorizontalLayout {
                 SpinBox {
                     value: Store.active_frame + 1;
                     minimum: 1;
-                    maximum: Math.max(1, Store.grid_cols * Store.grid_rows);
+                    maximum: Math.max(1, Store.viewer.grid_cols * Store.viewer.grid_rows);
                     height: 24px;
                     width: 90px;
                     edited(val) => {
@@ -478,13 +478,13 @@ export component CompareTab inherits HorizontalLayout {
 
                 // FPS Input
                 SpinBox {
-                    value: Math.round(Store.flipbook_fps);
+                    value: Math.round(Store.viewer.flipbook_fps);
                     minimum: 1;
                     maximum: 144;
                     height: 24px;
                     width: 90px;
                     edited(val) => {
-                        Store.flipbook_fps = val;
+                        Store.viewer.flipbook_fps = val;
                     }
                 }
 
@@ -504,7 +504,7 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Slider {
-                    value <=> Store.play_speed;
+                    value <=> Store.viewer.play_speed;
                     minimum: 0.1;
                     maximum: 4.0;
                     height: 24px;
@@ -512,7 +512,7 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Text {
-                    text: (Math.round(Store.play_speed * 10) / 10) + "x";
+                    text: (Math.round(Store.viewer.play_speed * 10) / 10) + "x";
                     font-size: 11px;
                     color: #ffffff;
                     vertical-alignment: center;
@@ -522,7 +522,7 @@ export component CompareTab inherits HorizontalLayout {
                 // Frame Blending CheckBox
                 CheckBox {
                     text: "Blend";
-                    checked <=> Store.enable_frame_blending;
+                    checked <=> Store.viewer.enable_frame_blending;
                     height: 24px;
                 }
 
@@ -541,7 +541,7 @@ export component CompareTab inherits HorizontalLayout {
                         // Fill bar
                         Rectangle {
                             x: 0px;
-                            width: parent.width * (Store.active_frame / Math.max(1, (Store.grid_cols * Store.grid_rows) - 1));
+                            width: parent.width * (Store.active_frame / Math.max(1, (Store.viewer.grid_cols * Store.viewer.grid_rows) - 1));
                             height: 100%;
                             background: #e59535;
                             border-radius: 5px;
@@ -549,7 +549,7 @@ export component CompareTab inherits HorizontalLayout {
 
                         // Handle
                         Rectangle {
-                            x: (parent.width - self.width) * (Store.active_frame / Math.max(1, (Store.grid_cols * Store.grid_rows) - 1));
+                            x: (parent.width - self.width) * (Store.active_frame / Math.max(1, (Store.viewer.grid_cols * Store.viewer.grid_rows) - 1));
                             y: (parent.height - self.height) / 2;
                             width: 14px;
                             height: 14px;
@@ -564,7 +564,7 @@ export component CompareTab inherits HorizontalLayout {
                             height: 100%;
                             moved => {
                                 if (self.pressed) {
-                                    let total_frames = Store.grid_cols * Store.grid_rows;
+                                    let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
                                     let ratio = self.mouse-x / parent.width;
                                     let raw_frame = Math.round(ratio * (total_frames - 1));
                                     Store.active_frame = raw_frame.clamp(0, total_frames - 1);
@@ -572,7 +572,7 @@ export component CompareTab inherits HorizontalLayout {
                                 }
                             }
                             clicked => {
-                                let total_frames = Store.grid_cols * Store.grid_rows;
+                                let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
                                 let ratio = self.mouse-x / parent.width;
                                 let raw_frame = Math.round(ratio * (total_frames - 1));
                                 Store.active_frame = raw_frame.clamp(0, total_frames - 1);
@@ -635,13 +635,13 @@ export component CompareTab inherits HorizontalLayout {
 
         compare-splitter-ta := TouchArea {
             mouse-cursor: MouseCursor.col-resize;
-            moved => { if (self.pressed) { Store.compare_sidebar_width = (Store.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); } }
+            moved => { if (self.pressed) { Store.ui.compare_sidebar_width = (Store.ui.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); } }
         }
     }
 
     // COMPARISON SIDEBAR
     VerticalLayout {
-        width: Store.compare_sidebar_width;
+        width: Store.ui.compare_sidebar_width;
         padding-left: 12px;
         spacing: 12px;
         Text {
@@ -652,7 +652,7 @@ export component CompareTab inherits HorizontalLayout {
         }
 
         Rectangle {
-            height: Store.duplicates_panel_height;
+            height: Store.ui.duplicates_panel_height;
             background: #181818;
             border-color: #353535;
             border-width: 1px;
@@ -721,7 +721,7 @@ export component CompareTab inherits HorizontalLayout {
 
             splitter-ta := TouchArea {
                 mouse-cursor: row-resize;
-                moved => { if (self.pressed) { Store.duplicates_panel_height = (self.y + self.mouse-y - self.pressed-y).clamp(80px, 450px); } }
+                moved => { if (self.pressed) { Store.ui.duplicates_panel_height = (self.y + self.mouse-y - self.pressed-y).clamp(80px, 450px); } }
             }
         }
 
@@ -774,7 +774,6 @@ export component CompareTab inherits HorizontalLayout {
                             font-size: 12px;
                         }
 
-                        // Draggable Splitter 1 with clean 9px hitbox
                         Rectangle {
                             width: 1px;
                             background: spec_split1.has-hover ? #e59535 : #353535;
@@ -798,7 +797,6 @@ export component CompareTab inherits HorizontalLayout {
                             font-size: 12px;
                         }
 
-                        // Draggable Splitter 2 with clean 9px hitbox
                         Rectangle {
                             width: 1px;
                             background: spec_split2.has-hover ? #e59535 : #353535;
@@ -885,14 +883,14 @@ export component CompareTab inherits HorizontalLayout {
 
                     SpecsRow {
                         name: "Sprites Count";
-                        val1: Store.grid_cols > 1 || Store.grid_rows > 1 ? Store.sprites_count : "-";
-                        val2: Store.grid_cols > 1 || Store.grid_rows > 1 ? Store.sprites_count : "-";
+                        val1: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? Store.sprites_count : "-";
+                        val2: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? Store.sprites_count : "-";
                     }
 
                     SpecsRow {
                         name: "Sprite Size";
-                        val1: Store.grid_cols > 1 || Store.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
-                        val2: Store.grid_cols > 1 || Store.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
+                        val1: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
+                        val2: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
                     }
 
                     Rectangle {

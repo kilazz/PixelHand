@@ -14,12 +14,6 @@ pub enum AnalysisType {
     A,
 }
 
-#[allow(dead_code)]
-pub struct PerceptualHashes {
-    pub dhash: String,
-    pub phash: String,
-}
-
 /// Detects if an image has a fully transparent alpha channel but contains
 /// valid RGB visual data (common in game engines/packed textures).
 /// Processes sequentially to leverage CPU SIMD auto-vectorization on small sized blocks.
@@ -97,12 +91,13 @@ pub fn preprocess_image_channels(
     Some(processed)
 }
 
-/// Computes both dHash and phash visual signatures for the target asset.
-pub fn calculate_perceptual_hashes(
+/// Computes the dHash visual signature for the target asset.
+/// Returns raw bytes to avoid O(N²) string allocations and Base64 parsing overhead.
+pub fn calculate_perceptual_hash(
     path: &Path,
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
-) -> Option<PerceptualHashes> {
+) -> Option<Vec<u8>> {
     // Request a downscaled 128px mipmap during parsing to conserve CPU cycles and RAM.
     // Passed `None` for tonemap_config as perceptual hashing operates on raw/default SDR mapping.
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
@@ -111,26 +106,22 @@ pub fn calculate_perceptual_hashes(
     let processed_image =
         preprocess_image_channels(&resized_img, analysis_type, ignore_solid_channels)?;
 
+    // Only compute the gradient hash (dHash) as phash is unused dead code
     let dhash_result = HasherConfig::new()
         .hash_alg(HashAlg::Gradient)
         .hash_size(8, 8)
         .to_hasher()
         .hash_image(&processed_image);
-    let phash_result = HasherConfig::new()
-        .hash_alg(HashAlg::Mean)
-        .hash_size(8, 8)
-        .to_hasher()
-        .hash_image(&processed_image);
 
-    Some(PerceptualHashes {
-        dhash: dhash_result.to_base64(),
-        phash: phash_result.to_base64(),
-    })
+    // Return the raw byte array
+    Some(dhash_result.as_bytes().to_vec())
 }
 
-/// Computes the bitwise Hamming distance between two base64-encoded visual hashes.
-pub fn calculate_hamming_distance(hash1_base64: &str, hash2_base64: &str) -> Option<u32> {
-    let h1 = image_hasher::ImageHash::<Vec<u8>>::from_base64(hash1_base64).ok()?;
-    let h2 = image_hasher::ImageHash::<Vec<u8>>::from_base64(hash2_base64).ok()?;
-    Some(h1.dist(&h2))
+/// Computes the bitwise Hamming distance between two raw byte sequences directly.
+/// This prevents base64 overhead and enables LLVM SIMD auto-vectorization.
+pub fn calculate_hamming_distance(h1: &[u8], h2: &[u8]) -> u32 {
+    h1.iter()
+        .zip(h2.iter())
+        .map(|(a, b)| (*a ^ *b).count_ones())
+        .sum()
 }

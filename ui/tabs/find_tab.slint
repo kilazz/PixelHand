@@ -58,7 +58,7 @@ export component FindTab inherits HorizontalLayout {
 
         sidebar-splitter-ta := TouchArea {
             mouse-cursor: MouseCursor.col-resize;
-            moved => { if (self.pressed) { Store.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); } }
+            moved => { if (self.pressed) { Store.ui.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); } }
         }
     }
 
@@ -194,25 +194,25 @@ export component FindTab inherits HorizontalLayout {
 
                 CheckBox {
                     text: "NPOT Only";
-                    checked <=> Store.filter_only_npot;
+                    checked <=> Store.preview.filter_only_npot;
                     toggled => { Store.results_filter_changed(); }
                 }
 
                 CheckBox {
                     text: "Uncompressed Only";
-                    checked <=> Store.filter_only_uncompressed;
+                    checked <=> Store.preview.filter_only_uncompressed;
                     toggled => { Store.results_filter_changed(); }
                 }
 
                 CheckBox {
                     text: "Missing Mips Only";
-                    checked <=> Store.filter_only_missing_mips;
+                    checked <=> Store.preview.filter_only_missing_mips;
                     toggled => { Store.results_filter_changed(); }
                 }
 
                 CheckBox {
                     text: "Cubemaps Only";
-                    checked <=> Store.filter_only_cubemaps;
+                    checked <=> Store.preview.filter_only_cubemaps;
                     toggled => { Store.results_filter_changed(); }
                 }
             }
@@ -246,8 +246,8 @@ export component FindTab inherits HorizontalLayout {
                             for item in row.items: GridCard {
                                 row-data: item;
                                 checkerboard: Store.checkerboard_pattern;
-                                width: Store.grid_card_size;
-                                height: Store.grid_card_size + 45px;
+                                width: Store.ui.grid_card_size;
+                                height: Store.ui.grid_card_size + 45px;
                                 clicked => { Store.row_clicked(-1, false, item.group_index, item.path); Store.active_tab = 1; }
                                 right_clicked(mx, my) => { root.show_context_menu(mx, my, item.path); }
                                 channel_hovered(path, chan) => { Store.thumbnail_channel_hovered(path, chan); }

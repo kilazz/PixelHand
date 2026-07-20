@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
-use crate::core::perceptual::{calculate_hamming_distance, calculate_perceptual_hashes};
+use crate::core::perceptual::{calculate_hamming_distance, calculate_perceptual_hash};
 use crate::scanners::AnalysisItem;
 use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::clustering::UnionFind;
@@ -28,14 +28,15 @@ pub async fn run_perceptual_scan_internal(
         let processed = std::sync::atomic::AtomicUsize::new(0);
 
         // Compute perceptual dHash structures across all worker threads in parallel
-        let hashes: Vec<(AnalysisItem, String)> = items
+        // hashes stores raw Vec<u8> instead of String Base64
+        let hashes: Vec<(AnalysisItem, Vec<u8>)> = items
             .par_iter()
             .filter_map(|item| {
                 if cancel_token.load(Ordering::Relaxed) {
                     return None;
                 }
 
-                let res = calculate_perceptual_hashes(
+                let hash = calculate_perceptual_hash(
                     &item.path,
                     item.analysis_type,
                     params.prep.prep_ignore_solid,
@@ -44,7 +45,7 @@ pub async fn run_perceptual_scan_internal(
                 let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
                 progress_cb(current as f32 / total as f32, current, total);
 
-                Some((item.clone(), res.dhash))
+                Some((item.clone(), hash))
             })
             .collect();
 
@@ -62,9 +63,9 @@ pub async fn run_perceptual_scan_internal(
                 return Err(anyhow!("Scan cancelled by user."));
             }
             for j in (i + 1)..hashes.len() {
-                if let Some(dist) = calculate_hamming_distance(&hashes[i].1, &hashes[j].1)
-                    && dist <= max_dist
-                {
+                // calculate_hamming_distance works directly with &[u8] and returns u32 without wrapping in Option
+                let dist = calculate_hamming_distance(&hashes[i].1, &hashes[j].1);
+                if dist <= max_dist {
                     uf.union(i, j);
                 }
             }
@@ -143,7 +144,7 @@ pub async fn run_perceptual_scan_internal(
                         .map(|&idx| &hashes[idx].1)
                         .unwrap_or(&hashes[member_indices[0]].1);
 
-                    let dist = calculate_hamming_distance(best_hash, cur_hash).unwrap_or(0);
+                    let dist = calculate_hamming_distance(best_hash, cur_hash);
                     file.similarity = (1.0 - (dist as f32 / 64.0)) * 100.0;
                 }
 

@@ -1,5 +1,9 @@
 // ui/structs.slint
 
+// ==========================================
+// --- RUNTIME DATA STRUCTURES --------------
+// ==========================================
+
 export struct ResultsRow {
     is_header: bool,
     is_qc: bool,
@@ -35,4 +39,112 @@ export struct SelectedFile {
 
 export struct GridRow {
     items: [ResultsRow],
+}
+
+// ==========================================
+// --- GROUPED CONFIGURATION STRUCTURES ------
+// ==========================================
+
+export struct PathSettings {
+    dir_a: string,
+    dir_b: string,
+    excluded_folders: string,
+    query_text: string,
+}
+
+export struct ExtensionSettings {
+    ext_png: bool,
+    ext_jpg: bool,
+    ext_tga: bool,
+    ext_dds: bool,
+    ext_bmp: bool,
+    ext_exr: bool,
+    ext_hdr: bool,
+    ext_tif: bool,
+    ext_webp: bool,
+    ext_gif: bool,
+    ext_psd: bool,
+    ext_jxl: bool,
+    ext_heic: bool,
+    ext_avif: bool,
+}
+
+export struct UiLayoutSettings {
+    duplicates_panel_height: length,
+    sidebar_width: length,
+    compare_sidebar_width: length,
+    list_preview_size: length,
+    grid_card_size: length,
+}
+
+export struct VisualReportSettings {
+    save_visuals: bool,
+    visuals_columns: int,
+    visuals_max_count: int,
+    visuals_font_size: int,
+    visuals_scale: float,
+}
+
+export struct PreprocessingSettings {
+    prep_luminance: bool,
+    prep_channels: bool,
+    prep_r: bool,
+    prep_g: bool,
+    prep_b: bool,
+    prep_a: bool,
+    prep_tags: string,
+    prep_ignore_solid: bool,
+}
+
+export struct QcSettings {
+    qc_mode: bool,
+    qc_npot: bool,
+    qc_mipmaps: bool,
+    qc_block_align: bool,
+    qc_bit_depth: bool,
+    qc_solid_colors: bool,
+    qc_normals: bool,
+    qc_normals_tags: string,
+    qc_match_by_stem: bool,
+    qc_hide_same_resolution: bool,
+    qc_check_bloat: bool,
+    qc_check_alpha: bool,
+    qc_check_colorspace: bool,
+    qc_check_compression: bool,
+}
+
+export struct AiSettings {
+    ai_model: int,
+    custom_model_path: string,
+    custom_model_arch: int,
+    custom_model_dim: int,
+}
+
+export struct TonemapSettings {
+    tonemap_enabled: bool,
+    tonemap_auto_exposure: bool,
+    tonemap_operator: int,
+}
+
+export struct ViewerConfig {
+    grid_cols: int,
+    grid_rows: int,
+    manual_brightness: float,
+    manual_contrast: float,
+    manual_gamma: float,
+    aspect_ratio_modifier: float,
+    background_mode: int,
+    flipbook_fps: float,
+    fit_to_window: bool,
+    play_speed: float,
+    enable_frame_blending: bool,
+}
+
+export struct PreviewSettings {
+    enable_previews: bool,
+    preview_quality: int,
+    filter_only_npot: bool,
+    filter_only_uncompressed: bool,
+    filter_only_missing_mips: bool,
+    filter_only_cubemaps: bool,
 }

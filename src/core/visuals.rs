@@ -21,7 +21,7 @@ const IMGS_PER_FILE: usize = 50;
 
 const FONT_DATA: &[u8] = include_bytes!("../../assets/font.ttf");
 
-/// Encapsulates geometric and sizing logic for visual contact sheets layout.
+/// Encapsulates geometric and sizing logic for visual contact sheets layout
 struct SheetLayout {
     thumb_size: u32,
     padding: u32,
@@ -43,7 +43,7 @@ impl SheetLayout {
         }
     }
 
-    /// Computes the exact dimensions of the target canvas.
+    /// Computes the exact dimensions of the target canvas
     fn calculate_canvas_dimensions(&self, cols: u32, rows: u32) -> (u32, u32) {
         let width = cols * (self.thumb_size + self.padding) + self.padding;
         let height = rows * (self.thumb_size + self.text_area + self.padding)
@@ -53,7 +53,7 @@ impl SheetLayout {
     }
 }
 
-/// Generates visual comparison reports (Contact Sheets) as PNGs on disk.
+/// Generates visual comparison reports (Contact Sheets) as PNGs on disk safely without unwraps
 pub async fn generate_visual_reports(
     groups: Vec<DuplicateGroupSummary>,
     max_columns: usize,
@@ -113,7 +113,7 @@ pub async fn generate_visual_reports(
                     let y = layout.padding
                         + row * (layout.thumb_size + layout.text_area + layout.padding);
 
-                    // Decode high-resolution textures with fast_image_resize fallback
+                    // Decode high-resolution textures with fast_image_resize fallback handling
                     let thumb = match crate::format_loaders::open_image_with_dds_fallback(
                         Path::new(&file.path),
                         Some(layout.thumb_size),
@@ -122,36 +122,67 @@ pub async fn generate_visual_reports(
                         Ok(img) => {
                             let mut rgba_img = img.to_rgba8();
 
-                            // fast_image_resize v6.0.0 API: directly pass u32 dimensions and borrow mutably
-                            let src_image = fr::images::Image::from_slice_u8(
+                            // Safely attempt raw image mapping and scaling without unwraps
+                            let processed_img = fr::images::Image::from_slice_u8(
                                 rgba_img.width(),
                                 rgba_img.height(),
                                 rgba_img.as_mut(),
                                 fr::PixelType::U8x4,
                             )
-                            .unwrap();
+                            .map_err(|e| anyhow::anyhow!("Failed to map image slice: {:?}", e))
+                            .and_then(|src_image| {
+                                let mut dst_image = fr::images::Image::new(
+                                    layout.thumb_size,
+                                    layout.thumb_size,
+                                    fr::PixelType::U8x4,
+                                );
 
-                            // Construct destination image with direct u32 dimensions
-                            let mut dst_image = fr::images::Image::new(
-                                layout.thumb_size,
-                                layout.thumb_size,
-                                fr::PixelType::U8x4,
-                            );
+                                let mut options = fr::ResizeOptions::new();
+                                options = options.resize_alg(fr::ResizeAlg::Interpolation(
+                                    fr::FilterType::Lanczos3,
+                                ));
 
-                            // Execute resizing using processor-optimized SIMD architectures
-                            let mut options = fr::ResizeOptions::new();
-                            options = options
-                                .resize_alg(fr::ResizeAlg::Interpolation(fr::FilterType::Lanczos3));
-                            resizer
-                                .resize(&src_image, &mut dst_image, Some(&options))
-                                .unwrap();
+                                resizer
+                                    .resize(&src_image, &mut dst_image, Some(&options))
+                                    .map_err(|e| anyhow::anyhow!("Resize failed: {:?}", e))?;
 
-                            RgbaImage::from_raw(
-                                layout.thumb_size,
-                                layout.thumb_size,
-                                dst_image.into_vec(),
-                            )
-                            .unwrap()
+                                RgbaImage::from_raw(
+                                    layout.thumb_size,
+                                    layout.thumb_size,
+                                    dst_image.into_vec(),
+                                )
+                                .ok_or_else(|| {
+                                    anyhow::anyhow!(
+                                        "Failed to build RgbaImage from raw resized buffer"
+                                    )
+                                })
+                            });
+
+                            match processed_img {
+                                Ok(thumb_img) => thumb_img,
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Failed to resize thumbnail for '{}': {}",
+                                        file.path,
+                                        err
+                                    );
+                                    let mut err_img = RgbaImage::from_pixel(
+                                        layout.thumb_size,
+                                        layout.thumb_size,
+                                        color_err_bg,
+                                    );
+                                    draw_text_mut(
+                                        &mut err_img,
+                                        color_text_white,
+                                        10,
+                                        10,
+                                        layout.scale_bold,
+                                        &font,
+                                        "Error Resizing Image",
+                                    );
+                                    err_img
+                                }
+                            }
                         }
                         Err(e) => {
                             tracing::warn!(

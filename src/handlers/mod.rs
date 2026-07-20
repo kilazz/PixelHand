@@ -6,12 +6,12 @@ pub mod ui_state;
 
 use crate::app::AppWindow;
 use crate::state::AppState;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Registers all interactive callbacks and event bindings for the Slint UI Window.
 pub fn register_callbacks(
     app: &AppWindow,
-    state: Arc<Mutex<AppState>>,
+    state: Arc<parking_lot::Mutex<AppState>>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
 ) {
     files::bind_directory_selection(app);

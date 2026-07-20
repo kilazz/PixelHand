@@ -1,12 +1,11 @@
 // src/utils/export.rs
 
 use crate::state::AppState;
-use crate::utils::helpers::MutexExt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Formats the active asset scan results and persists them to a CSV table via native save file dialogs.
-pub fn export_results_to_csv(state: Arc<Mutex<AppState>>) {
-    let lock = state.safe_lock();
+pub fn export_results_to_csv(state: Arc<parking_lot::Mutex<AppState>>) {
+    let lock = state.lock();
 
     if lock.results.is_empty() {
         crate::app::append_to_console_log("No data available to export.");

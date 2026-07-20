@@ -103,10 +103,10 @@ export component WipeViewport {
     in property <image> checkerboard;
 
     viewport-root := Rectangle {
-        background: Store.background_mode == 2 ? #000000 : (Store.background_mode == 3 ? #ffffff : #181818);
+        background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #181818);
         clip: true;
 
-        if Store.background_mode == 0: Image {
+        if Store.viewer.background_mode == 0: Image {
             source: checkerboard;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
@@ -114,7 +114,7 @@ export component WipeViewport {
             height: 100%;
         }
 
-        if Store.background_mode == 1: Image {
+        if Store.viewer.background_mode == 1: Image {
             source: Store.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;

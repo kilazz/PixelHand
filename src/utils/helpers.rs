@@ -98,19 +98,3 @@ pub fn calculate_xxhash(path: &Path) -> std::io::Result<String> {
     }
     Ok(format!("{:x}", hasher.digest()))
 }
-
-/// Resilient Mutex locking wrapper trait.
-pub trait MutexExt<T> {
-    /// Locks the mutex safely. If another thread panicked and poisoned the lock,
-    /// it recovers the inner guard state instead of crashing.
-    fn safe_lock(&self) -> std::sync::MutexGuard<'_, T>;
-}
-
-impl<T> MutexExt<T> for std::sync::Mutex<T> {
-    fn safe_lock(&self) -> std::sync::MutexGuard<'_, T> {
-        self.lock().unwrap_or_else(|poisoned| {
-            eprintln!("[WARN] Recovering state from poisoned lock safely.");
-            poisoned.into_inner()
-        })
-    }
-}

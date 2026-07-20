@@ -13,7 +13,7 @@ import { PanelSection, FormRow } from "./common.slint";
 import { CustomButton, ChannelButton } from "./buttons.slint";
 
 export component FindSidebar inherits Rectangle {
-    width: Store.sidebar_width;
+    width: Store.ui.sidebar_width;
     background: #2b2d31;
     border-color: #1f2023;
     border-width: 1px;
@@ -44,7 +44,7 @@ export component FindSidebar inherits Rectangle {
                         current-index <=> Store.search_method;
                         height: 32px;
                         selected(val) => {
-                            Store.qc_mode = Store.search_method == 4;
+                            Store.qc.qc_mode = Store.search_method == 4;
                             Store.save_settings();
                         }
                     }
@@ -59,7 +59,7 @@ export component FindSidebar inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 4px;
                                 LineEdit {
-                                    text <=> Store.dir_a;
+                                    text <=> Store.paths.dir_a;
                                     height: 32px;
                                     placeholder-text: "Source folder...";
                                     edited => { Store.save_settings(); }
@@ -79,7 +79,7 @@ export component FindSidebar inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 4px;
                                 LineEdit {
-                                    text <=> Store.dir_b;
+                                    text <=> Store.paths.dir_b;
                                     height: 32px;
                                     placeholder-text: "Comparison folder...";
                                     edited => { Store.save_settings(); }
@@ -96,7 +96,7 @@ export component FindSidebar inherits Rectangle {
                         FormRow {
                             title: "Exclude:";
                             LineEdit {
-                                text <=> Store.excluded_folders;
+                                text <=> Store.paths.excluded_folders;
                                 placeholder-text: "e.g. .cache, previews, temp_files";
                                 height: 22px;
                                 edited => { Store.save_settings(); }
@@ -149,12 +149,12 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Save Visual Reports";
-                            checked <=> Store.save_visuals;
+                            checked <=> Store.visuals.save_visuals;
                             height: 20px;
                             toggled => { Store.save_settings(); }
                         }
 
-                        if Store.save_visuals: VerticalLayout {
+                        if Store.visuals.save_visuals: VerticalLayout {
                             spacing: 4px;
                             padding-left: 8px;
                             HorizontalLayout {
@@ -168,7 +168,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals_columns;
+                                    value <=> Store.visuals.visuals_columns;
                                     minimum: 2;
                                     maximum: 12;
                                     height: 32px;
@@ -185,7 +185,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals_max_count;
+                                    value <=> Store.visuals.visuals_max_count;
                                     minimum: 1;
                                     maximum: 1000;
                                     height: 32px;
@@ -205,7 +205,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals_font_size;
+                                    value <=> Store.visuals.visuals_font_size;
                                     minimum: 8;
                                     maximum: 36;
                                     height: 32px;
@@ -222,7 +222,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 Slider {
-                                    value <=> Store.visuals_scale;
+                                    value <=> Store.visuals.visuals_scale;
                                     minimum: 1.0;
                                     maximum: 4.0;
                                     height: 32px;
@@ -231,7 +231,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: (Math.round(Store.visuals_scale * 10) / 10) + "x";
+                                    text: (Math.round(Store.visuals.visuals_scale * 10) / 10) + "x";
                                     width: 30px;
                                     font-size: 11px;
                                     color: #ffffff;
@@ -241,17 +241,17 @@ export component FindSidebar inherits Rectangle {
                         }
                         if Store.search_method == 1: CheckBox {
                             text: "Compare by luminance only";
-                            checked <=> Store.prep_luminance;
+                            checked <=> Store.prep.prep_luminance;
                             height: 20px;
                             toggled => { Store.save_settings(); }
                         }
                         if Store.search_method == 1: CheckBox {
                             text: "Compare by specific channels";
-                            checked <=> Store.prep_channels;
+                            checked <=> Store.prep.prep_channels;
                             height: 20px;
                             toggled => { Store.save_settings(); }
                         }
-                        if Store.search_method == 1 && Store.prep_channels: VerticalLayout {
+                        if Store.search_method == 1 && Store.prep.prep_channels: VerticalLayout {
                             spacing: 4px;
                             padding-left: 12px;
                             FormRow {
@@ -263,30 +263,30 @@ export component FindSidebar inherits Rectangle {
                                     ChannelButton {
                                         text: "R";
                                         active-color: #f23f43;
-                                        active <=> Store.prep_r;
-                                        clicked => { Store.prep_r = !Store.prep_r; Store.save_settings(); }
+                                        active <=> Store.prep.prep_r;
+                                        clicked => { Store.prep.prep_r = !Store.prep.prep_r; Store.save_settings(); }
                                     }
 
                                     ChannelButton {
                                         text: "G";
                                         active-color: #23a55a;
-                                        active <=> Store.prep_g;
-                                        clicked => { Store.prep_g = !Store.prep_g; Store.save_settings(); }
+                                        active <=> Store.prep.prep_g;
+                                        clicked => { Store.prep.prep_g = !Store.prep.prep_g; Store.save_settings(); }
                                     }
 
                                     ChannelButton {
                                         text: "B";
                                         active-color: #5865f2;
-                                        active <=> Store.prep_b;
-                                        clicked => { Store.prep_b = !Store.prep_b; Store.save_settings(); }
+                                        active <=> Store.prep.prep_b;
+                                        clicked => { Store.prep.prep_b = !Store.prep.prep_b; Store.save_settings(); }
                                     }
 
                                     ChannelButton {
                                         text: "A";
                                         active-color: #ffffff;
                                         text-color: #000000;
-                                        active <=> Store.prep_a;
-                                        clicked => { Store.prep_a = !Store.prep_a; Store.save_settings(); }
+                                        active <=> Store.prep.prep_a;
+                                        clicked => { Store.prep.prep_a = !Store.prep.prep_a; Store.save_settings(); }
                                     }
                                 }
                             }
@@ -295,7 +295,7 @@ export component FindSidebar inherits Rectangle {
                                 title: "Tags:";
                                 label-width: 40px;
                                 LineEdit {
-                                    text <=> Store.prep_tags;
+                                    text <=> Store.prep.prep_tags;
                                     placeholder-text: "_mask, _ddn";
                                     height: 32px;
                                     edited => { Store.save_settings(); }
@@ -304,7 +304,7 @@ export component FindSidebar inherits Rectangle {
 
                             CheckBox {
                                 text: "Ignore solid channels";
-                                checked <=> Store.prep_ignore_solid;
+                                checked <=> Store.prep.prep_ignore_solid;
                                 height: 20px;
                                 toggled => { Store.save_settings(); }
                             }
@@ -321,10 +321,10 @@ export component FindSidebar inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 4px;
                                 LineEdit {
-                                    text <=> Store.query_text;
+                                    text <=> Store.paths.query_text;
                                     height: 32px;
-                                    placeholder-text: Store.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
-                                    enabled: Store.ai_model != 4;
+                                    placeholder-text: Store.ai.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                    enabled: Store.ai.ai_model != 4;
                                     edited => { Store.save_settings(); }
                                 }
 
@@ -333,13 +333,13 @@ export component FindSidebar inherits Rectangle {
                                     icon-type: 1;
                                     width: 32px;
                                     height: 32px;
-                                    enabled: Store.ai_model != 4;
+                                    enabled: Store.ai.ai_model != 4;
                                     clicked => { Store.select_reference_image(); }
                                 }
                             }
                         }
 
-                        if Store.query_text == "": FormRow {
+                        if Store.paths.query_text == "": FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
                                 spacing: 6px;
@@ -374,20 +374,20 @@ export component FindSidebar inherits Rectangle {
                                     "LLM2CLIP OpenAI-B-16",
                                     "Custom (Local ONNX)"
                                 ];
-                                current-index <=> Store.ai_model;
+                                current-index <=> Store.ai.ai_model;
                                 height: 32px;
                                 selected(val) => { Store.save_settings(); }
                             }
                         }
 
-                        if Store.ai_model == 7: VerticalLayout {
+                        if Store.ai.ai_model == 7: VerticalLayout {
                             spacing: 4px;
                             FormRow {
                                 title: "Local Path:";
                                 HorizontalLayout {
                                     spacing: 4px;
                                     LineEdit {
-                                        text <=> Store.custom_model_path;
+                                        text <=> Store.ai.custom_model_path;
                                         height: 32px;
                                         edited => { Store.save_settings(); }
                                     }
@@ -413,7 +413,7 @@ export component FindSidebar inherits Rectangle {
 
                                 ComboBox {
                                     model: ["CLIP", "SigLIP", "DINOv2"];
-                                    current-index <=> Store.custom_model_arch;
+                                    current-index <=> Store.ai.custom_model_arch;
                                     height: 32px;
                                     selected(val) => { Store.save_settings(); }
                                 }
@@ -427,23 +427,23 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value: Store.custom_model_dim;
+                                    value: Store.ai.custom_model_dim;
                                     minimum: 64;
                                     maximum: 4096;
                                     height: 32px;
-                                    edited(val) => { Store.custom_model_dim = val; Store.save_settings(); }
+                                    edited(val) => { Store.ai.custom_model_dim = val; Store.save_settings(); }
                                 }
                             }
                         }
 
-                        if Store.query_text == "": CheckBox {
+                        if Store.paths.query_text == "": CheckBox {
                             text: "Save Visual Reports";
-                            checked <=> Store.save_visuals;
+                            checked <=> Store.visuals.save_visuals;
                             height: 20px;
                             toggled => { Store.save_settings(); }
                         }
 
-                        if Store.query_text == "" && Store.save_visuals: VerticalLayout {
+                        if Store.paths.query_text == "" && Store.visuals.save_visuals: VerticalLayout {
                             spacing: 4px;
                             padding-left: 8px;
                             HorizontalLayout {
@@ -457,7 +457,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals_columns;
+                                    value <=> Store.visuals.visuals_columns;
                                     minimum: 2;
                                     maximum: 12;
                                     height: 32px;
@@ -474,7 +474,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals_max_count;
+                                    value <=> Store.visuals.visuals_max_count;
                                     minimum: 1;
                                     maximum: 1000;
                                     height: 32px;
@@ -494,7 +494,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals_font_size;
+                                    value <=> Store.visuals.visuals_font_size;
                                     minimum: 8;
                                     maximum: 36;
                                     height: 32px;
@@ -511,7 +511,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 Slider {
-                                    value <=> Store.visuals_scale;
+                                    value <=> Store.visuals.visuals_scale;
                                     minimum: 1.0;
                                     maximum: 4.0;
                                     height: 32px;
@@ -520,7 +520,7 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 Text {
-                                    text: (Math.round(Store.visuals_scale * 10) / 10) + "x";
+                                    text: (Math.round(Store.visuals.visuals_scale * 10) / 10) + "x";
                                     width: 30px;
                                     font-size: 11px;
                                     color: #ffffff;
@@ -545,13 +545,13 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Match by stem";
-                            checked <=> Store.qc_match_by_stem;
+                            checked <=> Store.qc.qc_match_by_stem;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Hide same resolution";
-                            checked <=> Store.qc_hide_same_resolution;
+                            checked <=> Store.qc.qc_hide_same_resolution;
                             toggled => { Store.save_settings(); }
                         }
 
@@ -564,31 +564,31 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Check NPOT (Power of 2)";
-                            checked <=> Store.qc_npot;
+                            checked <=> Store.qc.qc_npot;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Mip-Maps";
-                            checked <=> Store.qc_mipmaps;
+                            checked <=> Store.qc.qc_mipmaps;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check BlockAlignment";
-                            checked <=> Store.qc_block_align;
+                            checked <=> Store.qc.qc_block_align;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Bit Depth";
-                            checked <=> Store.qc_bit_depth;
+                            checked <=> Store.qc.qc_bit_depth;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Solid Colors & Empty Channels";
-                            checked <=> Store.qc_solid_colors;
+                            checked <=> Store.qc.qc_solid_colors;
                             toggled => { Store.save_settings(); }
                         }
 
@@ -601,12 +601,12 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Validate Normal Vectors";
-                            checked <=> Store.qc_normals;
+                            checked <=> Store.qc.qc_normals;
                             toggled => { Store.save_settings(); }
                         }
 
-                        if Store.qc_normals: LineEdit {
-                            text <=> Store.qc_normals_tags;
+                        if Store.qc.qc_normals: LineEdit {
+                            text <=> Store.qc.qc_normals_tags;
                             placeholder-text: "Tags: _norm, _ddn";
                             height: 32px;
                             edited => { Store.save_settings(); }
@@ -621,25 +621,25 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Check Size Bloat";
-                            checked <=> Store.qc_check_bloat;
+                            checked <=> Store.qc.qc_check_bloat;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Alpha Mismatch";
-                            checked <=> Store.qc_check_alpha;
+                            checked <=> Store.qc.qc_check_alpha;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Color Space Mismatch";
-                            checked <=> Store.qc_check_colorspace;
+                            checked <=> Store.qc.qc_check_colorspace;
                             toggled => { Store.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Compression Change";
-                            checked <=> Store.qc_check_compression;
+                            checked <=> Store.qc.qc_check_compression;
                             toggled => { Store.save_settings(); }
                         }
                     }
@@ -699,27 +699,27 @@ export component FindSidebar inherits Rectangle {
 
                             CheckBox {
                                 text: "Enable Previews Window";
-                                checked <=> Store.enable_previews;
+                                checked <=> Store.preview.enable_previews;
                                 toggled => { Store.save_settings(); }
                             }
 
-                            if Store.enable_previews: FormRow {
+                            if Store.preview.enable_previews: FormRow {
                                 title: "List Thumb Size:";
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Slider {
-                                        value: Store.list_preview_size / 1px;
+                                        value: Store.ui.list_preview_size / 1px;
                                         minimum: 32;
                                         maximum: 120;
                                         height: 32px;
                                         changed(val) => {
-                                            Store.list_preview_size = val * 1px;
+                                            Store.ui.list_preview_size = val * 1px;
                                             Store.save_settings();
                                         }
                                     }
 
                                     Text {
-                                        text: Math.round(Store.list_preview_size / 1px) + "px";
+                                        text: Math.round(Store.ui.list_preview_size / 1px) + "px";
                                         width: 36px;
                                         font-size: 11px;
                                         color: #ffffff;
@@ -728,23 +728,23 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            if Store.enable_previews: FormRow {
+                            if Store.preview.enable_previews: FormRow {
                                 title: "Grid Card Size:";
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Slider {
-                                        value: Store.grid_card_size / 1px;
+                                        value: Store.ui.grid_card_size / 1px;
                                         minimum: 100;
                                         maximum: 250;
                                         height: 32px;
                                         changed(val) => {
-                                            Store.grid_card_size = val * 1px;
+                                            Store.ui.grid_card_size = val * 1px;
                                             Store.save_settings();
                                         }
                                     }
 
                                     Text {
-                                        text: Math.round(Store.grid_card_size / 1px) + "px";
+                                        text: Math.round(Store.ui.grid_card_size / 1px) + "px";
                                         width: 36px;
                                         font-size: 11px;
                                         color: #ffffff;
@@ -753,28 +753,28 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            if Store.enable_previews: FormRow {
+                            if Store.preview.enable_previews: FormRow {
                                 title: "Preview Quality:";
                                 ComboBox {
                                     model: ["Fast (64px)", "Balanced (128px)", "High Quality (256px)"];
-                                    current-index <=> Store.preview_quality;
+                                    current-index <=> Store.preview.preview_quality;
                                     height: 32px;
                                     selected(val) => { Store.save_settings(); }
                                 }
                             }
                             CheckBox {
                                 text: "Enable HDR Tonemapping";
-                                checked <=> Store.tonemap_enabled;
+                                checked <=> Store.tonemap.tonemap_enabled;
                                 toggled => { Store.tonemap_toggled(); }
                             }
 
-                            if Store.tonemap_enabled: CheckBox {
+                            if Store.tonemap.tonemap_enabled: CheckBox {
                                 text: "Enable Auto Exposure";
-                                checked <=> Store.tonemap_auto_exposure;
+                                checked <=> Store.tonemap.tonemap_auto_exposure;
                                 toggled => { Store.tonemap_toggled(); }
                             }
 
-                            if Store.tonemap_enabled: ComboBox {
+                            if Store.tonemap.tonemap_enabled: ComboBox {
                                 model: [
                                     "None",
                                     "False Color",
@@ -784,7 +784,7 @@ export component FindSidebar inherits Rectangle {
                                     "ICtCp BT.2446c",
                                     "ICtCp Lumina"
                                 ];
-                                current-index <=> Store.tonemap_operator;
+                                current-index <=> Store.tonemap.tonemap_operator;
                                 height: 32px;
                                 selected(val) => { Store.tonemap_toggled(); }
                             }

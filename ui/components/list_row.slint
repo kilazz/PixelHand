@@ -6,7 +6,6 @@ import { InteractiveThumbnail } from "./thumbnail.slint";
 import { Store } from "../store.slint";
 
 export component ListRow inherits Rectangle {
-    // Renamed from 'row' to 'row-data' to avoid Slint keyword conflicts
     in property <ResultsRow> row-data;
 
     callback row_clicked(bool, int, string);
@@ -14,13 +13,13 @@ export component ListRow inherits Rectangle {
     callback right_clicked(length, length);
     callback channel_hovered(string, string);
 
-    height: row-data.is_header ? 28px : (Store.list_preview_size + 8px);
+    height: row-data.is_header ? 28px : (Store.ui.list_preview_size + 8px);
     background: row-data.is_header ? #1e1f22 : (row-data.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
     border-color: #1f2023;
     border-width: 1px;
 
     main_row_ta := TouchArea {
-        x: 28px + 24px + 8px + Store.list_preview_size + 8px;
+        x: 28px + 24px + 8px + Store.ui.list_preview_size + 8px;
         width: parent.width - self.x;
         height: 100%;
         clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
@@ -34,7 +33,6 @@ export component ListRow inherits Rectangle {
     if row-data.is_header: Rectangle {
         background: transparent;
 
-        // Click anywhere else to expand/collapse
         header_ta := TouchArea {
             width: 100%;
             height: 100%;
@@ -55,7 +53,6 @@ export component ListRow inherits Rectangle {
                 alignment: start;
                 cross-axis-alignment: center;
 
-                // Expand/Collapse arrow icon
                 Text {
                     text: row-data.is_checked ? "▶" : "▼";
                     color: #949ba4;
@@ -63,7 +60,6 @@ export component ListRow inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                // Inline Trash action placed right at the front for ergonomic reasons
                 trash_ta := TouchArea {
                     width: 22px;
                     height: 22px;
@@ -83,7 +79,6 @@ export component ListRow inherits Rectangle {
                     }
                 }
 
-                // Group details label
                 Text {
                     text: row-data.is_qc ? ("QC Issue: " + row-data.hash_or_issue) : ("Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
                     color: header_ta.has-hover ? #ffffff : #949ba4;
@@ -118,17 +113,17 @@ export component ListRow inherits Rectangle {
             width: 8px;
         }
 
-        if Store.enable_previews: InteractiveThumbnail {
+        if Store.preview.enable_previews: InteractiveThumbnail {
             source: row-data.thumbnail;
             path: row-data.path;
             show_corners: true;
             checkerboard: Store.checkerboard_pattern;
-            width: Store.list_preview_size;
-            height: Store.list_preview_size;
+            width: Store.ui.list_preview_size;
+            height: Store.ui.list_preview_size;
             corner_hovered(path, chan) => { root.channel_hovered(path, chan); }
             clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
         }
-        if Store.enable_previews: Rectangle {
+        if Store.preview.enable_previews: Rectangle {
             width: 8px;
         }
 
@@ -140,7 +135,7 @@ export component ListRow inherits Rectangle {
                 height: 100%;
 
                 HorizontalLayout {
-                    width: Store.enable_previews ? (Store.col_file_w - Store.list_preview_size - 8px) : Store.col_file_w;
+                    width: Store.preview.enable_previews ? (Store.col_file_w - Store.ui.list_preview_size - 8px) : Store.col_file_w;
                     Text {
                         text: row-data.name;
                         color: #dcddde;

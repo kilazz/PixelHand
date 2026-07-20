@@ -3,13 +3,11 @@
 use slint::ComponentHandle;
 use slint::winit_030::WinitWindowAccessor;
 use slint::{Model, ModelRc, VecModel};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::app::{AppWindow, SelectedFile, Store};
-use crate::scanners;
 use crate::state::AppState;
 use crate::utils;
-use crate::utils::helpers::MutexExt;
 
 pub fn bind_directory_selection(app: &AppWindow) {
     let app_weak_a = app.as_weak();
@@ -23,7 +21,9 @@ pub fn bind_directory_selection(app: &AppWindow) {
             let path_str = folder.to_string_lossy().to_string();
             if let Some(ui) = app_weak_a.upgrade() {
                 let store = ui.global::<Store>();
-                store.set_dir_a(path_str.into());
+                let mut paths = store.get_paths();
+                paths.dir_a = path_str.into();
+                store.set_paths(paths);
                 utils::settings::save_settings(&store);
             }
         }
@@ -40,7 +40,9 @@ pub fn bind_directory_selection(app: &AppWindow) {
             let path_str = folder.to_string_lossy().to_string();
             if let Some(ui) = app_weak_b.upgrade() {
                 let store = ui.global::<Store>();
-                store.set_dir_b(path_str.into());
+                let mut paths = store.get_paths();
+                paths.dir_b = path_str.into();
+                store.set_paths(paths);
                 utils::settings::save_settings(&store);
             }
         }
@@ -64,7 +66,9 @@ pub fn bind_directory_selection(app: &AppWindow) {
             let path_str = file.to_string_lossy().to_string();
             if let Some(ui) = app_weak_ref.upgrade() {
                 let store = ui.global::<Store>();
-                store.set_query_text(path_str.into());
+                let mut paths = store.get_paths();
+                paths.query_text = path_str.into();
+                store.set_paths(paths);
                 store.set_search_method(2);
                 utils::settings::save_settings(&store);
             }
@@ -82,14 +86,16 @@ pub fn bind_directory_selection(app: &AppWindow) {
             let path_str = folder.to_string_lossy().to_string();
             if let Some(ui) = app_weak_custom.upgrade() {
                 let store = ui.global::<Store>();
-                store.set_custom_model_path(path_str.into());
+                let mut ai = store.get_ai();
+                ai.custom_model_path = path_str.into();
+                store.set_ai(ai);
                 utils::settings::save_settings(&store);
             }
         }
     });
 }
 
-pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
+pub fn bind_file_actions(app: &AppWindow, state: Arc<parking_lot::Mutex<AppState>>) {
     let app_weak_ctx = app.as_weak();
     let state_clone_ctx = state.clone();
     let store = app.global::<Store>();
@@ -128,7 +134,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                                     .into(),
                                 );
 
-                                let mut lock = state_clone_ctx.safe_lock();
+                                let mut lock = state_clone_ctx.lock();
                                 let normalized_target = utils::fs::normalize_path(&path_str);
                                 lock.results.retain(|r| {
                                     utils::fs::normalize_path(&r.path) != normalized_target
@@ -144,7 +150,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             }
             "trash_group" => {
                 if let Ok(group_idx) = path_str.parse::<i32>() {
-                    let mut lock = state_clone_ctx.safe_lock();
+                    let mut lock = state_clone_ctx.lock();
                     let mut paths_to_delete = Vec::new();
 
                     if lock.groups.is_empty() {
@@ -214,7 +220,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
     let state_clone_cb = state.clone();
     let store = app.global::<Store>();
     store.on_row_checkbox_toggled(move |idx| {
-        let mut lock = state_clone_cb.safe_lock();
+        let mut lock = state_clone_cb.lock();
         // Opt: Visible indexing now happens in O(1) via cached mapping table
         if let Some(abs_idx) = utils::ui::get_absolute_index(&lock, idx as usize)
             && let Some(row) = lock.results.get_mut(abs_idx)
@@ -244,7 +250,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         let app_copy = app_weak_clicked.clone();
 
         if is_header {
-            let mut lock = state_clone_click.safe_lock();
+            let mut lock = state_clone_click.lock();
             if lock.collapsed_groups.contains(&group_idx) {
                 lock.collapsed_groups.remove(&group_idx);
             } else {
@@ -260,7 +266,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         }
 
         let path_str = path.to_string();
-        let lock = state_clone_click.safe_lock();
+        let lock = state_clone_click.lock();
         let group = lock.groups.get(group_idx as usize);
 
         let ui = match app_copy.upgrade() {
@@ -367,7 +373,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
         tokio::spawn(async move {
             let (checked_files, pairs) = {
-                let lock = state_copy_inner.safe_lock();
+                let lock = state_copy_inner.lock();
                 utils::fs::extract_selected_files(&lock)
             };
 
@@ -397,7 +403,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         ))));
                         store.set_has_results(false);
 
-                        let mut lock = state_copy_inner.safe_lock();
+                        let mut lock = state_copy_inner.lock();
                         lock.results.clear();
                         lock.groups.clear();
                         lock.collapsed_groups.clear();
@@ -415,7 +421,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
     let app_weak_hover = app.as_weak();
     let state_hover = state.clone();
-    let last_hover_task = Arc::new(Mutex::new(None::<tokio::task::JoinHandle<()>>));
+    let last_hover_task = Arc::new(parking_lot::Mutex::new(None::<tokio::task::JoinHandle<()>>));
 
     let store = app.global::<Store>();
     store.on_thumbnail_channel_hovered(move |path_str, channel| {
@@ -424,18 +430,21 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         let app_weak_clone = app_weak_hover.clone();
         let state_clone = state_hover.clone();
 
-        let mut lock = last_hover_task.lock().unwrap();
+        let mut lock = last_hover_task.lock();
         if let Some(handle) = lock.take() {
             handle.abort();
         }
 
         let handle = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
-            let normalized_path = utils::fs::normalize_path_key(&path_std);
+
+            // Dual normalization keys to ensure perfect cross-platform path matching
+            let normalized_path_cache = utils::cache::normalize_path_key(&path_std);
+            let normalized_path_fs = utils::fs::normalize_path_key(&path_std);
 
             let cached_img = {
-                let cache = scanners::THUMBNAIL_MEMORY_CACHE.get();
-                cache.and_then(|c| c.get(&normalized_path))
+                let manager = utils::cache::get_cache_manager();
+                manager.thumbnails.get(&normalized_path_cache)
             };
 
             if let Some(cached_thumb) = cached_img {
@@ -444,8 +453,8 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 // --- OPTIMIZATION (O(1) Hashmap Lookup) ---
                 // Eliminates sequential O(N) string-matching loops on state modification
                 {
-                    let mut lock = state_clone.safe_lock();
-                    if let Some(&idx) = lock.path_to_idx.get(&normalized_path) {
+                    let mut lock = state_clone.lock();
+                    if let Some(&idx) = lock.path_to_idx.get(&normalized_path_fs) {
                         lock.results[idx].thumbnail_data = Some(channel_img.clone());
                     }
                 }
@@ -458,7 +467,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                     let results_model = store.get_results();
                     for i in 0..results_model.row_count() {
                         if let Some(mut r) = results_model.row_data(i)
-                            && utils::fs::normalize_path_key(r.path.as_str()) == normalized_path
+                            && utils::fs::normalize_path_key(r.path.as_str()) == normalized_path_fs
                         {
                             r.thumbnail = slint_img.clone();
                             results_model.set_row_data(i, r);
@@ -473,7 +482,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
 
                             for item in items.iter_mut() {
                                 if utils::fs::normalize_path_key(item.path.as_str())
-                                    == normalized_path
+                                    == normalized_path_fs
                                 {
                                     item.thumbnail = slint_img.clone();
                                     changed = true;
@@ -490,7 +499,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                     let group_model = store.get_selected_group_files();
                     for i in 0..group_model.row_count() {
                         if let Some(mut r) = group_model.row_data(i)
-                            && utils::fs::normalize_path_key(r.path.as_str()) == normalized_path
+                            && utils::fs::normalize_path_key(r.path.as_str()) == normalized_path_fs
                         {
                             r.thumbnail = slint_img.clone();
                             group_model.set_row_data(i, r);
@@ -515,10 +524,14 @@ pub fn bind_drag_and_drop(app: &AppWindow) {
             let _ = app_copy.upgrade_in_event_loop(move |ui| {
                 let store = ui.global::<Store>();
                 if is_dir {
-                    store.set_dir_a(path_str.clone().into());
+                    let mut paths = store.get_paths();
+                    paths.dir_a = path_str.clone().into();
+                    store.set_paths(paths);
                     store.set_status_text(format!("Scan folder updated: {}", path_str).into());
                 } else if is_file {
-                    store.set_query_text(path_str.clone().into());
+                    let mut paths = store.get_paths();
+                    paths.query_text = path_str.clone().into();
+                    store.set_paths(paths);
                     store.set_search_method(2);
                     store.set_status_text(format!("Reference image loaded: {}", path_str).into());
                 }

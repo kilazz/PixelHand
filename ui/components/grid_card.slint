@@ -4,7 +4,7 @@ import { ResultsRow } from "../structs.slint";
 import { InteractiveThumbnail } from "./thumbnail.slint";
 
 export component GridCard inherits Rectangle {
-    in property <ResultsRow> row-data; // Renamed from 'row' to avoid clashing with Slint keywords
+    in property <ResultsRow> row-data;
     in property <image> checkerboard;
 
     callback clicked();

@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
+use ustr::Ustr;
 
 #[derive(Clone)]
 pub struct DecodedCacheItem {
@@ -12,11 +13,132 @@ pub struct DecodedCacheItem {
     pub image: Arc<image::RgbaImage>, // Wrapped in Arc to prevent copying heavy raw pixel allocations
 }
 
-/// Global dynamic memory cache to hold decrypted 1:1 original pixel buffers.
-pub static DECODED_CACHE: OnceLock<Cache<String, DecodedCacheItem>> = OnceLock::new();
+/// Container holding composite and lazy-allocated channel-isolated preview buffers
+#[derive(Clone)]
+pub struct CachedThumbnail {
+    pub composite: image::RgbaImage,
+    pub r_channel: Arc<OnceLock<image::RgbaImage>>,
+    pub g_channel: Arc<OnceLock<image::RgbaImage>>,
+    pub b_channel: Arc<OnceLock<image::RgbaImage>>,
+    pub a_channel: Arc<OnceLock<image::RgbaImage>>,
+}
 
-/// Decodes and returns the requested color channels (R, G, B, A, or Composite)
-/// of the image at the specified path for a specific mipmap level, utilizing an automated weight-based memory cache.
+impl CachedThumbnail {
+    pub fn new(composite: image::RgbaImage) -> Self {
+        Self {
+            composite,
+            r_channel: Arc::new(OnceLock::new()),
+            g_channel: Arc::new(OnceLock::new()),
+            b_channel: Arc::new(OnceLock::new()),
+            a_channel: Arc::new(OnceLock::new()),
+        }
+    }
+
+    /// Retrieves or dynamically computes a color-isolated preview on a separate thread, caching the result
+    pub fn get_channel(&self, channel: &str) -> image::RgbaImage {
+        let lock = match channel {
+            "R" => &self.r_channel,
+            "G" => &self.g_channel,
+            "B" => &self.b_channel,
+            "A" => &self.a_channel,
+            _ => return self.composite.clone(),
+        };
+
+        lock.get_or_init(|| {
+            let idx = match channel {
+                "R" => 0,
+                "G" => 1,
+                "B" => 2,
+                _ => 3,
+            };
+
+            let width = self.composite.width();
+            let height = self.composite.height();
+            let mut out_rgba = image::RgbaImage::new(width, height);
+
+            let composite_raw = self.composite.as_raw();
+            let out_raw = out_rgba.as_mut();
+
+            for (i, chunk) in composite_raw.chunks_exact(4).enumerate() {
+                let val = chunk[idx];
+                let dst_idx = i * 4;
+                if idx == 3 {
+                    out_raw[dst_idx] = val;
+                    out_raw[dst_idx + 1] = val;
+                    out_raw[dst_idx + 2] = val;
+                    out_raw[dst_idx + 3] = val;
+                } else {
+                    out_raw[dst_idx] = val;
+                    out_raw[dst_idx + 1] = val;
+                    out_raw[dst_idx + 2] = val;
+                    out_raw[dst_idx + 3] = 255;
+                }
+            }
+            out_rgba
+        })
+        .clone()
+    }
+}
+
+// ==========================================
+// --- CONSOLIDATED MEMORY CACHE MANAGER ----
+// ==========================================
+
+pub struct CacheManager {
+    pub decoded_images: Cache<String, DecodedCacheItem>,
+    pub thumbnails: Cache<Ustr, CachedThumbnail>,
+}
+
+/// Retrieve the central thread-safe Memory Cache Manager singleton
+pub fn get_cache_manager() -> &'static CacheManager {
+    static INSTANCE: OnceLock<CacheManager> = OnceLock::new();
+    INSTANCE.get_or_init(|| CacheManager {
+        decoded_images: Cache::builder()
+            // Limit to approximately 2.0 GB of decompressed texture preview data in RAM
+            .max_capacity(2 * 1024 * 1024 * 1024)
+            // Weigh each item according to its actual decompressed pixel payload
+            .weigher(|_k, v: &DecodedCacheItem| {
+                let bytes = v.image.width() as u64 * v.image.height() as u64 * 4;
+                bytes.min(u32::MAX as u64) as u32
+            })
+            .build(),
+        thumbnails: Cache::builder()
+            // Limit to approximately 150 MB base capacity of decompressed texture preview data in RAM
+            .max_capacity(150 * 1024 * 1024)
+            // Weigh each item according to its composite pixel payload
+            .weigher(|_k, v: &CachedThumbnail| {
+                let bytes = v.composite.width() as u64 * v.composite.height() as u64 * 4;
+                bytes.min(u32::MAX as u64) as u32
+            })
+            .build(),
+    })
+}
+
+/// Normalizes path representations across Windows and Unix platforms to guarantee absolute cache hit consistency
+pub fn normalize_path_key(path_str: &str) -> Ustr {
+    let normalized: String = path_str
+        .chars()
+        .map(|c| {
+            if c == '/' || c == '\\' {
+                std::path::MAIN_SEPARATOR
+            } else {
+                c
+            }
+        })
+        .collect();
+    ustr::ustr(&normalized.to_lowercase())
+}
+
+/// Stores an image buffer in the centralized thumbnails memory cache
+pub fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
+    let manager = get_cache_manager();
+    let normalized_key = normalize_path_key(path);
+    manager
+        .thumbnails
+        .insert(normalized_key, CachedThumbnail::new(img));
+}
+
+/// Decodes and returns the requested color channels of the image utilizing the unified cache manager
 pub async fn get_channel_preview_image(
     path: &str,
     channel: &str,
@@ -31,33 +153,19 @@ pub async fn get_channel_preview_image(
         .and_then(|m| m.modified())
         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
 
-    // Generate unique cache key incorporating both path and mip level
     let cache_key = format!("{}_mip{}", path, mip_level);
+    let manager = get_cache_manager();
 
-    let cache = DECODED_CACHE.get_or_init(|| {
-        Cache::builder()
-            // Limit to approximately 2.0 GB of decompressed texture preview data in RAM
-            .max_capacity(2 * 1024 * 1024 * 1024)
-            // Weigh each item according to its actual decompressed pixel payload (Width * Height * 4 channels)
-            .weigher(|_k, v: &DecodedCacheItem| {
-                let bytes = v.image.width() as u64 * v.image.height() as u64 * 4;
-                bytes.min(u32::MAX as u64) as u32
-            })
-            .build()
-    });
-
-    // Invalidate the cache entry if the underlying file has been modified on disk
-    if let Some(item) = cache.get(&cache_key)
+    if let Some(item) = manager.decoded_images.get(&cache_key)
         && item.mtime != current_mtime
     {
-        cache.invalidate(&cache_key);
+        manager.decoded_images.invalidate(&cache_key);
     }
 
-    // Atomically load and cache the image, preventing Cache Stampede.
-    // If another thread is already loading this exact file, the current thread will wait for it to finish.
-    let cached_item_res =
-        cache.try_get_with(cache_key.clone(), || -> Result<DecodedCacheItem, String> {
-            // Fetch UI settings right at the boundary here.
+    // Atomically load and cache the image, preventing Cache Stampede
+    let cached_item_res = manager.decoded_images.try_get_with(
+        cache_key.clone(),
+        || -> Result<DecodedCacheItem, String> {
             let t_config = crate::app::get_active_tonemap_config();
 
             if let Ok(img) =
@@ -70,7 +178,8 @@ pub async fn get_channel_preview_image(
             } else {
                 Err("Failed to decode image".to_string())
             }
-        });
+        },
+    );
 
     let cached_item = cached_item_res.ok()?;
     let rgba = &*cached_item.image;
@@ -90,7 +199,6 @@ pub async fn get_channel_preview_image(
         };
         let mut out_rgb = image::RgbImage::new(rgba.width(), rgba.height());
 
-        // Fast parallel channel extraction bypassing bounds checking and slow per-coordinate loops
         out_rgb
             .as_mut()
             .par_chunks_exact_mut(3)
@@ -108,7 +216,7 @@ pub async fn get_channel_preview_image(
     Some(out_img.into_rgba8())
 }
 
-/// Recursively calculates the total disk size of a directory in bytes.
+/// Recursively calculates the total disk size of a directory in bytes
 fn get_dir_size(path: &Path) -> u64 {
     fs::read_dir(path)
         .into_iter()
@@ -167,13 +275,11 @@ pub fn run_vector_cache_garbage_collector() {
         }
     }
 
-    // Sort folders by accessed time (oldest first)
     cache_folders.sort_by_key(|f| f.1);
 
     let max_cache_bytes: u64 = 1024 * 1024 * 1024; // 1 GiB capacity limit
     let mut current_total_size: u64 = cache_folders.iter().map(|f| f.2).sum();
 
-    // Evict oldest caches until total size fits inside the limit
     for (path, _, size) in cache_folders {
         if current_total_size <= max_cache_bytes {
             break;

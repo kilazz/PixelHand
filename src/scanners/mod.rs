@@ -6,128 +6,18 @@ pub mod perceptual;
 pub mod qc;
 
 use anyhow::Result;
-use moka::sync::Cache;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use ustr::Ustr;
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
 use crate::state::models::{AiModelType, SearchMethod};
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
-/// High-performance container holding composite and lazy-allocated channel-isolated preview buffers.
-#[derive(Clone)]
-pub struct CachedThumbnail {
-    pub composite: image::RgbaImage,
-    pub r_channel: Arc<OnceLock<image::RgbaImage>>,
-    pub g_channel: Arc<OnceLock<image::RgbaImage>>,
-    pub b_channel: Arc<OnceLock<image::RgbaImage>>,
-    pub a_channel: Arc<OnceLock<image::RgbaImage>>,
-}
-
-impl CachedThumbnail {
-    pub fn new(composite: image::RgbaImage) -> Self {
-        Self {
-            composite,
-            r_channel: Arc::new(OnceLock::new()),
-            g_channel: Arc::new(OnceLock::new()),
-            b_channel: Arc::new(OnceLock::new()),
-            a_channel: Arc::new(OnceLock::new()),
-        }
-    }
-
-    /// Retrieves or dynamically computes a color-isolated preview on a separate thread, caching the result.
-    pub fn get_channel(&self, channel: &str) -> image::RgbaImage {
-        let lock = match channel {
-            "R" => &self.r_channel,
-            "G" => &self.g_channel,
-            "B" => &self.b_channel,
-            "A" => &self.a_channel,
-            _ => return self.composite.clone(),
-        };
-
-        lock.get_or_init(|| {
-            let idx = match channel {
-                "R" => 0,
-                "G" => 1,
-                "B" => 2,
-                _ => 3,
-            };
-
-            let width = self.composite.width();
-            let height = self.composite.height();
-            let mut out_rgba = image::RgbaImage::new(width, height);
-
-            let composite_raw = self.composite.as_raw();
-            let out_raw = out_rgba.as_mut();
-
-            for (i, chunk) in composite_raw.chunks_exact(4).enumerate() {
-                let val = chunk[idx];
-                let dst_idx = i * 4;
-                if idx == 3 {
-                    out_raw[dst_idx] = val;
-                    out_raw[dst_idx + 1] = val;
-                    out_raw[dst_idx + 2] = val;
-                    out_raw[dst_idx + 3] = val;
-                } else {
-                    out_raw[dst_idx] = val;
-                    out_raw[dst_idx + 1] = val;
-                    out_raw[dst_idx + 2] = val;
-                    out_raw[dst_idx + 3] = 255;
-                }
-            }
-            out_rgba
-        })
-        .clone()
-    }
-}
-
-/// Fast thread-safe in-memory cache for loaded thumbnail textures to support zero-lag hover channel previews.
-/// Key type migrated to Ustr to leverage O(1) comparison and pre-calculated pointer hashing.
-pub static THUMBNAIL_MEMORY_CACHE: OnceLock<Cache<Ustr, CachedThumbnail>> = OnceLock::new();
-
 pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
 pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
-
-/// Normalizes path representations across Windows and Unix platforms to guarantee absolute cache hit consistency.
-/// Returns an interned Ustr for instant pointer-comparison (==) and zero heap allocations on hot paths.
-pub fn normalize_path_key(path_str: &str) -> Ustr {
-    let normalized: String = path_str
-        .chars()
-        .map(|c| {
-            if c == '/' || c == '\\' {
-                std::path::MAIN_SEPARATOR
-            } else {
-                c
-            }
-        })
-        .collect();
-    ustr::ustr(&normalized.to_lowercase())
-}
-
-/// Stores an image buffer in the memory cache, evicting the oldest items if total memory footprint exceeds limits.
-fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
-    let cache = THUMBNAIL_MEMORY_CACHE.get_or_init(|| {
-        Cache::builder()
-            // Reduced max capacity from 500 MB to 150 MB.
-            // Since channel layers (R, G, B, A) are allocated dynamically behind a OnceLock,
-            // the cache weigher does not automatically track their expanded memory footprint.
-            // A conservative 150 MB base limit prevents total RAM from silently bloating up to 1+ GB.
-            .max_capacity(150 * 1024 * 1024)
-            // Weigh each item according to its base decompressed pixel payload (Width * Height * 4 channels)
-            .weigher(|_k, v: &CachedThumbnail| {
-                let bytes = v.composite.width() as u64 * v.composite.height() as u64 * 4;
-                bytes.min(u32::MAX as u64) as u32
-            })
-            .build()
-    });
-
-    let normalized_key = normalize_path_key(path);
-    cache.insert(normalized_key, CachedThumbnail::new(img));
-}
 
 // ==========================================
 // --- DECOMPOSED SCANPARMS SUB-STRUCTS -----
@@ -220,52 +110,60 @@ impl ScanParams {
         store: &crate::app::Store,
         cancel_token: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
+        // Fetch nested settings from Slint
+        let paths = store.get_paths();
+        let ext = store.get_extensions();
+        let qc = store.get_qc();
+        let visuals = store.get_visuals();
+        let prep = store.get_prep();
+        let ai = store.get_ai();
+
         let mut extensions = Vec::new();
 
-        if store.get_ext_png() {
+        if ext.ext_png {
             extensions.push(".png".to_string());
         }
-        if store.get_ext_jpg() {
+        if ext.ext_jpg {
             extensions.push(".jpg".to_string());
             extensions.push(".jpeg".to_string());
         }
-        if store.get_ext_tga() {
+        if ext.ext_tga {
             extensions.push(".tga".to_string());
         }
-        if store.get_ext_dds() {
+        if ext.ext_dds {
             extensions.push(".dds".to_string());
         }
-        if store.get_ext_bmp() {
+        if ext.ext_bmp {
             extensions.push(".bmp".to_string());
         }
-        if store.get_ext_exr() {
+        if ext.ext_exr {
             extensions.push(".ext_exr".to_string());
             extensions.push(".exr".to_string());
         }
-        if store.get_ext_hdr() {
+        if ext.ext_hdr {
             extensions.push(".hdr".to_string());
         }
-        if store.get_ext_tif() {
+        if ext.ext_tif {
             extensions.push(".tif".to_string());
             extensions.push(".tiff".to_string());
         }
-        if store.get_ext_webp() {
+        if ext.ext_webp {
             extensions.push(".webp".to_string());
         }
-        if store.get_ext_gif() {
+        if ext.ext_gif {
             extensions.push(".gif".to_string());
         }
-        if store.get_ext_psd() {
+        if ext.ext_psd {
             extensions.push(".psd".to_string());
         }
-        if store.get_ext_jxl() {
+        if ext.ext_jxl {
             extensions.push(".jxl".to_string());
         }
-        if store.get_ext_heic() {
+        if ext.ext_heic {
             extensions.push(".heic".to_string());
             extensions.push(".heif".to_string());
         }
-        if store.get_ext_avif() {
+        if ext.ext_avif {
             extensions.push(".avif".to_string());
         }
 
@@ -279,50 +177,50 @@ impl ScanParams {
 
         Self {
             paths: ScanPaths {
-                dir_a: store.get_dir_a().to_string(),
-                dir_b: store.get_dir_b().to_string(),
-                query_text: store.get_query_text().to_string(),
-                excluded_folders: store.get_excluded_folders().to_string(),
+                dir_a: paths.dir_a.to_string(),
+                dir_b: paths.dir_b.to_string(),
+                query_text: paths.query_text.to_string(),
+                excluded_folders: paths.excluded_folders.to_string(),
             },
             qc: ScanQcRules {
                 qc_mode: store.get_search_method() == 4,
-                qc_npot: store.get_qc_npot(),
-                qc_mipmaps: store.get_qc_mipmaps(),
-                qc_block_align: store.get_qc_block_align(),
-                qc_bit_depth: store.get_qc_bit_depth(),
-                qc_solid_colors: store.get_qc_solid_colors(),
-                qc_normals: store.get_qc_normals(),
-                qc_normals_tags: store.get_qc_normals_tags().to_string(),
-                qc_match_by_stem: store.get_qc_match_by_stem(),
-                qc_hide_same_resolution: store.get_qc_hide_same_resolution(),
-                qc_check_bloat: store.get_qc_check_bloat(),
-                qc_check_alpha: store.get_qc_check_alpha(),
-                qc_check_colorspace: store.get_qc_check_colorspace(),
-                qc_check_compression: store.get_qc_check_compression(),
+                qc_npot: qc.qc_npot,
+                qc_mipmaps: qc.qc_mipmaps,
+                qc_block_align: qc.qc_block_align,
+                qc_bit_depth: qc.qc_bit_depth,
+                qc_solid_colors: qc.qc_solid_colors,
+                qc_normals: qc.qc_normals,
+                qc_normals_tags: qc.qc_normals_tags.to_string(),
+                qc_match_by_stem: qc.qc_match_by_stem,
+                qc_hide_same_resolution: qc.qc_hide_same_resolution,
+                qc_check_bloat: qc.qc_check_bloat,
+                qc_check_alpha: qc.qc_check_alpha,
+                qc_check_colorspace: qc.qc_check_colorspace,
+                qc_check_compression: qc.qc_check_compression,
             },
             visuals: ScanVisualReports {
-                save_visuals: store.get_save_visuals(),
-                visuals_columns: store.get_visuals_columns() as usize,
-                visuals_max_count: store.get_visuals_max_count() as usize,
-                visuals_font_size: store.get_visuals_font_size() as usize,
-                visuals_scale: store.get_visuals_scale(),
+                save_visuals: visuals.save_visuals,
+                visuals_columns: visuals.visuals_columns as usize,
+                visuals_max_count: visuals.visuals_max_count as usize,
+                visuals_font_size: visuals.visuals_font_size as usize,
+                visuals_scale: visuals.visuals_scale,
             },
             prep: ScanPreprocessing {
-                prep_luminance: store.get_prep_luminance(),
-                prep_channels: store.get_prep_channels(),
-                prep_r: store.get_prep_r(),
-                prep_g: store.get_prep_g(),
-                prep_b: store.get_prep_b(),
-                prep_a: store.get_prep_a(),
-                prep_tags: store.get_prep_tags().to_string(),
-                prep_ignore_solid: store.get_prep_ignore_solid(),
+                prep_luminance: prep.prep_luminance,
+                prep_channels: prep.prep_channels,
+                prep_r: prep.prep_r,
+                prep_g: prep.prep_g,
+                prep_b: prep.prep_b,
+                prep_a: prep.prep_a,
+                prep_tags: prep.prep_tags.to_string(),
+                prep_ignore_solid: prep.prep_ignore_solid,
             },
             ai: ScanAiSettings {
                 search_precision: store.get_search_precision(),
-                ai_model: AiModelType::from_i32(store.get_ai_model()),
-                custom_model_path: store.get_custom_model_path().to_string(),
-                custom_model_arch: store.get_custom_model_arch(),
-                custom_model_dim: store.get_custom_model_dim(),
+                ai_model: AiModelType::from_i32(ai.ai_model),
+                custom_model_path: ai.custom_model_path.to_string(),
+                custom_model_arch: ai.custom_model_arch,
+                custom_model_dim: ai.custom_model_dim,
             },
 
             similarity: store.get_similarity_threshold(),
@@ -527,7 +425,7 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         && let Ok(img) = image::open(cp)
     {
         let rgba = img.to_rgba8();
-        store_in_thumbnail_memory_cache(path_str, rgba.clone());
+        crate::utils::cache::store_in_thumbnail_memory_cache(path_str, rgba.clone());
         return Some(rgba);
     }
 
@@ -544,7 +442,6 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
     };
 
     // Fallback: Parse the actual texture and downscale
-    // Decoupled fix: Pass `None` since thumbnails use fast SDR scaling without loading UI contexts.
     if let Ok(mut img) =
         crate::format_loaders::open_image_with_dds_fallback(&path, Some(target_size), None)
     {
@@ -553,7 +450,7 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         }
         let rgba = img.to_rgba8();
 
-        store_in_thumbnail_memory_cache(path_str, rgba.clone());
+        crate::utils::cache::store_in_thumbnail_memory_cache(path_str, rgba.clone());
 
         if let Some(ref cp) = cache_path {
             let _ = rgba.save(cp);

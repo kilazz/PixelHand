@@ -34,25 +34,25 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".png";
-                        checked <=> Store.ext_png;
+                        checked <=> Store.extensions.ext_png;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".jpg / .jpeg";
-                        checked <=> Store.ext_jpg;
+                        checked <=> Store.extensions.ext_jpg;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".tga";
-                        checked <=> Store.ext_tga;
+                        checked <=> Store.extensions.ext_tga;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".dds";
-                        checked <=> Store.ext_dds;
+                        checked <=> Store.extensions.ext_dds;
                         toggled => { Store.save_settings(); }
                     }
                 }
@@ -61,25 +61,25 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".bmp";
-                        checked <=> Store.ext_bmp;
+                        checked <=> Store.extensions.ext_bmp;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".exr";
-                        checked <=> Store.ext_exr;
+                        checked <=> Store.extensions.ext_exr;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".hdr";
-                        checked <=> Store.ext_hdr;
+                        checked <=> Store.extensions.ext_hdr;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".tif / .tiff";
-                        checked <=> Store.ext_tif;
+                        checked <=> Store.extensions.ext_tif;
                         toggled => { Store.save_settings(); }
                     }
                 }
@@ -88,19 +88,19 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".webp";
-                        checked <=> Store.ext_webp;
+                        checked <=> Store.extensions.ext_webp;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".gif";
-                        checked <=> Store.ext_gif;
+                        checked <=> Store.extensions.ext_gif;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".psd";
-                        checked <=> Store.ext_psd;
+                        checked <=> Store.extensions.ext_psd;
                         toggled => { Store.save_settings(); }
                     }
                 }
@@ -109,19 +109,19 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".jxl";
-                        checked <=> Store.ext_jxl;
+                        checked <=> Store.extensions.ext_jxl;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".heic / .heif";
-                        checked <=> Store.ext_heic;
+                        checked <=> Store.extensions.ext_heic;
                         toggled => { Store.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".avif";
-                        checked <=> Store.ext_avif;
+                        checked <=> Store.extensions.ext_avif;
                         toggled => { Store.save_settings(); }
                     }
                 }

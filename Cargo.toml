@@ -67,6 +67,7 @@ thiserror = "2.0.19"
 
 moka = { version = "0.12.15", features = ["sync"] }
 ustr = "1.1.0"
+parking_lot = "0.12.5"
 
 [patch.crates-io]
 # Override for suffix automaton crate compatibility
