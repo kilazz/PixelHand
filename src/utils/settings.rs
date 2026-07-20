@@ -73,7 +73,8 @@ pub fn save_settings(store: &crate::app::Store) {
     }
 }
 
-/// Loads and deserializes previously saved config values from `Settings.json` if available.
+/// Loads and deserializes previously saved config values from `Settings.json`.
+/// Automatically auto-heals by overwriting the file with default settings if it is corrupted or outdated.
 pub fn load_settings() -> Option<AppSettings> {
     let dir = match get_portable_app_data_dir() {
         Ok(d) => d,
@@ -95,12 +96,32 @@ pub fn load_settings() -> Option<AppSettings> {
         Ok(content) => match serde_json::from_str::<AppSettings>(&content) {
             Ok(settings) => Some(settings),
             Err(e) => {
-                tracing::error!(
-                    "Corrupted Settings.json file format at {}: {}",
+                tracing::warn!(
+                    "Settings.json at {} is corrupted or outdated: {}. Auto-healing file with default configuration.",
                     path.display(),
                     e
                 );
-                None
+
+                // Self-healing: Overwrite the corrupted/outdated file with default settings immediately
+                let default_settings = AppSettings::default();
+                match serde_json::to_string_pretty(&default_settings) {
+                    Ok(serialized) => {
+                        if let Err(write_err) = fs::write(&path, serialized) {
+                            tracing::error!("Failed to auto-heal Settings.json: {}", write_err);
+                        } else {
+                            tracing::info!(
+                                "Settings.json successfully healed with default settings."
+                            );
+                        }
+                    }
+                    Err(serialize_err) => {
+                        tracing::error!(
+                            "Failed to serialize default settings during healing: {}",
+                            serialize_err
+                        );
+                    }
+                }
+                Some(default_settings)
             }
         },
         Err(e) => {
