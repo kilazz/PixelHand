@@ -1,0 +1,358 @@
+// ui/tabs/find_tab.slint
+
+import {
+    ProgressIndicator,
+    Palette,
+    TextEdit,
+    ListView,
+    ScrollView,
+    Slider,
+    SpinBox,
+    ComboBox,
+    LineEdit,
+    CheckBox,
+} from "std-widgets.slint";
+
+import { ResultsRow, SelectedFile, GridRow } from "../structs.slint";
+import { Store } from "../store.slint";
+import {
+    TabButton,
+    ChannelButton,
+    CustomButton,
+} from "../components/buttons.slint";
+import { TableHeader } from "../components/table_header.slint";
+import { ListRow } from "../components/list_row.slint";
+import { GridCard } from "../components/grid_card.slint";
+import { FindSidebar } from "../components/find_sidebar.slint";
+
+export component FindTab inherits HorizontalLayout {
+    spacing: 0px;
+    width: 100%;
+    height: 100%;
+
+    // Exposing callbacks to delegate popup operations back to AppWindow securely
+    callback show_formats_popup();
+    callback show_skipped_popup(length, length);
+    callback show_context_menu(length, length, string);
+
+    // ENCAPSULATED FIND CONFIGURATION SIDEBAR
+    FindSidebar {
+        show_formats_popup => {
+            root.show_formats_popup();
+        }
+    }
+
+    // SIDEBAR SPLITTER
+    Rectangle {
+        width: 8px;
+        horizontal-stretch: 0;
+        background: sidebar-splitter-ta.has-hover ? #474747 : #1e1e1e;
+        Rectangle {
+            width: 2px;
+            height: 20px;
+            background: #808080;
+            border-radius: 1px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+
+        sidebar-splitter-ta := TouchArea {
+            mouse-cursor: MouseCursor.col-resize;
+            moved => { if (self.pressed) { Store.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); } }
+        }
+    }
+
+    // MAIN RESULTS PANEL
+    VerticalLayout {
+        padding-left: 12px;
+        horizontal-stretch: 1;
+        spacing: 8px;
+        VerticalLayout {
+            spacing: 8px;
+            vertical-stretch: 1;
+
+            // RESULTS HEADER CONTROLS
+            HorizontalLayout {
+                alignment: space-between;
+                HorizontalLayout {
+                    spacing: 12px;
+                    Text {
+                        text: "Results (" + Store.results.length + " items)";
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: #ffffff;
+                        vertical-alignment: center;
+                    }
+
+                    LineEdit {
+                        text <=> Store.results_search_query;
+                        placeholder-text: "Filter by name...";
+                        height: 24px;
+                        width: 130px;
+                        edited => { Store.results_filter_changed(); }
+                    }
+
+                    ComboBox {
+                        model: Store.search_method == 3 ? ["By Format Type", "By Size on Disk", "By Filename"] : ["By Duplicate Count", "By Size on Disk", "By Filename"];
+                        current-index <=> Store.results_sort_index;
+                        height: 24px;
+                        width: 145px;
+                        selected(val) => { Store.results_sort_changed(Store.results_sort_index); }
+                    }
+
+                    if !Store.results_grid_mode && Store.has_results: CustomButton {
+                        text: "Expand All";
+                        height: 24px;
+                        primary-color: #474747;
+                        clicked => { Store.expand_all_groups(); }
+                    }
+
+                    if !Store.results_grid_mode && Store.has_results: CustomButton {
+                        text: "Collapse All";
+                        height: 24px;
+                        primary-color: #474747;
+                        clicked => { Store.collapse_all_groups(); }
+                    }
+
+                    if Store.has_results: CustomButton {
+                        text: "Auto Cols";
+                        height: 24px;
+                        primary-color: #474747;
+                        clicked => { Store.auto_size_columns(); }
+                    }
+
+                    if Store.has_results: CustomButton {
+                        text: "Reset Cols";
+                        height: 24px;
+                        primary-color: #474747;
+                        clicked => { Store.reset_size_columns(); }
+                    }
+
+                    if Store.has_results: CustomButton {
+                        text: "Export CSV";
+                        height: 24px;
+                        primary-color: #3e6a90;
+                        clicked => { Store.export_csv(); }
+                    }
+
+                    if Store.search_method == 2: HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: "Min Sim:";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #cfcfcf;
+                        }
+
+                        Slider {
+                            value <=> Store.results_min_similarity;
+                            minimum: 0.0;
+                            maximum: 100.0;
+                            width: 80px;
+                            height: 24px;
+                            changed(val) => { Store.results_filter_changed(); }
+                        }
+
+                        Text {
+                            text: Math.round(Store.results_min_similarity) + "%";
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: #ffffff;
+                            width: 35px;
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    if Store.skipped_files_list.length > 0: CustomButton {
+                        text: "⚠️ Skipped Files (" + Store.skipped_files_list.length + ")";
+                        primary-color: #aa3838;
+                        height: 24px;
+                        clicked => { root.show_skipped_popup(self.absolute-position.x - 120px, self.absolute-position.y + self.height); }
+                    }
+                    CustomButton {
+                        text: Store.results_grid_mode ? "List Mode" : "Grid Mode";
+                        icon-type: Store.results_grid_mode ? 2 : 3;
+                        height: 24px;
+                        clicked => { Store.results_grid_mode = !Store.results_grid_mode; }
+                    }
+                }
+            }
+
+            if Store.has_results: HorizontalLayout {
+                spacing: 12px;
+                padding-left: 4px;
+                padding-bottom: 4px;
+                alignment: start;
+                Text {
+                    text: "Smart Filters:";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #808080;
+                }
+
+                CheckBox {
+                    text: "NPOT Only";
+                    checked <=> Store.filter_only_npot;
+                    toggled => { Store.results_filter_changed(); }
+                }
+
+                CheckBox {
+                    text: "Uncompressed Only";
+                    checked <=> Store.filter_only_uncompressed;
+                    toggled => { Store.results_filter_changed(); }
+                }
+
+                CheckBox {
+                    text: "Missing Mips Only";
+                    checked <=> Store.filter_only_missing_mips;
+                    toggled => { Store.results_filter_changed(); }
+                }
+
+                CheckBox {
+                    text: "Cubemaps Only";
+                    checked <=> Store.filter_only_cubemaps;
+                    toggled => { Store.results_filter_changed(); }
+                }
+            }
+
+            // VIRTUALIZED SCROLL CONTENT
+            Rectangle {
+                border-color: #353535;
+                border-width: 1px;
+                background: #2d2d2d;
+                border-radius: 4px;
+                vertical-stretch: 1;
+                clip: true;
+
+                VerticalLayout {
+                    if !Store.results_grid_mode && Store.results.length > 0: TableHeader { }
+                    if !Store.results_grid_mode && Store.results.length > 0: ListView {
+                        for row[idx] in Store.results: ListRow {
+                            row-data: row;
+                            row_clicked(is_header, grp_idx, pth) => { Store.row_clicked(idx, is_header, grp_idx, pth); if !is_header { Store.active_tab = 1; } }
+                            checkbox_toggled() => { Store.row_checkbox_toggled(idx); }
+                            right_clicked(mx, my) => { root.show_context_menu(mx, my, row.path); }
+                            channel_hovered(pth, chan) => { Store.thumbnail_channel_hovered(pth, chan); }
+                        }
+                    }
+                    if Store.results_grid_mode && Store.grid_row_results.length > 0: ListView {
+                        for row in Store.grid_row_results: HorizontalLayout {
+                            spacing: 12px;
+                            padding: 10px;
+                            alignment: start;
+
+                            for item in row.items: GridCard {
+                                row-data: item;
+                                checkerboard: Store.checkerboard_pattern;
+                                width: Store.grid_card_size;
+                                height: Store.grid_card_size + 45px;
+                                clicked => { Store.row_clicked(-1, false, item.group_index, item.path); Store.active_tab = 1; }
+                                right_clicked(mx, my) => { root.show_context_menu(mx, my, item.path); }
+                                channel_hovered(path, chan) => { Store.thumbnail_channel_hovered(path, chan); }
+                            }
+                        }
+                    }
+
+                    if !Store.has_results: VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        Text {
+                            text: "No duplicate assets loaded. Choose scan parameters in the left pane and begin auditing.";
+                            color: #808080;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if Store.has_results && Store.results.length == 0: VerticalLayout {
+                        alignment: center;
+                        spacing: 12px;
+                        Text {
+                            text: "No results match your active smart filters or search query.";
+                            color: #808080;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+
+        // SELECTION CONTROL PANELS
+        Rectangle {
+            background: #2d2d2d;
+            border-color: #353535;
+            border-width: 1px;
+            border-radius: 4px;
+            height: 56px;
+            VerticalLayout {
+                padding: 8px;
+                spacing: 4px;
+                Text {
+                    text: "Selection Rules";
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: #808080;
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    CustomButton {
+                        text: "Select All";
+                        primary-color: #474747;
+                        clicked => { Store.trigger_selection_rule("all"); }
+                    }
+
+                    CustomButton {
+                        text: "Deselect All";
+                        primary-color: #474747;
+                        clicked => { Store.trigger_selection_rule("none"); }
+                    }
+
+                    CustomButton {
+                        text: "Select All Except Best";
+                        primary-color: #474747;
+                        clicked => { Store.trigger_selection_rule("except_best"); }
+                    }
+
+                    CustomButton {
+                        text: "Invert Selection";
+                        primary-color: #474747;
+                        clicked => { Store.trigger_selection_rule("invert"); }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            height: 24px;
+            CustomButton {
+                text: "Replace with Hardlink";
+                primary-color: #3e6a90;
+                clicked => { Store.trigger_action("hardlink"); }
+            }
+
+            CustomButton {
+                text: "Replace with Reflink";
+                primary-color: #3e6a90;
+                clicked => { Store.trigger_action("reflink"); }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            CustomButton {
+                text: "Move to Trash";
+                primary-color: #aa3838;
+                clicked => { Store.trigger_action("trash"); }
+            }
+        }
+    }
+}

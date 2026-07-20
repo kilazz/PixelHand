@@ -2,7 +2,7 @@
 
 use slint::ComponentHandle;
 use slint::winit_030::WinitWindowAccessor;
-use slint::{ModelRc, VecModel};
+use slint::{Model, ModelRc, VecModel};
 use std::sync::{Arc, Mutex};
 
 use crate::app::{AppWindow, SelectedFile, Store};
@@ -133,11 +133,73 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                                     .into(),
                                 );
                                 let mut lock = state_clone_ctx.safe_lock();
-                                lock.results.retain(|r| r.path != path_str);
+
+                                // Unified path normalization to prevent list mismatch on deletion
+                                let normalized_target = utils::fs::normalize_path(&path_str);
+                                lock.results.retain(|r| {
+                                    utils::fs::normalize_path(&r.path) != normalized_target
+                                });
+
                                 utils::ui::update_results_ui(&store, &lock);
                             }
                         }
                         Err(e) => tracing::error!("Failed to move to trash: {}", e),
+                    }
+                }
+            }
+            "trash_group" => {
+                if let Ok(group_idx) = path_str.parse::<i32>() {
+                    tracing::info!("Context Menu: Trashing entire group index {}", group_idx);
+                    let mut lock = state_clone_ctx.safe_lock();
+                    let mut paths_to_delete = Vec::new();
+
+                    if lock.groups.is_empty() {
+                        // Technical QC or Flat mode (categorized via group_index mappings)
+                        for row in &lock.results {
+                            if row.group_index == group_idx && !row.is_header {
+                                paths_to_delete.push(std::path::PathBuf::from(&row.path));
+                            }
+                        }
+                        paths_to_delete.retain(|p| p.exists());
+                        if !paths_to_delete.is_empty()
+                            && let Err(e) = trash::delete_all(&paths_to_delete)
+                        {
+                            tracing::error!("Failed to trash QC group items: {}", e);
+                        }
+                        lock.results.retain(|r| r.group_index != group_idx);
+                    } else {
+                        // Duplicate clusters mode
+                        let group_idx_us = group_idx as usize;
+                        if let Some(g) = lock.groups.get(group_idx_us) {
+                            paths_to_delete = g
+                                .files
+                                .iter()
+                                .map(|f| std::path::PathBuf::from(&f.path))
+                                .filter(|p| p.exists())
+                                .collect();
+
+                            if !paths_to_delete.is_empty()
+                                && let Err(e) = trash::delete_all(&paths_to_delete)
+                            {
+                                tracing::error!("Failed to trash duplicate cluster files: {}", e);
+                            }
+                        }
+                        if group_idx_us < lock.groups.len() {
+                            lock.groups.remove(group_idx_us);
+                            lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
+                        }
+                    }
+
+                    if let Some(ui) = app_weak_ctx.upgrade() {
+                        let store = ui.global::<Store>();
+                        store.set_status_text(
+                            format!(
+                                "Moved {} files in the selected group to trash.",
+                                paths_to_delete.len()
+                            )
+                            .into(),
+                        );
+                        utils::ui::update_results_ui(&store, &lock);
                     }
                 }
             }
@@ -164,11 +226,25 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         if let Some(abs_idx) = utils::ui::get_absolute_index(&lock, idx as usize)
             && let Some(row) = lock.results.get_mut(abs_idx)
         {
+            // Toggle backing state
             row.is_checked = !row.is_checked;
-        }
-        if let Some(ui) = app_weak_checkbox.upgrade() {
-            let store = ui.global::<Store>();
-            utils::ui::update_results_ui(&store, &lock);
+
+            // Micro-optimization: update the row-data inline inside Slint Model directly
+            // instead of triggering a full redraw of the entire list model!
+            if let Some(ui) = app_weak_checkbox.upgrade() {
+                let store = ui.global::<Store>();
+                let results_model = store.get_results();
+
+                // Downcast ModelRc to mutable VecModel with collapsed condition chains
+                if let Some(vec_model) = results_model
+                    .as_any()
+                    .downcast_ref::<VecModel<crate::app::ResultsRow>>()
+                    && let Some(mut slint_row) = vec_model.row_data(idx as usize)
+                {
+                    slint_row.is_checked = row.is_checked;
+                    vec_model.set_row_data(idx as usize, slint_row);
+                }
+            }
         }
     });
 
@@ -263,7 +339,14 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
             Some(f) => f,
             None => return,
         };
-        let duplicate = match group.files.iter().find(|f| f.path == path_str) {
+
+        // Unified path normalization to resolve potential comparison issues in the compare matrix
+        let normalized_target = utils::fs::normalize_path(&path_str);
+        let duplicate = match group
+            .files
+            .iter()
+            .find(|f| utils::fs::normalize_path(&f.path) == normalized_target)
+        {
             Some(f) => f,
             None => return,
         };
@@ -363,7 +446,8 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
         let handle = tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
 
-            let normalized_path = scanners::normalize_path_key(&path_std);
+            // Unified helper inside utils::fs
+            let normalized_path = utils::fs::normalize_path_key(&path_std);
 
             // Fetch the cached item directly from Moka sync cache (no explicit locking needed)
             let cached_img = {
@@ -379,30 +463,30 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                 {
                     let mut lock = state_clone.safe_lock();
                     for row in &mut lock.results {
-                        if scanners::normalize_path_key(&row.path) == normalized_path {
+                        if utils::fs::normalize_path_key(&row.path) == normalized_path {
                             row.thumbnail_data = Some(channel_img.clone());
                         }
                     }
                 }
 
-                // Update UI components dynamically inside the event loop
+                // UI components dynamically inside the event loop
                 let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
                     use slint::Model;
                     let store = ui.global::<Store>();
                     let slint_img = utils::ui::convert_to_slint_image(&channel_img);
 
-                    // Update List Results
+                    // List Results
                     let results_model = store.get_results();
                     for i in 0..results_model.row_count() {
                         if let Some(mut r) = results_model.row_data(i)
-                            && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                            && utils::fs::normalize_path_key(r.path.as_str()) == normalized_path
                         {
                             r.thumbnail = slint_img.clone();
                             results_model.set_row_data(i, r);
                         }
                     }
 
-                    // Update Grid Results (mapping dynamically into virtualized GridRow columns)
+                    // Grid Results (mapping dynamically into virtualized GridRow columns)
                     let grid_model = store.get_grid_row_results();
                     for i in 0..grid_model.row_count() {
                         if let Some(mut r) = grid_model.row_data(i) {
@@ -410,7 +494,7 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                             let mut items: Vec<_> = r.items.iter().collect();
 
                             for item in items.iter_mut() {
-                                if scanners::normalize_path_key(item.path.as_str())
+                                if utils::fs::normalize_path_key(item.path.as_str())
                                     == normalized_path
                                 {
                                     item.thumbnail = slint_img.clone();
@@ -425,11 +509,11 @@ pub fn bind_file_actions(app: &AppWindow, state: Arc<Mutex<AppState>>) {
                         }
                     }
 
-                    // Update Selected Group Files (Compare Panel)
+                    // Selected Group Files (Compare Panel)
                     let group_model = store.get_selected_group_files();
                     for i in 0..group_model.row_count() {
                         if let Some(mut r) = group_model.row_data(i)
-                            && scanners::normalize_path_key(r.path.as_str()) == normalized_path
+                            && utils::fs::normalize_path_key(r.path.as_str()) == normalized_path
                         {
                             r.thumbnail = slint_img.clone();
                             group_model.set_row_data(i, r);

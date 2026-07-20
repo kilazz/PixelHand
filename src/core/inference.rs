@@ -10,6 +10,8 @@ use std::path::Path;
 use std::sync::Mutex;
 use tokenizers::Tokenizer;
 
+use crate::state::models::AiModelType;
+
 #[derive(Debug, Clone)]
 pub struct PreprocessingConfig {
     pub target_size: (u32, u32),
@@ -19,9 +21,9 @@ pub struct PreprocessingConfig {
 
 impl PreprocessingConfig {
     /// Resolves the correct image scaling and normalization parameters based on the chosen AI architecture.
-    pub fn for_model(model_idx: i32, custom_arch: i32) -> Self {
-        if model_idx == 7 {
-            match custom_arch {
+    pub fn for_model(model: AiModelType, custom_arch: i32) -> Self {
+        match model {
+            AiModelType::Custom => match custom_arch {
                 1 => Self {
                     // SigLIP-style symmetric normalization [-1, 1] at 384x384 resolution
                     target_size: (384, 384),
@@ -40,49 +42,39 @@ impl PreprocessingConfig {
                     mean: [0.48145466, 0.4578275, 0.40821073],
                     std: [0.26862954, 0.2613026, 0.2757771],
                 },
-            }
-        } else {
-            match model_idx {
-                1 => Self {
-                    target_size: (224, 224),
-                    mean: [0.48145466, 0.4578275, 0.40821073],
-                    std: [0.26862954, 0.2613026, 0.2757771],
-                },
-                2 | 3 => Self {
-                    target_size: (384, 384),
-                    mean: [0.5, 0.5, 0.5],
-                    std: [0.5, 0.5, 0.5],
-                },
-                4 => Self {
-                    target_size: (224, 224),
-                    mean: [0.485, 0.456, 0.406],
-                    std: [0.229, 0.224, 0.225],
-                },
-                5 => Self {
-                    // Google SigLIP 2 Base (patch16-224)
-                    target_size: (224, 224),
-                    mean: [0.5, 0.5, 0.5],
-                    std: [0.5, 0.5, 0.5],
-                },
-                6 => Self {
-                    // LLM2CLIP OpenAI-B-16
-                    target_size: (224, 224),
-                    mean: [0.48145466, 0.4578275, 0.40821073],
-                    std: [0.26862954, 0.2613026, 0.2757771],
-                },
-                _ => Self {
-                    target_size: (224, 224),
-                    mean: [0.48145466, 0.4578275, 0.40821073],
-                    std: [0.26862954, 0.2613026, 0.2757771],
-                },
-            }
+            },
+            AiModelType::ClipVitB32 | AiModelType::ClipVitL14 => Self {
+                target_size: (224, 224),
+                mean: [0.48145466, 0.4578275, 0.40821073],
+                std: [0.26862954, 0.2613026, 0.2757771],
+            },
+            AiModelType::SiglipBase | AiModelType::SiglipLarge => Self {
+                target_size: (384, 384),
+                mean: [0.5, 0.5, 0.5],
+                std: [0.5, 0.5, 0.5],
+            },
+            AiModelType::DinoV2Base => Self {
+                target_size: (224, 224),
+                mean: [0.485, 0.456, 0.406],
+                std: [0.229, 0.224, 0.225],
+            },
+            AiModelType::Siglip2Base => Self {
+                target_size: (224, 224),
+                mean: [0.5, 0.5, 0.5],
+                std: [0.5, 0.5, 0.5],
+            },
+            AiModelType::Llm2ClipBase => Self {
+                target_size: (224, 224),
+                mean: [0.48145466, 0.4578275, 0.40821073],
+                std: [0.26862954, 0.2613026, 0.2757771],
+            },
         }
     }
 }
 
 impl Default for PreprocessingConfig {
     fn default() -> Self {
-        Self::for_model(0, 0)
+        Self::for_model(AiModelType::ClipVitB32, 0)
     }
 }
 

@@ -2,25 +2,25 @@
 
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use crate::core::qc::{
-    check_absolute, check_empty_channels, check_normal_map_integrity, check_normal_map_orientation,
-    check_relative, check_solid_texture, extract_qc_metadata,
+    QcImageMetadata, check_absolute, check_empty_channels, check_normal_map_integrity,
+    check_normal_map_orientation, check_relative, check_solid_texture,
 };
 use crate::state::QcIssueSummary;
 use crate::utils::helpers::discover_files;
 
 /// Executes an absolute local directory Quality Control audit.
 pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
-    let path = PathBuf::from(&params.dir_a);
+    let path = PathBuf::from(&params.paths.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
     let ex_folders: Vec<String> = params
+        .paths
         .excluded_folders
         .split(',')
         .map(|t| t.trim().to_string())
@@ -44,38 +44,17 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
             }
 
             let mut file_issues = Vec::new();
-            let (w, h) = match imagesize::size(p) {
-                Ok(dim) => (dim.width, dim.height),
-                Err(_) => (0, 0),
-            };
-            let ext = p
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
 
-            let qc_meta =
-                extract_qc_metadata(p).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
-                    width: w as u32,
-                    height: h as u32,
-                    file_size: size,
-                    format_str: ext.clone(),
-                    compression_format: ext,
-                    color_space: "sRGB".into(),
-                    has_alpha: false,
-                    bit_depth: 8,
-                    mipmap_count: 1,
-                    is_cubemap: false,
-                    estimated_vram: 0,
-                });
+            // DRY implementation: Safely extract metadata using the robust fallback factory
+            let qc_meta = QcImageMetadata::extract_or_fallback(p);
 
             // Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
             let abs_issues = check_absolute(
                 &qc_meta,
-                params.qc_npot,
-                params.qc_mipmaps,
-                params.qc_block_align,
-                params.qc_bit_depth,
+                params.qc.qc_npot,
+                params.qc.qc_mipmaps,
+                params.qc.qc_block_align,
+                params.qc.qc_bit_depth,
             );
             for issue in abs_issues {
                 file_issues.push(QcIssueSummary {
@@ -86,7 +65,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
             }
 
             // Perform optional solid flat color checking and empty channel packing checks
-            if params.qc_solid_colors {
+            if params.qc.qc_solid_colors {
                 if let Some((issue, details)) = check_solid_texture(p) {
                     file_issues.push(QcIssueSummary {
                         path: p.to_string_lossy().to_string(),
@@ -104,12 +83,13 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
             }
 
             // Perform optional normal maps vector integrity and DirectX vs OpenGL Y-axis audits
-            if params.qc_normals {
+            if params.qc.qc_normals {
                 let path_str = p.to_string_lossy().to_lowercase();
-                let should_check = if params.qc_normals_tags.is_empty() {
+                let should_check = if params.qc.qc_normals_tags.is_empty() {
                     true
                 } else {
                     params
+                        .qc
                         .qc_normals_tags
                         .split(',')
                         .map(|t| t.trim().to_lowercase())
@@ -210,55 +190,9 @@ pub async fn run_folder_compare(
     for p_b in &files_b {
         let key = get_key(p_b);
         if let Some(p_a) = map_a.get(&key) {
-            let size_a = fs::metadata(p_a).map(|m| m.len()).unwrap_or(0);
-            let size_b = fs::metadata(p_b).map(|m| m.len()).unwrap_or(0);
-
-            let (w_a, h_a) = match imagesize::size(p_a) {
-                Ok(dim) => (dim.width, dim.height),
-                Err(_) => (0, 0),
-            };
-            let (w_b, h_b) = match imagesize::size(p_b) {
-                Ok(dim) => (dim.width, dim.height),
-                Err(_) => (0, 0),
-            };
-
-            let ext_a = p_a
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let ext_b = p_b
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            let meta_a =
-                extract_qc_metadata(p_a).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
-                    width: w_a as u32,
-                    height: h_a as u32,
-                    file_size: size_a,
-                    format_str: ext_a.clone(),
-                    compression_format: ext_a,
-                    color_space: "sRGB".into(),
-                    has_alpha: false,
-                    bit_depth: 8,
-                    mipmap_count: 1,
-                    is_cubemap: false,
-                    estimated_vram: 0,
-                });
-            let meta_b =
-                extract_qc_metadata(p_b).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
-                    width: w_b as u32,
-                    height: h_b as u32,
-                    file_size: size_b,
-                    format_str: ext_b.clone(),
-                    compression_format: ext_b,
-                    color_space: "sRGB".into(),
-                    has_alpha: false,
-                    bit_depth: 8,
-                    mipmap_count: 1,
-                    is_cubemap: false,
-                    estimated_vram: 0,
-                });
+            // DRY implementation: Safely extract metadata using the robust fallback factory
+            let meta_a = QcImageMetadata::extract_or_fallback(p_a);
+            let meta_b = QcImageMetadata::extract_or_fallback(p_b);
 
             let rel_issues = check_relative(
                 &meta_a,
@@ -297,12 +231,13 @@ pub async fn run_folder_compare(
 pub async fn run_asset_audit(
     params: super::ScanParams,
 ) -> Result<Vec<crate::state::ResultsRowData>> {
-    let path = PathBuf::from(&params.dir_a);
+    let path = PathBuf::from(&params.paths.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
     let ex_folders: Vec<String> = params
+        .paths
         .excluded_folders
         .split(',')
         .map(|t| t.trim().to_string())
@@ -327,30 +262,8 @@ pub async fn run_asset_audit(
                 return None;
             }
 
-            let (w, h) = match imagesize::size(p) {
-                Ok(dim) => (dim.width, dim.height),
-                Err(_) => (0, 0),
-            };
-            let ext = p
-                .extension()
-                .map(|e| e.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
-
-            let qc_meta =
-                extract_qc_metadata(p).unwrap_or_else(|_| crate::core::qc::QcImageMetadata {
-                    width: w as u32,
-                    height: h as u32,
-                    file_size: size,
-                    format_str: ext.clone(),
-                    compression_format: ext.clone(),
-                    color_space: "sRGB".into(),
-                    has_alpha: false,
-                    bit_depth: 8,
-                    mipmap_count: 1,
-                    is_cubemap: false,
-                    estimated_vram: 0,
-                });
+            // DRY implementation: Safely extract metadata using the robust fallback factory
+            let qc_meta = QcImageMetadata::extract_or_fallback(p);
 
             let thumbnail_data = super::load_thumbnail_for_path(&p.to_string_lossy());
 

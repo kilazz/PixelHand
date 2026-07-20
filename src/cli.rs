@@ -1,6 +1,10 @@
 // src/cli.rs
 
-use crate::scanners::{ScanParams, exact, qc};
+use crate::scanners::{
+    ScanAiSettings, ScanParams, ScanPaths, ScanPreprocessing, ScanQcRules, ScanVisualReports,
+    exact, qc,
+};
+use crate::state::models::{AiModelType, SearchMethod};
 use anyhow::{Result, anyhow};
 
 /// Main CLI entry point.
@@ -61,21 +65,57 @@ fn print_help() {
 /// Helper constructor to centralize default scan options configuration and prevent boilerplate replication.
 fn create_default_cli_params(dir: String) -> ScanParams {
     ScanParams {
-        dir_a: dir,
-        dir_b: String::new(),
-        query_text: String::new(),
+        paths: ScanPaths {
+            dir_a: dir,
+            dir_b: String::new(),
+            query_text: String::new(),
+            excluded_folders: ".git, .svn, cache, temp".to_string(),
+        },
+        qc: ScanQcRules {
+            qc_mode: false,
+            qc_npot: false,
+            qc_mipmaps: false,
+            qc_block_align: false,
+            qc_bit_depth: false,
+            qc_solid_colors: false,
+            qc_normals: false,
+            qc_normals_tags: String::new(),
+            qc_match_by_stem: true,
+            qc_hide_same_resolution: false,
+            qc_check_bloat: true,
+            qc_check_alpha: true,
+            qc_check_colorspace: true,
+            qc_check_compression: true,
+        },
+        visuals: ScanVisualReports {
+            save_visuals: false,
+            visuals_columns: 6,
+            visuals_max_count: 100,
+            visuals_font_size: 14,
+            visuals_scale: 1.0,
+        },
+        prep: ScanPreprocessing {
+            prep_luminance: false,
+            prep_channels: false,
+            prep_r: true,
+            prep_g: true,
+            prep_b: true,
+            prep_a: true,
+            prep_tags: String::new(),
+            prep_ignore_solid: true,
+        },
+        ai: ScanAiSettings {
+            search_precision: 1,
+            ai_model: AiModelType::ClipVitB32,
+            custom_model_path: String::new(),
+            custom_model_arch: 0,
+            custom_model_dim: 512,
+        },
+
         similarity: 100.0,
         batch_size: 128,
-        search_method: 0,
+        search_method: SearchMethod::Exact,
         execution_provider: "CPU".to_string(),
-        qc_mode: false,
-        qc_npot: false,
-        qc_mipmaps: false,
-        qc_block_align: false,
-        qc_bit_depth: false,
-        qc_solid_colors: false,
-        qc_normals: false,
-        qc_normals_tags: String::new(),
         extensions: vec![
             ".png".to_string(),
             ".jpg".to_string(),
@@ -88,38 +128,6 @@ fn create_default_cli_params(dir: String) -> ScanParams {
             ".tiff".to_string(),
         ],
         cancel_token: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-
-        save_visuals: false,
-        visuals_columns: 6,
-        visuals_max_count: 100,
-        visuals_font_size: 14,
-        visuals_scale: 1.0,
-
-        prep_luminance: false,
-        prep_channels: false,
-        prep_r: true,
-        prep_g: true,
-        prep_b: true,
-        prep_a: true,
-        prep_tags: String::new(),
-        prep_ignore_solid: true,
-
-        excluded_folders: ".git, .svn, cache, temp".to_string(),
-        qc_match_by_stem: true,
-        qc_hide_same_resolution: false,
-        search_precision: 1,
-
-        ai_model: 0,
-
-        // Run thorough deep validation criteria assessments by default on matching targets
-        qc_check_bloat: true,
-        qc_check_alpha: true,
-        qc_check_colorspace: true,
-        qc_check_compression: true,
-
-        custom_model_path: String::new(),
-        custom_model_arch: 0,
-        custom_model_dim: 512,
         on_progress: None,
     }
 }
@@ -168,12 +176,13 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
 
     let mut params = create_default_cli_params(dir);
     params.similarity = 90.0;
-    params.qc_mode = true;
-    params.qc_npot = check_npot;
-    params.qc_mipmaps = check_mipmaps;
-    params.qc_block_align = check_block;
-    params.qc_bit_depth = check_bit;
-    params.qc_normals = validate_normals;
+    params.search_method = SearchMethod::Qc;
+    params.qc.qc_mode = true;
+    params.qc.qc_npot = check_npot;
+    params.qc.qc_mipmaps = check_mipmaps;
+    params.qc.qc_block_align = check_block;
+    params.qc.qc_bit_depth = check_bit;
+    params.qc.qc_normals = validate_normals;
 
     match qc::run_qc_scan_internal(params).await {
         Ok(results) => {

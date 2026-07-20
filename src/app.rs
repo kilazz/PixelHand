@@ -216,11 +216,11 @@ pub fn run_gui() -> Result<()> {
 
     // Initialize state context variables from AppSettings
     update_viewer_settings(|s| {
-        s.tonemap_enabled = loaded_settings.tonemap_enabled;
-        s.auto_exposure_enabled = loaded_settings.tonemap_auto_exposure;
-        s.tonemap_operator = loaded_settings.tonemap_operator as usize;
-        s.play_speed = loaded_settings.play_speed;
-        s.enable_frame_blending = loaded_settings.enable_frame_blending;
+        s.tonemap_enabled = loaded_settings.tonemap.tonemap_enabled;
+        s.auto_exposure_enabled = loaded_settings.tonemap.tonemap_auto_exposure;
+        s.tonemap_operator = loaded_settings.tonemap.tonemap_operator as usize;
+        s.play_speed = loaded_settings.viewer.play_speed;
+        s.enable_frame_blending = loaded_settings.viewer.enable_frame_blending;
     });
 
     // Flush initial startup logs queued before UI loop initialization
@@ -419,109 +419,129 @@ pub fn run_gui() -> Result<()> {
     Ok(())
 }
 
+// Declares the clean mapping macro to automate the repetitive app.set_... calls
+macro_rules! sync_to_ui {
+    ($app:expr, {
+        strings: [ $($str_setter:ident => $str_val:expr),* $(,)? ],
+        values: [ $($val_setter:ident => $val_val:expr),* $(,)? ],
+    }) => {
+        $(
+            $app.$str_setter($str_val.clone().into());
+        )*
+        $(
+            $app.$val_setter($val_val);
+        )*
+    };
+}
+
 /// Maps serializable application settings structs into Slint component properties.
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
-    app.set_dir_a(settings.dir_a.clone().into());
-    app.set_dir_b(settings.dir_b.clone().into());
-    app.set_query_text(settings.query_text.clone().into());
-    app.set_similarity_threshold(settings.similarity_threshold);
-    app.set_batch_size(settings.batch_size);
-
-    let search_method = if settings.qc_mode {
+    let search_method = if settings.qc.qc_mode {
         4
     } else {
         settings.search_method
     };
-    app.set_search_method(search_method);
-    app.set_qc_mode(settings.qc_mode);
-    app.set_execution_provider(settings.execution_provider);
 
-    app.set_qc_npot(settings.qc_npot);
-    app.set_qc_mipmaps(settings.qc_mipmaps);
-    app.set_qc_block_align(settings.qc_block_align);
-    app.set_qc_bit_depth(settings.qc_bit_depth);
-    app.set_qc_solid_colors(settings.qc_solid_colors);
-    app.set_qc_normals(settings.qc_normals);
-    app.set_qc_normals_tags(settings.qc_normals_tags.clone().into());
+    // Clean declarative synchronization mapping block replacing 80 lines of manual setters
+    sync_to_ui!(app, {
+        strings: [
+            set_dir_a => settings.paths.dir_a,
+            set_dir_b => settings.paths.dir_b,
+            set_query_text => settings.paths.query_text,
+            set_qc_normals_tags => settings.qc.qc_normals_tags,
+            set_prep_tags => settings.prep.prep_tags,
+            set_excluded_folders => settings.paths.excluded_folders,
+            set_custom_model_path => settings.ai.custom_model_path,
+        ],
+        values: [
+            set_similarity_threshold => settings.similarity_threshold,
+            set_batch_size => settings.batch_size,
+            set_search_method => search_method,
+            set_qc_mode => settings.qc.qc_mode,
+            set_execution_provider => settings.execution_provider,
 
-    app.set_qc_check_bloat(settings.qc_check_bloat);
-    app.set_qc_check_alpha(settings.qc_check_alpha);
-    app.set_qc_check_colorspace(settings.qc_check_colorspace);
-    app.set_qc_check_compression(settings.qc_check_compression);
+            set_qc_npot => settings.qc.qc_npot,
+            set_qc_mipmaps => settings.qc.qc_mipmaps,
+            set_qc_block_align => settings.qc.qc_block_align,
+            set_qc_bit_depth => settings.qc.qc_bit_depth,
+            set_qc_solid_colors => settings.qc.qc_solid_colors,
+            set_qc_normals => settings.qc.qc_normals,
 
-    app.set_ext_png(settings.ext_png);
-    app.set_ext_jpg(settings.ext_jpg);
-    app.set_ext_tga(settings.ext_tga);
-    app.set_ext_dds(settings.ext_dds);
-    app.set_ext_bmp(settings.ext_bmp);
-    app.set_ext_exr(settings.ext_exr);
-    app.set_ext_hdr(settings.ext_hdr);
-    app.set_ext_tif(settings.ext_tif);
-    app.set_ext_webp(settings.ext_webp);
-    app.set_ext_gif(settings.ext_gif);
-    app.set_ext_psd(settings.ext_psd);
-    app.set_ext_jxl(settings.ext_jxl);
-    app.set_ext_heic(settings.ext_heic);
-    app.set_ext_avif(settings.ext_avif);
+            set_qc_check_bloat => settings.qc.qc_check_bloat,
+            set_qc_check_alpha => settings.qc.qc_check_alpha,
+            set_qc_check_colorspace => settings.qc.qc_check_colorspace,
+            set_qc_check_compression => settings.qc.qc_check_compression,
 
-    app.set_duplicates_panel_height(settings.duplicates_panel_height);
-    app.set_sidebar_width(settings.sidebar_width);
-    app.set_compare_sidebar_width(settings.compare_sidebar_width);
-    app.set_list_preview_size(settings.list_preview_size);
+            set_ext_png => settings.extensions.ext_png,
+            set_ext_jpg => settings.extensions.ext_jpg,
+            set_ext_tga => settings.extensions.ext_tga,
+            set_ext_dds => settings.extensions.ext_dds,
+            set_ext_bmp => settings.extensions.ext_bmp,
+            set_ext_exr => settings.extensions.ext_exr,
+            set_ext_hdr => settings.extensions.ext_hdr,
+            set_ext_tif => settings.extensions.ext_tif,
+            set_ext_webp => settings.extensions.ext_webp,
+            set_ext_gif => settings.extensions.ext_gif,
+            set_ext_psd => settings.extensions.ext_psd,
+            set_ext_jxl => settings.extensions.ext_jxl,
+            set_ext_heic => settings.extensions.ext_heic,
+            set_ext_avif => settings.extensions.ext_avif,
 
-    app.set_save_visuals(settings.save_visuals);
-    app.set_visuals_columns(settings.visuals_columns);
-    app.set_visuals_max_count(settings.visuals_max_count);
-    app.set_visuals_font_size(settings.visuals_font_size);
-    app.set_visuals_scale(settings.visuals_scale);
+            set_duplicates_panel_height => settings.ui.duplicates_panel_height,
+            set_sidebar_width => settings.ui.sidebar_width,
+            set_compare_sidebar_width => settings.ui.compare_sidebar_width,
+            set_list_preview_size => settings.ui.list_preview_size,
 
-    app.set_prep_luminance(settings.prep_luminance);
-    app.set_prep_channels(settings.prep_channels);
-    app.set_prep_r(settings.prep_r);
-    app.set_prep_g(settings.prep_g);
-    app.set_prep_b(settings.prep_b);
-    app.set_prep_a(settings.prep_a);
-    app.set_prep_tags(settings.prep_tags.clone().into());
-    app.set_prep_ignore_solid(settings.prep_ignore_solid);
+            set_save_visuals => settings.visuals.save_visuals,
+            set_visuals_columns => settings.visuals.visuals_columns,
+            set_visuals_max_count => settings.visuals.visuals_max_count,
+            set_visuals_font_size => settings.visuals.visuals_font_size,
+            set_visuals_scale => settings.visuals.visuals_scale,
 
-    app.set_excluded_folders(settings.excluded_folders.clone().into());
-    app.set_qc_match_by_stem(settings.qc_match_by_stem);
-    app.set_qc_hide_same_resolution(settings.qc_hide_same_resolution);
-    app.set_ai_model(settings.ai_model);
-    app.set_search_precision(settings.search_precision);
+            set_prep_luminance => settings.prep.prep_luminance,
+            set_prep_channels => settings.prep.prep_channels,
+            set_prep_r => settings.prep.prep_r,
+            set_prep_g => settings.prep.prep_g,
+            set_prep_b => settings.prep.prep_b,
+            set_prep_a => settings.prep.prep_a,
+            set_prep_ignore_solid => settings.prep.prep_ignore_solid,
 
-    app.set_custom_model_path(settings.custom_model_path.clone().into());
-    app.set_custom_model_arch(settings.custom_model_arch);
-    app.set_custom_model_dim(settings.custom_model_dim);
+            set_qc_match_by_stem => settings.qc.qc_match_by_stem,
+            set_qc_hide_same_resolution => settings.qc.qc_hide_same_resolution,
+            set_ai_model => settings.ai.ai_model,
+            set_search_precision => settings.search_precision,
 
-    app.set_tonemap_enabled(settings.tonemap_enabled);
-    app.set_tonemap_auto_exposure(settings.tonemap_auto_exposure);
-    app.set_tonemap_operator(settings.tonemap_operator);
+            set_custom_model_arch => settings.ai.custom_model_arch,
+            set_custom_model_dim => settings.ai.custom_model_dim,
 
-    app.set_enable_previews(settings.enable_previews);
-    app.set_preview_quality(settings.preview_quality);
-    app.set_filter_only_npot(settings.filter_only_npot);
-    app.set_filter_only_uncompressed(settings.filter_only_uncompressed);
-    app.set_filter_only_missing_mips(settings.filter_only_missing_mips);
-    app.set_filter_only_cubemaps(settings.filter_only_cubemaps);
+            set_tonemap_enabled => settings.tonemap.tonemap_enabled,
+            set_tonemap_auto_exposure => settings.tonemap.tonemap_auto_exposure,
+            set_tonemap_operator => settings.tonemap.tonemap_operator,
 
-    crate::scanners::ENABLE_PREVIEWS.store(settings.enable_previews, Ordering::Relaxed);
-    crate::scanners::PREVIEW_QUALITY.store(settings.preview_quality, Ordering::Relaxed);
+            set_enable_previews => settings.preview.enable_previews,
+            set_preview_quality => settings.preview.preview_quality,
+            set_filter_only_npot => settings.preview.filter_only_npot,
+            set_filter_only_uncompressed => settings.preview.filter_only_uncompressed,
+            set_filter_only_missing_mips => settings.preview.filter_only_missing_mips,
+            set_filter_only_cubemaps => settings.preview.filter_only_cubemaps,
 
-    // Apply the newly integrated GameTextureViewer settings mapped to AppWindow properties
-    app.set_grid_cols(settings.grid_cols);
-    app.set_grid_rows(settings.grid_rows);
-    app.set_manual_brightness(settings.manual_brightness);
-    app.set_manual_contrast(settings.manual_contrast);
-    app.set_manual_gamma(settings.manual_gamma);
-    app.set_aspect_ratio_modifier(settings.aspect_ratio_modifier);
-    app.set_background_mode(settings.background_mode);
-    app.set_flipbook_fps(settings.flipbook_fps);
-    app.set_fit_to_window(settings.fit_to_window);
+            set_grid_cols => settings.viewer.grid_cols,
+            set_grid_rows => settings.viewer.grid_rows,
+            set_manual_brightness => settings.viewer.manual_brightness,
+            set_manual_contrast => settings.viewer.manual_contrast,
+            set_manual_gamma => settings.viewer.manual_gamma,
+            set_aspect_ratio_modifier => settings.viewer.aspect_ratio_modifier,
+            set_background_mode => settings.viewer.background_mode,
+            set_flipbook_fps => settings.viewer.flipbook_fps,
+            set_fit_to_window => settings.viewer.fit_to_window,
 
-    // Apply the newly integrated Continuous Playback and Blending options
-    app.set_play_speed(settings.play_speed);
-    app.set_enable_frame_blending(settings.enable_frame_blending);
+            set_play_speed => settings.viewer.play_speed,
+            set_enable_frame_blending => settings.viewer.enable_frame_blending,
+        ],
+    });
+
+    crate::scanners::ENABLE_PREVIEWS.store(settings.preview.enable_previews, Ordering::Relaxed);
+    crate::scanners::PREVIEW_QUALITY.store(settings.preview.preview_quality, Ordering::Relaxed);
 }
 
 /// Helper function to push decoded graphics buffers to Slint preview targets.
@@ -661,7 +681,7 @@ pub fn trigger_viewport_update(
             (0, 0)
         };
 
-        // Update the calculated metadata sizes (Sprite Width, Sprite Height, Sprites Count) based on the slice
+        // The calculated metadata sizes (Sprite Width, Sprite Height, Sprites Count) based on the slice
         let app_weak_meta = app_weak_clone.clone();
         let _ = app_weak_meta.upgrade_in_event_loop(move |ui| {
             let store = ui.global::<crate::app::Store>();

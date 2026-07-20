@@ -11,6 +11,7 @@ use xxhash_rust::xxh64::Xxh64;
 use crate::core::database::{DatabaseService, DbRecord};
 use crate::core::inference::{InferenceEngine, PreprocessingConfig};
 use crate::scanners::AnalysisItem;
+use crate::state::models::AiModelType;
 use crate::state::{AiSearchResultSummary, DuplicateFileSummary, DuplicateGroupSummary};
 use crate::utils::helpers::discover_files;
 
@@ -68,12 +69,13 @@ fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
 async fn scan_and_index_directory(
     params: &super::ScanParams,
 ) -> Result<(DatabaseService, InferenceEngine, Vec<DbRecord>)> {
-    let path = PathBuf::from(&params.dir_a);
+    let path = PathBuf::from(&params.paths.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
     let ex_folders: Vec<String> = params
+        .paths
         .excluded_folders
         .split(',')
         .map(|t| t.trim().to_string())
@@ -85,24 +87,23 @@ async fn scan_and_index_directory(
         crate::app::append_to_console_log(&warn);
     }
 
-    let (folder_name, dim) = match params.ai_model {
-        1 => ("clip_vit_l14".to_string(), 768),
-        2 => ("siglip_base".to_string(), 768),
-        3 => ("siglip_large".to_string(), 1024),
-        4 => ("dinov2_base".to_string(), 768),
-        5 => ("siglip2_base".to_string(), 768),
-        6 => ("llm2clip_base".to_string(), 1280),
-        7 => (
-            params.custom_model_path.clone(),
-            params.custom_model_dim as usize,
-        ),
-        _ => ("clip_vit_b32".to_string(), 512),
+    // Strongly-typed model resolution replacing raw integer index mapping (nested under params.ai)
+    let folder_name = if params.ai.ai_model == AiModelType::Custom {
+        params.ai.custom_model_path.clone()
+    } else {
+        params.ai.ai_model.folder_name().to_string()
+    };
+
+    let dim = if params.ai.ai_model == AiModelType::Custom {
+        params.ai.custom_model_dim as usize
+    } else {
+        params.ai.ai_model.dimensions()
     };
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
     let folder_hash = {
         let mut hasher = Xxh64::new(0);
-        hasher.update(params.dir_a.as_bytes());
+        hasher.update(params.paths.dir_a.as_bytes());
         hasher.digest()
     };
 
@@ -110,7 +111,7 @@ async fn scan_and_index_directory(
         .join(".lancedb_cache")
         .join(format!("{}_{:016x}", folder_name, folder_hash));
 
-    let model_dir = if params.ai_model == 7 {
+    let model_dir = if params.ai.ai_model == AiModelType::Custom {
         PathBuf::from(&folder_name)
     } else {
         app_dir.join("models").join(&folder_name)
@@ -155,6 +156,8 @@ async fn scan_and_index_directory(
             _ => "Composite",
         };
 
+        // We use lightweight fs::metadata here explicitly for caching checks
+        // Using QcImageMetadata would be a massive performance bottleneck here
         let file_meta = fs::metadata(&item.path);
         let size = file_meta.as_ref().map(|m| m.len()).unwrap_or(0);
         let mtime = file_meta
@@ -229,8 +232,10 @@ async fn scan_and_index_directory(
                     };
 
                     // Select closest mip level dynamically based on AI model architecture
-                    let target_size = match params.ai_model {
-                        2 | 3 | 5 => 384,
+                    let target_size = match params.ai.ai_model {
+                        AiModelType::SiglipBase
+                        | AiModelType::SiglipLarge
+                        | AiModelType::Siglip2Base => 384,
                         _ => 256,
                     };
 
@@ -243,7 +248,7 @@ async fn scan_and_index_directory(
                     let processed = crate::core::perceptual::preprocess_image_channels(
                         &img,
                         item.analysis_type,
-                        params.prep_ignore_solid,
+                        params.prep.prep_ignore_solid,
                     )?;
 
                     let mut final_img = processed;
@@ -268,7 +273,10 @@ async fn scan_and_index_directory(
             if !imgs.is_empty()
                 && let Ok(vectors) = engine.encode_images_batch(
                     &imgs,
-                    &PreprocessingConfig::for_model(params.ai_model, params.custom_model_arch),
+                    &PreprocessingConfig::for_model(
+                        params.ai.ai_model,
+                        params.ai.custom_model_arch,
+                    ),
                 )
             {
                 for (item, vector) in chunk_items.into_iter().zip(vectors) {
@@ -341,7 +349,7 @@ pub async fn run_ai_duplicate_scan(
     let dist_threshold = 1.0 - (params.similarity / 100.0);
     let mut uf = crate::utils::clustering::UnionFind::new(records.len());
 
-    let (nprobes, refine_factor) = map_precision_presets(params.search_precision);
+    let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
 
     {
         use futures::StreamExt;
@@ -398,35 +406,15 @@ pub async fn run_ai_duplicate_scan(
         for idx in member_indices {
             let record = &records[idx];
             let p = PathBuf::from(&record.path);
-            let metadata = fs::metadata(&p)?;
-            let size = metadata.len();
-            let (width, height) = match imagesize::size(&p) {
-                Ok(dim) => (dim.width, dim.height),
-                Err(_) => (0, 0),
-            };
-            let qc_meta = crate::core::qc::extract_qc_metadata(&p).unwrap_or_else(|_| {
-                crate::core::qc::QcImageMetadata {
-                    width: width as u32,
-                    height: height as u32,
-                    file_size: size,
-                    format_str: p
-                        .extension()
-                        .map(|e| e.to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                    compression_format: "Unknown".into(),
-                    color_space: "Unknown".into(),
-                    has_alpha: false,
-                    bit_depth: 8,
-                    mipmap_count: 1,
-                    is_cubemap: false,
-                    estimated_vram: 0,
-                }
-            });
+
+            // DRY implementation: Safely extract metadata using the robust fallback factory
+            let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&p);
+
             file_summaries.push(DuplicateFileSummary {
                 path: record.path.clone(),
-                size,
-                width,
-                height,
+                size: qc_meta.file_size,
+                width: qc_meta.width as usize,
+                height: qc_meta.height as usize,
                 format_str: qc_meta.format_str,
                 compression_format: qc_meta.compression_format,
                 color_space: qc_meta.color_space,
@@ -490,9 +478,9 @@ pub async fn run_ai_duplicate_scan(
 /// Executes image-to-image or text-to-image semantic search dynamically.
 pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResultSummary>> {
     let (db, engine, _records) = scan_and_index_directory(&params).await?;
-    let (nprobes, refine_factor) = map_precision_presets(params.search_precision);
+    let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
 
-    let query_path = std::path::Path::new(&params.query_text);
+    let query_path = std::path::Path::new(&params.paths.query_text);
 
     // Check if the query is a physical file path on disk.
     // If true, load and run it through the Vision Encoder. Otherwise, fall back to Text Tokenization.
@@ -505,7 +493,8 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
         )
         .map_err(|e| anyhow!("Failed to load reference image for visual query: {}", e))?;
 
-        let config = PreprocessingConfig::for_model(params.ai_model, params.custom_model_arch);
+        let config =
+            PreprocessingConfig::for_model(params.ai.ai_model, params.ai.custom_model_arch);
 
         // Encode the single image and pop the first returned vector embedding
         let mut vectors = engine.encode_images_batch(&[img], &config)?;
@@ -514,7 +503,7 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
             .ok_or_else(|| anyhow!("Failed to generate visual embedding for query target"))?
     } else {
         tracing::info!("Query target is a text string. Running text tokenizer pipeline...");
-        engine.encode_text(&params.query_text)?
+        engine.encode_text(&params.paths.query_text)?
     };
 
     let search_results = db

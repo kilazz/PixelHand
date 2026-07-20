@@ -21,12 +21,13 @@ struct FileMetadata {
 
 /// Executes a byte-exact duplicate scan across files using high-speed xxHash64.
 pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
-    let path = PathBuf::from(&params.dir_a);
+    let path = PathBuf::from(&params.paths.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
     let ex_folders: Vec<String> = params
+        .paths
         .excluded_folders
         .split(',')
         .map(|t| t.trim().to_string())
@@ -56,6 +57,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
                 return None;
             }
 
+            // We keep lightweight image size extraction here so we don't need full QC parsing just to find if it's a dup
             let (width, height) = match imagesize::size(p) {
                 Ok(dim) => (dim.width, dim.height),
                 Err(_) => (0, 0),
@@ -104,25 +106,9 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
         let file_summaries = files
             .into_iter()
             .map(|f| {
-                let qc_meta = crate::core::qc::extract_qc_metadata(&f.path).unwrap_or_else(|_| {
-                    crate::core::qc::QcImageMetadata {
-                        width: f.width as u32,
-                        height: f.height as u32,
-                        file_size: f.size,
-                        format_str: f
-                            .path
-                            .extension()
-                            .map(|e| e.to_string_lossy().to_string())
-                            .unwrap_or_default(),
-                        compression_format: "Unknown".into(),
-                        color_space: "Unknown".into(),
-                        has_alpha: false,
-                        bit_depth: 8,
-                        mipmap_count: 1,
-                        is_cubemap: false,
-                        estimated_vram: 0,
-                    }
-                });
+                // DRy implementation: Centralized fallback handles errors gracefully inside extract_or_fallback
+                let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&f.path);
+
                 DuplicateFileSummary {
                     path: f.path.to_string_lossy().to_string(),
                     size: f.size,
@@ -139,6 +125,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
                 }
             })
             .collect();
+
         results.push(DuplicateGroupSummary {
             hash,
             files: file_summaries,

@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use crate::app::{AppWindow, Store};
 use crate::scanners;
 use crate::state::AppState;
+use crate::state::models::SearchMethod;
 use crate::utils;
 use crate::utils::helpers::MutexExt;
 
@@ -50,17 +51,17 @@ pub fn bind_scan_execution(
         store.set_is_scanning(true);
         store.set_status_text("Scanning assets...".into());
         store.set_progress(0.0);
-        tracing::info!("Starting scan on directory: {}", params.dir_a);
+        tracing::info!("Starting scan on directory: {}", params.paths.dir_a);
 
         let params_for_task = params.clone();
         let app_weak_download = app_copy.clone();
 
         tokio::spawn(async move {
-            // Verify models on huggingface if AI search is selected
-            if params_for_task.search_method == 2
+            // Verify models on Hugging Face if AI search method is selected
+            if params_for_task.search_method == SearchMethod::Ai
                 && let Err(e) = crate::core::downloader::verify_and_download_models(
                     app_weak_download.clone(),
-                    params_for_task.ai_model,
+                    params_for_task.ai.ai_model,
                     params_for_task.cancel_token.clone(),
                 )
                 .await
@@ -91,7 +92,7 @@ pub fn bind_scan_execution(
                 .map_err(|e| anyhow::anyhow!("Background scanning failed: {}", e));
 
             // Generate optional contact sheets on duplicate clusters
-            if params_for_task.save_visuals
+            if params_for_task.visuals.save_visuals
                 && let Ok((ref groups, _)) = scan_result
             {
                 let _ = app_copy.upgrade_in_event_loop(|ui| {
@@ -103,10 +104,10 @@ pub fn bind_scan_execution(
                     let out_dir = app_dir.join("duplicate_visuals");
                     if let Err(e) = crate::core::visuals::generate_visual_reports(
                         groups.clone(),
-                        params_for_task.visuals_columns,
-                        params_for_task.visuals_max_count,
-                        params_for_task.visuals_font_size,
-                        params_for_task.visuals_scale,
+                        params_for_task.visuals.visuals_columns,
+                        params_for_task.visuals.visuals_max_count,
+                        params_for_task.visuals.visuals_font_size,
+                        params_for_task.visuals.visuals_scale,
                         out_dir,
                     )
                     .await
@@ -129,7 +130,7 @@ pub fn bind_scan_execution(
 
                         utils::ui::update_results_ui(&store, &state_lock);
 
-                        let msg = if params_for_task.save_visuals {
+                        let msg = if params_for_task.visuals.save_visuals {
                             "Scan and visual reports finished successfully!"
                         } else {
                             "Scan finished successfully!"

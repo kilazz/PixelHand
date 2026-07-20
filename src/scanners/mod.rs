@@ -15,6 +15,7 @@ use ustr::Ustr;
 use xxhash_rust::xxh64::Xxh64;
 
 use crate::core::perceptual::AnalysisType;
+use crate::state::models::{AiModelType, SearchMethod};
 use crate::state::{DuplicateGroupSummary, ResultsRowData};
 
 /// High-performance container holding composite and lazy-allocated channel-isolated preview buffers.
@@ -128,16 +129,20 @@ fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     cache.insert(normalized_key, CachedThumbnail::new(img));
 }
 
-/// Data structure mapping all options gathered from the UI panel to orchestrate a scan.
-#[derive(Clone)]
-pub struct ScanParams {
+// ==========================================
+// --- DECOMPOSED SCANPARMS SUB-STRUCTS -----
+// ==========================================
+
+#[derive(Clone, Debug)]
+pub struct ScanPaths {
     pub dir_a: String,
     pub dir_b: String,
+    pub excluded_folders: String,
     pub query_text: String,
-    pub similarity: f32,
-    pub batch_size: usize,
-    pub search_method: i32, // 0: Exact (xxHash), 1: Perceptual (dHash), 2: AI, 3: Inventory, 4: QC
-    pub execution_provider: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScanQcRules {
     pub qc_mode: bool,
     pub qc_npot: bool,
     pub qc_mipmaps: bool,
@@ -146,17 +151,25 @@ pub struct ScanParams {
     pub qc_solid_colors: bool,
     pub qc_normals: bool,
     pub qc_normals_tags: String,
-    pub extensions: Vec<String>,
-    pub cancel_token: Arc<std::sync::atomic::AtomicBool>,
+    pub qc_match_by_stem: bool,
+    pub qc_hide_same_resolution: bool,
+    pub qc_check_bloat: bool,
+    pub qc_check_alpha: bool,
+    pub qc_check_colorspace: bool,
+    pub qc_check_compression: bool,
+}
 
-    // Contact Sheet configurations
+#[derive(Clone, Debug)]
+pub struct ScanVisualReports {
     pub save_visuals: bool,
     pub visuals_columns: usize,
     pub visuals_max_count: usize,
     pub visuals_font_size: usize,
     pub visuals_scale: f32,
+}
 
-    // Preprocessing configurations
+#[derive(Clone, Debug)]
+pub struct ScanPreprocessing {
     pub prep_luminance: bool,
     pub prep_channels: bool,
     pub prep_r: bool,
@@ -165,27 +178,40 @@ pub struct ScanParams {
     pub prep_a: bool,
     pub prep_tags: String,
     pub prep_ignore_solid: bool,
+}
 
-    // Exclude filters
-    pub excluded_folders: String,
-    pub qc_match_by_stem: bool,
-    pub qc_hide_same_resolution: bool,
-
-    // Relative Quality Control parameters
-    pub qc_check_bloat: bool,
-    pub qc_check_alpha: bool,
-    pub qc_check_colorspace: bool,
-    pub qc_check_compression: bool,
-
+#[derive(Clone, Debug)]
+pub struct ScanAiSettings {
     pub search_precision: i32,
-    pub ai_model: i32,
-
-    #[allow(clippy::type_complexity)]
-    pub on_progress: Option<Arc<dyn Fn(f32, usize, usize) + Send + Sync>>,
-
+    pub ai_model: AiModelType,
     pub custom_model_path: String,
     pub custom_model_arch: i32,
     pub custom_model_dim: i32,
+}
+
+// ==========================================
+// --- COMPOSITE SCANPARAMS -----------------
+// ==========================================
+
+/// Data structure mapping all options gathered from the UI panel to orchestrate a scan.
+#[derive(Clone)]
+pub struct ScanParams {
+    pub paths: ScanPaths,
+    pub qc: ScanQcRules,
+    pub visuals: ScanVisualReports,
+    pub prep: ScanPreprocessing,
+    pub ai: ScanAiSettings,
+
+    // Core execution controls
+    pub similarity: f32,
+    pub batch_size: usize,
+    pub search_method: SearchMethod,
+    pub execution_provider: String,
+    pub extensions: Vec<String>,
+    pub cancel_token: Arc<std::sync::atomic::AtomicBool>,
+
+    #[allow(clippy::type_complexity)]
+    pub on_progress: Option<Arc<dyn Fn(f32, usize, usize) + Send + Sync>>,
 }
 
 impl ScanParams {
@@ -213,6 +239,7 @@ impl ScanParams {
             extensions.push(".bmp".to_string());
         }
         if store.get_ext_exr() {
+            extensions.push(".ext_exr".to_string());
             extensions.push(".exr".to_string());
         }
         if store.get_ext_hdr() {
@@ -251,57 +278,59 @@ impl ScanParams {
         };
 
         Self {
-            dir_a: store.get_dir_a().to_string(),
-            dir_b: store.get_dir_b().to_string(),
-            query_text: store.get_query_text().to_string(),
+            paths: ScanPaths {
+                dir_a: store.get_dir_a().to_string(),
+                dir_b: store.get_dir_b().to_string(),
+                query_text: store.get_query_text().to_string(),
+                excluded_folders: store.get_excluded_folders().to_string(),
+            },
+            qc: ScanQcRules {
+                qc_mode: store.get_search_method() == 4,
+                qc_npot: store.get_qc_npot(),
+                qc_mipmaps: store.get_qc_mipmaps(),
+                qc_block_align: store.get_qc_block_align(),
+                qc_bit_depth: store.get_qc_bit_depth(),
+                qc_solid_colors: store.get_qc_solid_colors(),
+                qc_normals: store.get_qc_normals(),
+                qc_normals_tags: store.get_qc_normals_tags().to_string(),
+                qc_match_by_stem: store.get_qc_match_by_stem(),
+                qc_hide_same_resolution: store.get_qc_hide_same_resolution(),
+                qc_check_bloat: store.get_qc_check_bloat(),
+                qc_check_alpha: store.get_qc_check_alpha(),
+                qc_check_colorspace: store.get_qc_check_colorspace(),
+                qc_check_compression: store.get_qc_check_compression(),
+            },
+            visuals: ScanVisualReports {
+                save_visuals: store.get_save_visuals(),
+                visuals_columns: store.get_visuals_columns() as usize,
+                visuals_max_count: store.get_visuals_max_count() as usize,
+                visuals_font_size: store.get_visuals_font_size() as usize,
+                visuals_scale: store.get_visuals_scale(),
+            },
+            prep: ScanPreprocessing {
+                prep_luminance: store.get_prep_luminance(),
+                prep_channels: store.get_prep_channels(),
+                prep_r: store.get_prep_r(),
+                prep_g: store.get_prep_g(),
+                prep_b: store.get_prep_b(),
+                prep_a: store.get_prep_a(),
+                prep_tags: store.get_prep_tags().to_string(),
+                prep_ignore_solid: store.get_prep_ignore_solid(),
+            },
+            ai: ScanAiSettings {
+                search_precision: store.get_search_precision(),
+                ai_model: AiModelType::from_i32(store.get_ai_model()),
+                custom_model_path: store.get_custom_model_path().to_string(),
+                custom_model_arch: store.get_custom_model_arch(),
+                custom_model_dim: store.get_custom_model_dim(),
+            },
+
             similarity: store.get_similarity_threshold(),
             batch_size: store.get_batch_size() as usize,
-            search_method: store.get_search_method(),
+            search_method: SearchMethod::from_i32(store.get_search_method()),
             execution_provider,
-
-            qc_mode: store.get_search_method() == 4,
-            qc_npot: store.get_qc_npot(),
-            qc_mipmaps: store.get_qc_mipmaps(),
-            qc_block_align: store.get_qc_block_align(),
-            qc_bit_depth: store.get_qc_bit_depth(),
-            qc_solid_colors: store.get_qc_solid_colors(),
-            qc_normals: store.get_qc_normals(),
-            qc_normals_tags: store.get_qc_normals_tags().to_string(),
-
             extensions,
             cancel_token,
-
-            save_visuals: store.get_save_visuals(),
-            visuals_columns: store.get_visuals_columns() as usize,
-            visuals_max_count: store.get_visuals_max_count() as usize,
-            visuals_font_size: store.get_visuals_font_size() as usize,
-            visuals_scale: store.get_visuals_scale(),
-
-            prep_luminance: store.get_prep_luminance(),
-            prep_channels: store.get_prep_channels(),
-            prep_r: store.get_prep_r(),
-            prep_g: store.get_prep_g(),
-            prep_b: store.get_prep_b(),
-            prep_a: store.get_prep_a(),
-            prep_tags: store.get_prep_tags().to_string(),
-            prep_ignore_solid: store.get_prep_ignore_solid(),
-
-            excluded_folders: store.get_excluded_folders().to_string(),
-            qc_match_by_stem: store.get_qc_match_by_stem(),
-            qc_hide_same_resolution: store.get_qc_hide_same_resolution(),
-
-            qc_check_bloat: store.get_qc_check_bloat(),
-            qc_check_alpha: store.get_qc_check_alpha(),
-            qc_check_colorspace: store.get_qc_check_colorspace(),
-            qc_check_compression: store.get_qc_check_compression(),
-
-            search_precision: store.get_search_precision(),
-            ai_model: store.get_ai_model(),
-
-            custom_model_path: store.get_custom_model_path().to_string(),
-            custom_model_arch: store.get_custom_model_arch(),
-            custom_model_dim: store.get_custom_model_dim(),
-
             on_progress: None,
         }
     }
@@ -319,6 +348,7 @@ pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<An
     let mut items = Vec::new();
 
     let tags: Vec<String> = params
+        .prep
         .prep_tags
         .split(',')
         .map(|t| t.trim().to_lowercase())
@@ -334,32 +364,32 @@ pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<An
             tags.iter().any(|tag| path_str.contains(tag))
         };
 
-        if params.prep_channels && matches_tags {
-            if params.prep_r {
+        if params.prep.prep_channels && matches_tags {
+            if params.prep.prep_r {
                 items.push(AnalysisItem {
                     path: path.clone(),
                     analysis_type: AnalysisType::R,
                 });
             }
-            if params.prep_g {
+            if params.prep.prep_g {
                 items.push(AnalysisItem {
                     path: path.clone(),
                     analysis_type: AnalysisType::G,
                 });
             }
-            if params.prep_b {
+            if params.prep.prep_b {
                 items.push(AnalysisItem {
                     path: path.clone(),
                     analysis_type: AnalysisType::B,
                 });
             }
-            if params.prep_a {
+            if params.prep.prep_a {
                 items.push(AnalysisItem {
                     path: path.clone(),
                     analysis_type: AnalysisType::A,
                 });
             }
-        } else if params.prep_luminance {
+        } else if params.prep.prep_luminance {
             items.push(AnalysisItem {
                 path: path.clone(),
                 analysis_type: AnalysisType::Luminance,
@@ -379,57 +409,65 @@ pub fn generate_analysis_items(paths: &[PathBuf], params: &ScanParams) -> Vec<An
 pub async fn execute_scan(
     params: ScanParams,
 ) -> Result<(Vec<DuplicateGroupSummary>, Vec<ResultsRowData>)> {
-    if params.qc_mode {
-        if !params.dir_b.trim().is_empty() {
-            let ex_folders: Vec<String> = params
-                .excluded_folders
-                .split(',')
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-                .collect();
+    // Strongly-typed routing over the SearchMethod enum
+    match params.search_method {
+        SearchMethod::Qc => {
+            if !params.paths.dir_b.trim().is_empty() {
+                let ex_folders: Vec<String> = params
+                    .paths
+                    .excluded_folders
+                    .split(',')
+                    .map(|t| t.trim().to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
 
-            let issues = qc::run_folder_compare(
-                params.dir_a.clone(),
-                params.dir_b.clone(),
-                params.extensions.clone(),
-                params.qc_match_by_stem,
-                params.qc_hide_same_resolution,
-                ex_folders,
-                params.qc_check_bloat,
-                params.qc_check_alpha,
-                params.qc_check_colorspace,
-                params.qc_check_compression,
-            )
-            .await?;
-            let rows = map_qc_to_rows(&issues);
-            Ok((Vec::new(), rows))
-        } else {
-            let issues = qc::run_qc_scan_internal(params).await?;
-            let rows = map_qc_to_rows(&issues);
+                let issues = qc::run_folder_compare(
+                    params.paths.dir_a.clone(),
+                    params.paths.dir_b.clone(),
+                    params.extensions.clone(),
+                    params.qc.qc_match_by_stem,
+                    params.qc.qc_hide_same_resolution,
+                    ex_folders,
+                    params.qc.qc_check_bloat,
+                    params.qc.qc_check_alpha,
+                    params.qc.qc_check_colorspace,
+                    params.qc.qc_check_compression,
+                )
+                .await?;
+                let rows = map_qc_to_rows(&issues);
+                Ok((Vec::new(), rows))
+            } else {
+                let issues = qc::run_qc_scan_internal(params).await?;
+                let rows = map_qc_to_rows(&issues);
+                Ok((Vec::new(), rows))
+            }
+        }
+        SearchMethod::Inventory => {
+            let mut rows = qc::run_asset_audit(params).await?;
+            rows.sort_by(|a, b| a.path.cmp(&b.path));
             Ok((Vec::new(), rows))
         }
-    } else if params.search_method == 3 {
-        let mut rows = qc::run_asset_audit(params).await?;
-        rows.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok((Vec::new(), rows))
-    } else if params.search_method == 2 {
-        if !params.query_text.trim().is_empty() {
-            let matches = ai::run_ai_search(params).await?;
-            let rows = map_ai_search_to_rows(&matches);
-            Ok((Vec::new(), rows))
-        } else {
-            let groups = ai::run_ai_duplicate_scan(params).await?;
+        SearchMethod::Ai => {
+            if !params.paths.query_text.trim().is_empty() {
+                let matches = ai::run_ai_search(params).await?;
+                let rows = map_ai_search_to_rows(&matches);
+                Ok((Vec::new(), rows))
+            } else {
+                let groups = ai::run_ai_duplicate_scan(params).await?;
+                let rows = map_groups_to_rows(&groups);
+                Ok((groups, rows))
+            }
+        }
+        SearchMethod::Perceptual => {
+            let groups = perceptual::run_perceptual_scan_internal(params).await?;
             let rows = map_groups_to_rows(&groups);
             Ok((groups, rows))
         }
-    } else if params.search_method == 1 {
-        let groups = perceptual::run_perceptual_scan_internal(params).await?;
-        let rows = map_groups_to_rows(&groups);
-        Ok((groups, rows))
-    } else {
-        let groups = exact::run_exact_scan(params).await?;
-        let rows = map_groups_to_rows(&groups);
-        Ok((groups, rows))
+        SearchMethod::Exact => {
+            let groups = exact::run_exact_scan(params).await?;
+            let rows = map_groups_to_rows(&groups);
+            Ok((groups, rows))
+        }
     }
 }
 

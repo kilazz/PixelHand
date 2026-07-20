@@ -3,7 +3,6 @@
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::collections::HashSet;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
@@ -17,12 +16,13 @@ use crate::utils::helpers::discover_files;
 pub async fn run_perceptual_scan_internal(
     params: super::ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
-    let path = PathBuf::from(&params.dir_a);
+    let path = PathBuf::from(&params.paths.dir_a);
     if !path.is_dir() {
         return Err(anyhow!("The specified path is not a valid directory"));
     }
 
     let ex_folders: Vec<String> = params
+        .paths
         .excluded_folders
         .split(',')
         .map(|t| t.trim().to_string())
@@ -57,7 +57,7 @@ pub async fn run_perceptual_scan_internal(
             let res = calculate_perceptual_hashes(
                 &item.path,
                 item.analysis_type,
-                params.prep_ignore_solid,
+                params.prep.prep_ignore_solid,
             )?;
 
             let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
@@ -116,38 +116,14 @@ pub async fn run_perceptual_scan_internal(
             }
             seen_paths.insert(path_str.clone());
 
-            let metadata = fs::metadata(&item.path)?;
-            let size = metadata.len();
-            let (width, height) = match imagesize::size(&item.path) {
-                Ok(dim) => (dim.width, dim.height),
-                Err(_) => (0, 0),
-            };
-
-            let qc_meta = crate::core::qc::extract_qc_metadata(&item.path).unwrap_or_else(|_| {
-                crate::core::qc::QcImageMetadata {
-                    width: width as u32,
-                    height: height as u32,
-                    file_size: size,
-                    format_str: item
-                        .path
-                        .extension()
-                        .map(|e| e.to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                    compression_format: "Unknown".into(),
-                    color_space: "Unknown".into(),
-                    has_alpha: false,
-                    bit_depth: 8,
-                    mipmap_count: 1,
-                    is_cubemap: false,
-                    estimated_vram: 0,
-                }
-            });
+            // DRY implementation: Safely extract metadata using the robust fallback factory
+            let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&item.path);
 
             file_summaries.push(DuplicateFileSummary {
                 path: path_str,
-                size,
-                width,
-                height,
+                size: qc_meta.file_size,
+                width: qc_meta.width as usize,
+                height: qc_meta.height as usize,
                 format_str: qc_meta.format_str,
                 compression_format: qc_meta.compression_format,
                 color_space: qc_meta.color_space,

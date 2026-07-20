@@ -11,6 +11,8 @@ use tokio::fs::{self, File};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::state::models::AiModelType;
+
 // Global lock to prevent conflicts between background download and manual scan threads
 static DOWNLOAD_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 
@@ -87,14 +89,14 @@ where
 
 pub async fn verify_and_download_models(
     app_weak: slint::Weak<crate::app::AppWindow>,
-    model_idx: i32,
+    model: AiModelType,
     cancel_token: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
-    if model_idx == 7 {
+    if model == AiModelType::Custom {
         return Ok(());
     }
 
-    tracing::info!("Verifying AI models for model index: {}", model_idx);
+    tracing::info!("Verifying AI models for architecture: {:?}", model);
 
     // Acquire lock to avoid concurrent downloads if triggered multiple times
     let lock = DOWNLOAD_LOCK.get_or_init(|| AsyncMutex::new(()));
@@ -104,114 +106,95 @@ pub async fn verify_and_download_models(
     tracing::info!("Download lock successfully acquired.");
 
     let app_dir = crate::utils::settings::get_portable_app_data_dir()?;
+    let folder_name = model.folder_name();
 
-    let (folder_name, files) = match model_idx {
-        1 => (
-            "clip_vit_l14",
-            vec![
-                (
-                    "tokenizer.json",
-                    "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/tokenizer.json",
-                ),
-                (
-                    "text.onnx",
-                    "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/onnx/text_model.onnx",
-                ),
-                (
-                    "visual.onnx",
-                    "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/onnx/vision_model.onnx",
-                ),
-            ],
-        ),
-        2 => (
-            "siglip_base",
-            vec![
-                (
-                    "tokenizer.json",
-                    "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/tokenizer.json",
-                ),
-                (
-                    "text.onnx",
-                    "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/onnx/text_model.onnx",
-                ),
-                (
-                    "visual.onnx",
-                    "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/onnx/vision_model.onnx",
-                ),
-            ],
-        ),
-        3 => (
-            "siglip_large",
-            vec![
-                (
-                    "tokenizer.json",
-                    "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/tokenizer.json",
-                ),
-                (
-                    "text.onnx",
-                    "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/onnx/text_model.onnx",
-                ),
-                (
-                    "visual.onnx",
-                    "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/onnx/vision_model.onnx",
-                ),
-            ],
-        ),
-        4 => (
-            "dinov2_base",
-            vec![(
+    let files = match model {
+        AiModelType::ClipVitL14 => vec![
+            (
+                "tokenizer.json",
+                "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/tokenizer.json",
+            ),
+            (
+                "text.onnx",
+                "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/onnx/text_model.onnx",
+            ),
+            (
                 "visual.onnx",
-                "https://huggingface.co/Xenova/dinov2-base/resolve/main/onnx/model.onnx",
-            )],
-        ),
-        5 => (
-            "siglip2_base",
-            vec![
-                (
-                    "tokenizer.json",
-                    "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/tokenizer.json",
-                ),
-                (
-                    "text.onnx",
-                    "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/text_model.onnx",
-                ),
-                (
-                    "visual.onnx",
-                    "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/vision_model.onnx",
-                ),
-            ],
-        ),
-        6 => (
-            "llm2clip_base",
-            vec![
-                // microsoft/LLM2CLIP-Openai-B-16 lacks tokenizer files. We redirect to standard CLIP-B/32 since vocabularies are identical.
-                (
-                    "tokenizer.json",
-                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
-                ),
-                (
-                    "text.onnx",
-                    "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/7a66a9239794caa50824f8c737366abc34d328aa/onnx/model.onnx",
-                ),
-            ],
-        ),
-        _ => (
-            "clip_vit_b32",
-            vec![
-                (
-                    "tokenizer.json",
-                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
-                ),
-                (
-                    "text.onnx",
-                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model.onnx",
-                ),
-                (
-                    "visual.onnx",
-                    "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx",
-                ),
-            ],
-        ),
+                "https://huggingface.co/Xenova/clip-vit-large-patch14/resolve/main/onnx/vision_model.onnx",
+            ),
+        ],
+        AiModelType::SiglipBase => vec![
+            (
+                "tokenizer.json",
+                "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/tokenizer.json",
+            ),
+            (
+                "text.onnx",
+                "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/onnx/text_model.onnx",
+            ),
+            (
+                "visual.onnx",
+                "https://huggingface.co/Xenova/siglip-base-patch16-384/resolve/main/onnx/vision_model.onnx",
+            ),
+        ],
+        AiModelType::SiglipLarge => vec![
+            (
+                "tokenizer.json",
+                "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/tokenizer.json",
+            ),
+            (
+                "text.onnx",
+                "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/onnx/text_model.onnx",
+            ),
+            (
+                "visual.onnx",
+                "https://huggingface.co/Xenova/siglip-large-patch16-384/resolve/main/onnx/vision_model.onnx",
+            ),
+        ],
+        AiModelType::DinoV2Base => vec![(
+            "visual.onnx",
+            "https://huggingface.co/Xenova/dinov2-base/resolve/main/onnx/model.onnx",
+        )],
+        AiModelType::Siglip2Base => vec![
+            (
+                "tokenizer.json",
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/tokenizer.json",
+            ),
+            (
+                "text.onnx",
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/text_model.onnx",
+            ),
+            (
+                "visual.onnx",
+                "https://huggingface.co/onnx-community/siglip2-base-patch16-224-ONNX/resolve/main/onnx/vision_model.onnx",
+            ),
+        ],
+        AiModelType::Llm2ClipBase => vec![
+            // microsoft/LLM2CLIP-Openai-B-16 lacks tokenizer files. We redirect to standard CLIP-B/32 since vocabularies are identical.
+            (
+                "tokenizer.json",
+                "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
+            ),
+            (
+                "text.onnx",
+                "https://huggingface.co/microsoft/LLM2CLIP-Openai-B-16/resolve/7a66a9239794caa50824f8c737366abc34d328aa/onnx/model.onnx",
+            ),
+        ],
+        AiModelType::ClipVitB32 => vec![
+            (
+                "tokenizer.json",
+                "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
+            ),
+            (
+                "text.onnx",
+                "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/text_model.onnx",
+            ),
+            (
+                "visual.onnx",
+                "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model.onnx",
+            ),
+        ],
+        AiModelType::Custom => unreachable!(),
     };
 
     let model_dir = app_dir.join("models").join(folder_name);
@@ -290,7 +273,7 @@ pub async fn verify_and_download_models(
     }
 
     // Special optimization for single-file ONNX models like LLM2CLIP to save 1.2 GB of download
-    if model_idx == 6 {
+    if model == AiModelType::Llm2ClipBase {
         let visual_dest = model_dir.join("visual.onnx");
         let text_dest = model_dir.join("text.onnx");
         if text_dest.exists() && !visual_dest.exists() {

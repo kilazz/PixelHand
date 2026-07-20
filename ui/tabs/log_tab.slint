@@ -1,0 +1,47 @@
+// ui/tabs/log_tab.slint
+
+import { TextEdit } from "std-widgets.slint";
+import { Store } from "../store.slint";
+import { CustomButton } from "../components/buttons.slint";
+
+export component LogTab inherits VerticalLayout {
+    padding: 15px;
+    spacing: 10px;
+    width: 100%;
+    height: 100%;
+
+    Text {
+        text: "System Console Logs & Compiler Diagnostics";
+        font-weight: 700;
+        font-size: 14px;
+        color: #ffffff;
+    }
+
+    TextEdit {
+        text <=> Store.console_log;
+        read-only: true;
+        font-family: "Consolas";
+        font-size: 12px;
+        vertical-stretch: 1;
+        wrap: TextWrap.word-wrap;
+    }
+
+    HorizontalLayout {
+        spacing: 8px;
+        CustomButton {
+            text: "Export Log Output...";
+            primary-color: #3e6a90;
+            clicked => { Store.export_log(Store.console_log); }
+        }
+
+        CustomButton {
+            text: "Clear Console Buffer";
+            primary-color: #474747;
+            clicked => { Store.console_log = "Buffer cleared."; }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+        }
+    }
+}

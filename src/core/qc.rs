@@ -37,6 +37,39 @@ pub struct QcImageMetadata {
     pub estimated_vram: u64,
 }
 
+impl QcImageMetadata {
+    /// A unified entry point for extracting file metadata with robust fallback defaults.
+    /// This eliminates DRY violations across different scanning modules.
+    pub fn extract_or_fallback(path: &Path) -> Self {
+        let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        let (width, height) = match imagesize::size(path) {
+            Ok(dim) => (dim.width as u32, dim.height as u32),
+            Err(_) => (0, 0),
+        };
+
+        extract_qc_metadata(path).unwrap_or_else(|_| {
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            QcImageMetadata {
+                width,
+                height,
+                file_size: size,
+                format_str: ext.clone(),
+                compression_format: ext,
+                color_space: "sRGB".into(),
+                has_alpha: false,
+                bit_depth: 8,
+                mipmap_count: 1,
+                is_cubemap: false,
+                estimated_vram: 0,
+            }
+        })
+    }
+}
+
 /// Safely reads a little-endian u32 integer from a byte slice at the given offset with bounds checking.
 fn safe_read_u32_le(bytes: &[u8], offset: usize) -> u32 {
     bytes

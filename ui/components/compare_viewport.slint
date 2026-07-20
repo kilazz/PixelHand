@@ -8,28 +8,34 @@ export component InteractiveCompareViewport inherits Rectangle {
     clip: true;
 
     TouchArea {
-        property <length> start_x;
-        property <length> start_y;
+        property <length> pressed-pan-x;
+        property <length> pressed-pan-y;
+
+        // Custom mouse cursor states for dragging feedback
+        mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
 
         pointer-event(evt) => {
             if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                // Right click resets the view to default
                 Store.zoom_factor = 1.0;
                 Store.pan_x = 0px;
                 Store.pan_y = 0px;
             }
             if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
-                self.start_x = self.mouse-x;
-                self.start_y = self.mouse-y;
-            }
-            if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.move) {
-                if (self.pressed) {
-                    Store.pan_x = Store.pan_x + (self.mouse-x - self.start_x);
-                    Store.pan_y = Store.pan_y + (self.mouse-y - self.start_y);
-                    self.start_x = self.mouse-x;
-                    self.start_y = self.mouse-y;
-                }
+                // Lock the initial pan positions when the left mouse button is pressed
+                self.pressed-pan-x = Store.pan_x;
+                self.pressed-pan-y = Store.pan_y;
             }
         }
+
+        moved => {
+            if (self.enabled && self.pressed) {
+                // Calculate absolute delta from the drag origin to prevent jitter
+                Store.pan_x = self.pressed-pan-x + (self.mouse-x - self.pressed-x);
+                Store.pan_y = self.pressed-pan-y + (self.mouse-y - self.pressed-y);
+            }
+        }
+
         scroll-event(evt) => {
             let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
             Store.zoom_factor = (Store.zoom_factor + zoom_delta).clamp(0.1, 10.0);
@@ -39,6 +45,7 @@ export component InteractiveCompareViewport inherits Rectangle {
             }
             EventResult.accept
         }
+
         double-clicked => {
             if (self.mouse-x < parent.width / 2) {
                 Store.open_file_in_viewer(Store.original_meta.path);

@@ -3,6 +3,22 @@
 use crate::state::AppState;
 use std::fs;
 use std::path::PathBuf;
+use ustr::Ustr;
+
+/// Standardizes a path string to a lowercased, slash-unified format to ensure cross-platform compatibility.
+/// Replaces Windows backslashes with forward slashes to prevent platform discrepancies.
+pub fn normalize_path(path_str: &str) -> String {
+    path_str
+        .chars()
+        .map(|c| if c == '\\' { '/' } else { c })
+        .collect::<String>()
+        .to_lowercase()
+}
+
+/// Returns an interned Ustr representing the normalized path to support O(1) matching and zero-allocation lookups.
+pub fn normalize_path_key(path_str: &str) -> Ustr {
+    ustr::ustr(&normalize_path(path_str))
+}
 
 /// Extracts checked file paths for deletion and resolves original-duplicate pairs for link transformations.
 pub fn extract_selected_files(lock: &AppState) -> (Vec<String>, Vec<(String, String)>) {

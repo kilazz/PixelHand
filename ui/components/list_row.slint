@@ -31,22 +31,67 @@ export component ListRow inherits Rectangle {
         }
     }
 
-    if row-data.is_header: TouchArea {
-        width: 100%;
-        height: 100%;
-        clicked => { root.row_clicked(true, row-data.group_index, row-data.path); }
+    if row-data.is_header: Rectangle {
+        background: transparent;
+
+        // Click anywhere else to expand/collapse
+        header_ta := TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { root.row_clicked(true, row-data.group_index, row-data.path); }
+        }
+
         HorizontalLayout {
+            width: 100%;
+            height: 100%;
             padding-left: 8px;
             padding-right: 8px;
             spacing: 8px;
             alignment: space-between;
-            Text {
-                text: row-data.is_qc ? ((row-data.is_checked ? "▶ " : "▼ ") + "QC Issue: " + row-data.hash_or_issue) : ((row-data.is_checked ? "▶ " : "▼ ") + "Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
-                color: #949ba4;
-                font-size: 12px;
-                font-weight: 700;
-                vertical-alignment: center;
-                overflow: elide;
+            cross-axis-alignment: center;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                cross-axis-alignment: center;
+
+                // Expand/Collapse arrow icon
+                Text {
+                    text: row-data.is_checked ? "▶" : "▼";
+                    color: #949ba4;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+
+                // Inline Trash action placed right at the front for ergonomic reasons
+                trash_ta := TouchArea {
+                    width: 22px;
+                    height: 22px;
+                    mouse-cursor: pointer;
+                    clicked => { Store.context_menu_action("trash_group", "\{row-data.group_index}"); }
+                    Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        y: 1.5px;
+                        Text {
+                            text: "🗑";
+                            color: trash_ta.has-hover ? #ff6b6b : #f23f43;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                // Group details label
+                Text {
+                    text: row-data.is_qc ? ("QC Issue: " + row-data.hash_or_issue) : ("Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
+                    color: header_ta.has-hover ? #ffffff : #949ba4;
+                    font-size: 12px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
             }
 
             Text {
