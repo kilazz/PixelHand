@@ -968,6 +968,60 @@ impl AppController {
                     utils::ui::update_results_ui(&scan_cfg, &mut lock);
                 }
             }
+            "trash_group" => {
+                if let Ok(group_idx) = path_str.parse::<i32>() {
+                    let mut lock = self.state.lock();
+                    let mut paths_to_delete = Vec::new();
+
+                    // If groups list is empty, we are likely in a flat/QC results list
+                    if lock.groups.is_empty() {
+                        for row in &lock.results {
+                            if row.group_index == group_idx && !row.is_header {
+                                paths_to_delete.push(std::path::PathBuf::from(&row.path));
+                            }
+                        }
+                        paths_to_delete.retain(|p| p.exists());
+                        if !paths_to_delete.is_empty()
+                            && let Err(e) = trash::delete_all(&paths_to_delete)
+                        {
+                            tracing::error!("Failed to trash QC group items: {}", e);
+                        }
+                        lock.results.retain(|r| r.group_index != group_idx);
+                    } else {
+                        let group_idx_us = group_idx as usize;
+                        if let Some(g) = lock.groups.get(group_idx_us) {
+                            paths_to_delete = g
+                                .files
+                                .iter()
+                                .map(|f| std::path::PathBuf::from(&f.path))
+                                .filter(|p| p.exists())
+                                .collect();
+                            if !paths_to_delete.is_empty()
+                                && let Err(e) = trash::delete_all(&paths_to_delete)
+                            {
+                                tracing::error!("Failed to trash duplicate cluster files: {}", e);
+                            }
+                        }
+                        if group_idx_us < lock.groups.len() {
+                            lock.groups.remove(group_idx_us);
+                            lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
+                        }
+                    }
+
+                    if let Some(ui) = self.ui_weak.upgrade() {
+                        let diag = ui.global::<Diagnostics>();
+                        let scan_cfg = ui.global::<ScanConfig>();
+                        diag.set_status_text(
+                            format!(
+                                "Moved {} files in the selected group to trash.",
+                                paths_to_delete.len()
+                            )
+                            .into(),
+                        );
+                        utils::ui::update_results_ui(&scan_cfg, &mut lock);
+                    }
+                }
+            }
             _ => {}
         }
     }
