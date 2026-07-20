@@ -177,7 +177,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
         let asc = lock.sort_ascending;
 
         if !lock.groups.is_empty() {
-            // 1. Sort duplicates INSIDE each group (keeping index 0 intact)
+            // Sort duplicates INSIDE each group (keeping index 0 intact)
             for group in &mut lock.groups {
                 if group.files.len() > 1 {
                     let (_, duplicates) = group.files.split_at_mut(1);
@@ -215,7 +215,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
                 }
             }
 
-            // 2. Sort the groups themselves
+            // Sort the groups themselves
             match col_str.as_str() {
                 "name" => {
                     lock.groups.sort_by(|a, b| {
@@ -355,7 +355,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
 
     let store = app.global::<Store>();
     store.on_clear_cache(move || {
-        // 1. Clear in-memory caches immediately using Moka API
+        // Clear in-memory caches immediately using Moka API
         if let Some(cache) = crate::utils::cache::DECODED_CACHE.get() {
             cache.invalidate_all();
         }
@@ -364,7 +364,7 @@ pub fn bind_ui_state_and_settings(app: &AppWindow, state: Arc<Mutex<AppState>>) 
             cache.invalidate_all();
         }
 
-        // 2. Safely delete database files in a background thread
+        // Safely delete database files in a background thread
         tokio::spawn(async move {
             if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
                 let lancedb_dir = app_dir.join(".lancedb_cache");

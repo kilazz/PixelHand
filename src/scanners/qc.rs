@@ -69,7 +69,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     estimated_vram: 0,
                 });
 
-            // 1. Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
+            // Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
             let abs_issues = check_absolute(
                 &qc_meta,
                 params.qc_npot,
@@ -85,7 +85,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 });
             }
 
-            // 2. Perform optional solid flat color checking and empty channel packing checks
+            // Perform optional solid flat color checking and empty channel packing checks
             if params.qc_solid_colors {
                 if let Some((issue, details)) = check_solid_texture(p) {
                     file_issues.push(QcIssueSummary {
@@ -103,7 +103,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                 }
             }
 
-            // 3. Perform optional normal maps vector integrity and DirectX vs OpenGL Y-axis audits
+            // Perform optional normal maps vector integrity and DirectX vs OpenGL Y-axis audits
             if params.qc_normals {
                 let path_str = p.to_string_lossy().to_lowercase();
                 let should_check = if params.qc_normals_tags.is_empty() {

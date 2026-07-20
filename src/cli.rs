@@ -15,7 +15,7 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         return Ok(());
     }
 
-    // 1. Process Byte-Exact Scan Routing
+    // Process Byte-Exact Scan Routing
     if let Some(pos) = args.iter().position(|arg| arg == "--scan-exact") {
         if pos + 1 < args.len() {
             let dir = args[pos + 1].clone();
@@ -26,7 +26,7 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         return Ok(());
     }
 
-    // 2. Process Quality Control (QC) Routing
+    // Process Quality Control (QC) Routing
     if let Some(pos) = args.iter().position(|arg| arg == "--scan-qc") {
         if pos + 1 < args.len() {
             let dir = args[pos + 1].clone();

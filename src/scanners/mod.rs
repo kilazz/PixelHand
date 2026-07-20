@@ -483,7 +483,7 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         None
     };
 
-    // 1. Try reading the tiny pre-rendered PNG from the disk cache safely
+    // Try reading the tiny pre-rendered PNG from the disk cache safely
     if let Some(ref cp) = cache_path
         && cp.is_file()
         && let Ok(img) = image::open(cp)
@@ -505,7 +505,7 @@ pub(crate) fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage
         _ => image::imageops::FilterType::Lanczos3,
     };
 
-    // 2. Fallback: Parse the actual texture and downscale
+    // Fallback: Parse the actual texture and downscale
     if let Ok(mut img) =
         crate::format_loaders::dds_loader::open_image_with_dds_fallback(&path, Some(target_size))
     {
@@ -534,7 +534,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             continue;
         }
 
-        // 1. Add Group Cluster Header row
+        // Add Group Cluster Header row
         rows.push(ResultsRowData {
             is_header: true,
             is_qc: false,
@@ -568,7 +568,7 @@ pub fn map_groups_to_rows(groups: &[DuplicateGroupSummary]) -> Vec<ResultsRowDat
             is_cubemap_bool: false,
         });
 
-        // 2. Add Child file rows belonging to this cluster
+        // Add Child file rows belonging to this cluster
         for (f_idx, file) in group.files.iter().enumerate() {
             let is_best = f_idx == 0;
             let thumbnail_data = load_thumbnail_for_path(&file.path);
@@ -656,7 +656,7 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
     for (g_idx, issue_type) in sorted_issue_types.iter().enumerate() {
         let group_issues = &grouped[issue_type];
 
-        // 1. Add Group Header Row for this specific issue type
+        // Add Group Header Row for this specific issue type
         rows.push(ResultsRowData {
             is_header: true,
             is_qc: true,
@@ -688,7 +688,7 @@ pub fn map_qc_to_rows(issues: &[crate::state::QcIssueSummary]) -> Vec<ResultsRow
             is_cubemap_bool: false,
         });
 
-        // 2. Add Child Rows belonging to this issue category
+        // Add Child Rows belonging to this issue category
         for issue in group_issues {
             let thumbnail_data = load_thumbnail_for_path(&issue.path);
             rows.push(ResultsRowData {

@@ -641,13 +641,13 @@ pub fn apply_manual_corrections(img: &mut RgbaImage, brightness: f32, contrast: 
         for ch in pixel.iter_mut().take(3) {
             let mut val = *ch as f32 / 255.0;
 
-            // 1. Brightness: Direct scalar multiplication
+            // Brightness: Direct scalar multiplication
             val *= brightness;
 
-            // 2. Contrast: Centered and scaled around the standard mid-gray (0.5) boundary
+            // Contrast: Centered and scaled around the standard mid-gray (0.5) boundary
             val = (val - 0.5) * contrast + 0.5;
 
-            // 3. Gamma: Power function curve
+            // Gamma: Power function curve
             if val > 0.0 && gamma != 1.0 {
                 val = val.powf(gamma);
             }
