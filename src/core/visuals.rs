@@ -19,7 +19,7 @@ const BASE_FOOTER_HEIGHT: f32 = 40.0;
 const MAX_IMGS_PER_GROUP: usize = 200;
 const IMGS_PER_FILE: usize = 50;
 
-const FONT_DATA: &[u8] = include_bytes!("../../assets/font.ttf");
+const FONT_DATA: &[u8] = include_bytes!("../../assets/font.otf");
 
 /// Encapsulates geometric and sizing logic for visual contact sheets layout
 struct SheetLayout {
