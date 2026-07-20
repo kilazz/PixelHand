@@ -45,6 +45,7 @@ export struct GridRow {
 // --- GROUPED CONFIGURATION STRUCTURES ------
 // ==========================================
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PathSettings {
     dir_a: string,
     dir_b: string,
@@ -52,6 +53,7 @@ export struct PathSettings {
     query_text: string,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct ExtensionSettings {
     ext_png: bool,
     ext_jpg: bool,
@@ -69,6 +71,7 @@ export struct ExtensionSettings {
     ext_avif: bool,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct UiLayoutSettings {
     duplicates_panel_height: length,
     sidebar_width: length,
@@ -77,6 +80,7 @@ export struct UiLayoutSettings {
     grid_card_size: length,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct VisualReportSettings {
     save_visuals: bool,
     visuals_columns: int,
@@ -85,6 +89,7 @@ export struct VisualReportSettings {
     visuals_scale: float,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PreprocessingSettings {
     prep_luminance: bool,
     prep_channels: bool,
@@ -96,6 +101,7 @@ export struct PreprocessingSettings {
     prep_ignore_solid: bool,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct QcSettings {
     qc_mode: bool,
     qc_npot: bool,
@@ -113,6 +119,7 @@ export struct QcSettings {
     qc_check_compression: bool,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct AiSettings {
     ai_model: int,
     custom_model_path: string,
@@ -120,12 +127,14 @@ export struct AiSettings {
     custom_model_dim: int,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct TonemapSettings {
     tonemap_enabled: bool,
     tonemap_auto_exposure: bool,
     tonemap_operator: int,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct ViewerConfig {
     grid_cols: int,
     grid_rows: int,
@@ -140,6 +149,7 @@ export struct ViewerConfig {
     enable_frame_blending: bool,
 }
 
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PreviewSettings {
     enable_previews: bool,
     preview_quality: int,

@@ -363,17 +363,17 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
 
     let store = app.global::<Store>();
 
-    // Apply grouped structures using auto-conversions
-    store.set_paths(settings.paths.clone().into());
-    store.set_extensions(settings.extensions.clone().into());
-    store.set_ui(settings.ui.clone().into());
-    store.set_visuals(settings.visuals.clone().into());
-    store.set_prep(settings.prep.clone().into());
-    store.set_qc(settings.qc.clone().into());
-    store.set_ai(settings.ai.clone().into());
-    store.set_tonemap(settings.tonemap.clone().into());
-    store.set_viewer(settings.viewer.clone().into());
-    store.set_preview(settings.preview.clone().into());
+    // Apply grouped structures directly
+    store.set_paths(settings.paths.clone());
+    store.set_extensions(settings.extensions.clone());
+    store.set_ui(settings.ui.clone());
+    store.set_visuals(settings.visuals.clone());
+    store.set_prep(settings.prep.clone());
+    store.set_qc(settings.qc.clone());
+    store.set_ai(settings.ai.clone());
+    store.set_tonemap(settings.tonemap.clone());
+    store.set_viewer(settings.viewer.clone());
+    store.set_preview(settings.preview.clone());
 
     // Apply global scalar settings
     store.set_similarity_threshold(settings.similarity_threshold);

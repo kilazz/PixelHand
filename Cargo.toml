@@ -6,7 +6,7 @@ description = "An AI-powered duplicate image finder, technical QC tool, and visu
 
 [dependencies]
 # UI Framework (Slint with unstable-winit-030 for native OS Drag and Drop integrations)
-slint = { version = "1.17.1", features = ["image-default-formats", "unstable-winit-030"] }
+slint = { version = "1.17.1", features = ["image-default-formats", "unstable-winit-030", "serde"] }
 
 # Logging and Diagnostics
 tracing = "0.1.44"
