@@ -122,20 +122,35 @@ pub async fn generate_visual_reports(
                         Ok(img) => {
                             let mut rgba_img = img.to_rgba8();
 
+                            // Calculate aspect-ratio preserving dimensions to prevent stretching
+                            let src_w = rgba_img.width();
+                            let src_h = rgba_img.height();
+                            let aspect = src_w as f32 / src_h as f32;
+
+                            let (dst_w, dst_h) = if aspect > 1.0 {
+                                // Landscape orientation
+                                let w = layout.thumb_size;
+                                let h = (layout.thumb_size as f32 / aspect).round() as u32;
+                                (w, h.max(1))
+                            } else {
+                                // Portrait or Square orientation
+                                let h = layout.thumb_size;
+                                let w = (layout.thumb_size as f32 * aspect).round() as u32;
+                                (w.max(1), h)
+                            };
+
                             // Safely attempt raw image mapping and scaling without unwraps
                             let processed_img = fr::images::Image::from_slice_u8(
-                                rgba_img.width(),
-                                rgba_img.height(),
+                                src_w,
+                                src_h,
                                 rgba_img.as_mut(),
                                 fr::PixelType::U8x4,
                             )
                             .map_err(|e| anyhow::anyhow!("Failed to map image slice: {:?}", e))
                             .and_then(|src_image| {
-                                let mut dst_image = fr::images::Image::new(
-                                    layout.thumb_size,
-                                    layout.thumb_size,
-                                    fr::PixelType::U8x4,
-                                );
+                                // Construct destination image with proportional aspect ratio dimensions
+                                let mut dst_image =
+                                    fr::images::Image::new(dst_w, dst_h, fr::PixelType::U8x4);
 
                                 let mut options = fr::ResizeOptions::new();
                                 options = options.resize_alg(fr::ResizeAlg::Interpolation(
@@ -146,16 +161,13 @@ pub async fn generate_visual_reports(
                                     .resize(&src_image, &mut dst_image, Some(&options))
                                     .map_err(|e| anyhow::anyhow!("Resize failed: {:?}", e))?;
 
-                                RgbaImage::from_raw(
-                                    layout.thumb_size,
-                                    layout.thumb_size,
-                                    dst_image.into_vec(),
+                                RgbaImage::from_raw(dst_w, dst_h, dst_image.into_vec()).ok_or_else(
+                                    || {
+                                        anyhow::anyhow!(
+                                            "Failed to build RgbaImage from raw resized buffer"
+                                        )
+                                    },
                                 )
-                                .ok_or_else(|| {
-                                    anyhow::anyhow!(
-                                        "Failed to build RgbaImage from raw resized buffer"
-                                    )
-                                })
                             });
 
                             match processed_img {
