@@ -1,7 +1,7 @@
 // ui/components/compare_viewport.slint
 
 import { WipeViewport } from "./common.slint";
-import { Store } from "../store.slint";
+import { ViewportState } from "../store.slint";
 
 export component InteractiveCompareViewport inherits Rectangle {
     background: #111214;
@@ -17,45 +17,45 @@ export component InteractiveCompareViewport inherits Rectangle {
         pointer-event(evt) => {
             if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
                 // Right click resets the view to default
-                Store.zoom_factor = 1.0;
-                Store.pan_x = 0px;
-                Store.pan_y = 0px;
+                ViewportState.zoom_factor = 1.0;
+                ViewportState.pan_x = 0px;
+                ViewportState.pan_y = 0px;
             }
             if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
                 // Lock the initial pan positions when the left mouse button is pressed
-                self.pressed-pan-x = Store.pan_x;
-                self.pressed-pan-y = Store.pan_y;
+                self.pressed-pan-x = ViewportState.pan_x;
+                self.pressed-pan-y = ViewportState.pan_y;
             }
         }
 
         moved => {
             if (self.enabled && self.pressed) {
                 // Calculate absolute delta from the drag origin to prevent jitter
-                Store.pan_x = self.pressed-pan-x + (self.mouse-x - self.pressed-x);
-                Store.pan_y = self.pressed-pan-y + (self.mouse-y - self.pressed-y);
+                ViewportState.pan_x = self.pressed-pan-x + (self.mouse-x - self.pressed-x);
+                ViewportState.pan_y = self.pressed-pan-y + (self.mouse-y - self.pressed-y);
             }
         }
 
         scroll-event(evt) => {
             let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
-            Store.zoom_factor = (Store.zoom_factor + zoom_delta).clamp(0.1, 10.0);
-            if (Store.zoom_factor == 1.0) {
-                Store.pan_x = 0px;
-                Store.pan_y = 0px;
+            ViewportState.zoom_factor = (ViewportState.zoom_factor + zoom_delta).clamp(0.1, 10.0);
+            if (ViewportState.zoom_factor == 1.0) {
+                ViewportState.pan_x = 0px;
+                ViewportState.pan_y = 0px;
             }
             EventResult.accept
         }
 
         double-clicked => {
             if (self.mouse-x < parent.width / 2) {
-                Store.open_file_in_viewer(Store.original_meta.path);
+                ViewportState.open_file_in_viewer(ViewportState.original_meta.path);
             } else {
-                Store.open_file_in_viewer(Store.duplicate_meta.path);
+                ViewportState.open_file_in_viewer(ViewportState.duplicate_meta.path);
             }
         }
     }
 
-    if Store.compare_mode == 0: Rectangle { // Side-by-Side
+    if ViewportState.compare_mode == 0: Rectangle { // Side-by-Side
         width: 100%;
         height: 100%;
 
@@ -69,22 +69,22 @@ export component InteractiveCompareViewport inherits Rectangle {
             Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #111214);
+                background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
                 border-color: #3e3e42;
                 border-width: 1px;
                 border-radius: 4px;
                 clip: true;
 
-                if Store.viewer.background_mode == 0: Image {
-                    source: Store.checkerboard_pattern;
+                if ViewportState.viewer.background_mode == 0: Image {
+                    source: ViewportState.checkerboard_pattern;
                     horizontal-tiling: repeat;
                     vertical-tiling: repeat;
                     width: 100%;
                     height: 100%;
                 }
 
-                if Store.viewer.background_mode == 1: Image {
-                    source: Store.checkerboard_pattern_light;
+                if ViewportState.viewer.background_mode == 1: Image {
+                    source: ViewportState.checkerboard_pattern_light;
                     horizontal-tiling: repeat;
                     vertical-tiling: repeat;
                     width: 100%;
@@ -92,23 +92,23 @@ export component InteractiveCompareViewport inherits Rectangle {
                 }
 
                 Image {
-                    source: Store.image_original;
+                    source: ViewportState.image_original;
                     image-fit: contain;
-                    width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-                    height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
-                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
 
                 // Smooth frame blending overlay (Original Image)
-                if Store.viewer.enable_frame_blending: Image {
-                    source: Store.image_original_next;
-                    opacity: Store.blend_factor;
+                if ViewportState.viewer.enable_frame_blending: Image {
+                    source: ViewportState.image_original_next;
+                    opacity: ViewportState.blend_factor;
                     image-fit: contain;
-                    width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-                    height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
-                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
             }
         }
@@ -123,22 +123,22 @@ export component InteractiveCompareViewport inherits Rectangle {
             Rectangle {
                 width: parent.width;
                 height: parent.height;
-                background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #111214);
+                background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
                 border-color: #3e3e42;
                 border-width: 1px;
                 border-radius: 4px;
                 clip: true;
 
-                if Store.viewer.background_mode == 0: Image {
-                    source: Store.checkerboard_pattern;
+                if ViewportState.viewer.background_mode == 0: Image {
+                    source: ViewportState.checkerboard_pattern;
                     horizontal-tiling: repeat;
                     vertical-tiling: repeat;
                     width: 100%;
                     height: 100%;
                 }
 
-                if Store.viewer.background_mode == 1: Image {
-                    source: Store.checkerboard_pattern_light;
+                if ViewportState.viewer.background_mode == 1: Image {
+                    source: ViewportState.checkerboard_pattern_light;
                     horizontal-tiling: repeat;
                     vertical-tiling: repeat;
                     width: 100%;
@@ -146,55 +146,57 @@ export component InteractiveCompareViewport inherits Rectangle {
                 }
 
                 Image {
-                    source: Store.image_duplicate;
+                    source: ViewportState.image_duplicate;
                     image-fit: contain;
-                    width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-                    height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
-                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
 
                 // Smooth frame blending overlay (Duplicate Image)
-                if Store.viewer.enable_frame_blending: Image {
-                    source: Store.image_duplicate_next;
-                    opacity: Store.blend_factor;
+                if ViewportState.viewer.enable_frame_blending: Image {
+                    source: ViewportState.image_duplicate_next;
+                    opacity: ViewportState.blend_factor;
                     image-fit: contain;
-                    width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-                    height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + Store.pan_x;
-                    y: parent.height / 2 - self.height / 2 + Store.pan_y;
+                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
             }
         }
     }
 
-    if Store.compare_mode == 1: WipeViewport { // Wipe Mode
-        original: Store.image_original;
-        duplicate: Store.image_duplicate;
-        checkerboard: Store.checkerboard_pattern;
-        wipe-val <=> Store.wipe_slider_val;
-        width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-        height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-        x: parent.width / 2 - self.width / 2 + Store.pan_x;
-        y: parent.height / 2 - self.height / 2 + Store.pan_y;
+    if ViewportState.compare_mode == 1: WipeViewport { // Wipe Mode
+        original: ViewportState.image_original;
+        duplicate: ViewportState.image_duplicate;
+        checkerboard: ViewportState.checkerboard_pattern;
+        background-mode: ViewportState.viewer.background_mode;
+        checkerboard-light: ViewportState.checkerboard_pattern_light;
+        wipe-val <=> ViewportState.wipe_slider_val;
+        width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+        height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+        x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+        y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
     }
 
-    if Store.compare_mode == 2: Rectangle { // Overlay Blend
+    if ViewportState.compare_mode == 2: Rectangle { // Overlay Blend
         width: 100%;
         height: 100%;
         clip: true;
-        background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #111214);
+        background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
 
-        if Store.viewer.background_mode == 0: Image {
-            source: Store.checkerboard_pattern;
+        if ViewportState.viewer.background_mode == 0: Image {
+            source: ViewportState.checkerboard_pattern;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
             height: 100%;
         }
 
-        if Store.viewer.background_mode == 1: Image {
-            source: Store.checkerboard_pattern_light;
+        if ViewportState.viewer.background_mode == 1: Image {
+            source: ViewportState.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -202,41 +204,41 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
 
         Image {
-            source: Store.image_original;
+            source: ViewportState.image_original;
             image-fit: contain;
-            width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-            height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-            x: parent.width / 2 - self.width / 2 + Store.pan_x;
-            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+            y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
 
         Image {
-            source: Store.image_duplicate;
+            source: ViewportState.image_duplicate;
             image-fit: contain;
-            opacity: Store.wipe_slider_val;
-            width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-            height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-            x: parent.width / 2 - self.width / 2 + Store.pan_x;
-            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+            opacity: ViewportState.wipe_slider_val;
+            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+            y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
     }
 
-    if Store.compare_mode == 3: Rectangle { // Difference Heatmap
+    if ViewportState.compare_mode == 3: Rectangle { // Difference Heatmap
         width: 100%;
         height: 100%;
         clip: true;
-        background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #111214);
+        background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
 
-        if Store.viewer.background_mode == 0: Image {
-            source: Store.checkerboard_pattern;
+        if ViewportState.viewer.background_mode == 0: Image {
+            source: ViewportState.checkerboard_pattern;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
             height: 100%;
         }
 
-        if Store.viewer.background_mode == 1: Image {
-            source: Store.checkerboard_pattern_light;
+        if ViewportState.viewer.background_mode == 1: Image {
+            source: ViewportState.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -244,31 +246,31 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
 
         Image {
-            source: Store.image_heatmap;
+            source: ViewportState.image_heatmap;
             image-fit: contain;
-            width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-            height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-            x: parent.width / 2 - self.width / 2 + Store.pan_x;
-            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+            y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
     }
 
-    if Store.compare_mode == 4: Rectangle { // Flicker Mode
+    if ViewportState.compare_mode == 4: Rectangle { // Flicker Mode
         width: 100%;
         height: 100%;
         clip: true;
-        background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #111214);
+        background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
 
-        if Store.viewer.background_mode == 0: Image {
-            source: Store.checkerboard_pattern;
+        if ViewportState.viewer.background_mode == 0: Image {
+            source: ViewportState.checkerboard_pattern;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
             height: 100%;
         }
 
-        if Store.viewer.background_mode == 1: Image {
-            source: Store.checkerboard_pattern_light;
+        if ViewportState.viewer.background_mode == 1: Image {
+            source: ViewportState.checkerboard_pattern_light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -276,23 +278,22 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
 
         Image {
-            source: Store.flicker_show_duplicate ? Store.image_duplicate : Store.image_original;
+            source: ViewportState.flicker_show_duplicate ? ViewportState.image_duplicate : ViewportState.image_original;
             image-fit: contain;
-            width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-            height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-            x: parent.width / 2 - self.width / 2 + Store.pan_x;
-            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+            y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
 
-        // Smooth frame blending overlay (Flicker Mode transitions)
-        if Store.viewer.enable_frame_blending: Image {
-            source: Store.flicker_show_duplicate ? Store.image_duplicate_next : Store.image_original_next;
-            opacity: Store.blend_factor;
+        if ViewportState.viewer.enable_frame_blending: Image {
+            source: ViewportState.flicker_show_duplicate ? ViewportState.image_duplicate_next : ViewportState.image_original_next;
+            opacity: ViewportState.blend_factor;
             image-fit: contain;
-            width: Store.viewer.fit_to_window ? (parent.width * Store.zoom_factor) : (Store.sprite_width * 1px * Store.zoom_factor);
-            height: Store.viewer.fit_to_window ? (parent.height * Store.zoom_factor) : (Store.sprite_height * 1px * Store.zoom_factor);
-            x: parent.width / 2 - self.width / 2 + Store.pan_x;
-            y: parent.height / 2 - self.height / 2 + Store.pan_y;
+            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+            y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
     }
 }

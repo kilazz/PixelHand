@@ -2,14 +2,14 @@
 
 import { CheckBox } from "std-widgets.slint";
 import { CustomButton } from "./buttons.slint";
-import { Store } from "../store.slint";
+import { ScanConfig, Diagnostics } from "../store.slint";
 
 export component FileFormatsPopup inherits PopupWindow {
     width: 480px;
     height: 180px;
     close-policy: close-on-click;
-    x: Store.ext_popup_x;
-    y: Store.ext_popup_y;
+    x: Diagnostics.ext_popup_x;
+    y: Diagnostics.ext_popup_y;
 
     Rectangle {
         background: #2b2d31;
@@ -34,26 +34,26 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".png";
-                        checked <=> Store.extensions.ext_png;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_png;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".jpg / .jpeg";
-                        checked <=> Store.extensions.ext_jpg;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_jpg;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".tga";
-                        checked <=> Store.extensions.ext_tga;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_tga;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".dds";
-                        checked <=> Store.extensions.ext_dds;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_dds;
+                        toggled => { ScanConfig.save_settings(); }
                     }
                 }
 
@@ -61,26 +61,26 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".bmp";
-                        checked <=> Store.extensions.ext_bmp;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_bmp;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".exr";
-                        checked <=> Store.extensions.ext_exr;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_exr;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".hdr";
-                        checked <=> Store.extensions.ext_hdr;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_hdr;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".tif / .tiff";
-                        checked <=> Store.extensions.ext_tif;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_tif;
+                        toggled => { ScanConfig.save_settings(); }
                     }
                 }
 
@@ -88,20 +88,20 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".webp";
-                        checked <=> Store.extensions.ext_webp;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_webp;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".gif";
-                        checked <=> Store.extensions.ext_gif;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_gif;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".psd";
-                        checked <=> Store.extensions.ext_psd;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_psd;
+                        toggled => { ScanConfig.save_settings(); }
                     }
                 }
 
@@ -109,20 +109,20 @@ export component FileFormatsPopup inherits PopupWindow {
                     spacing: 4px;
                     CheckBox {
                         text: ".jxl";
-                        checked <=> Store.extensions.ext_jxl;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_jxl;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".heic / .heif";
-                        checked <=> Store.extensions.ext_heic;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_heic;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
                         text: ".avif";
-                        checked <=> Store.extensions.ext_avif;
-                        toggled => { Store.save_settings(); }
+                        checked <=> ScanConfig.extensions.ext_avif;
+                        toggled => { ScanConfig.save_settings(); }
                     }
                 }
             }

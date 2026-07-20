@@ -16,12 +16,9 @@ import {
     GridRow,
 } from "./structs.slint";
 
-export global Store {
-    // ==========================================
-    // --- GROUPED PERSISTENT CONFIGURATIONS ----
-    // ==========================================
+export global ScanConfig {
+    // Persistent configuration structures
     in-out property <PathSettings> paths: { dir_a: "", dir_b: "", excluded_folders: ".git, .svn, cache, temp", query_text: "" };
-
     in-out property <ExtensionSettings> extensions: {
         ext_png: true,
         ext_jpg: true,
@@ -38,7 +35,6 @@ export global Store {
         ext_heic: true,
         ext_avif: true
     };
-
     in-out property <UiLayoutSettings> ui: {
         duplicates_panel_height: 180px,
         sidebar_width: 380px,
@@ -46,7 +42,6 @@ export global Store {
         list_preview_size: 40px,
         grid_card_size: 135px
     };
-
     in-out property <VisualReportSettings> visuals: {
         save_visuals: false,
         visuals_columns: 6,
@@ -54,7 +49,6 @@ export global Store {
         visuals_font_size: 14,
         visuals_scale: 1.5
     };
-
     in-out property <PreprocessingSettings> prep: {
         prep_luminance: false,
         prep_channels: false,
@@ -65,7 +59,6 @@ export global Store {
         prep_tags: "",
         prep_ignore_solid: true
     };
-
     in-out property <QcSettings> qc: {
         qc_mode: false,
         qc_npot: true,
@@ -82,11 +75,88 @@ export global Store {
         qc_check_colorspace: true,
         qc_check_compression: true
     };
-
     in-out property <AiSettings> ai: { ai_model: 0, custom_model_path: "", custom_model_arch: 0, custom_model_dim: 512 };
+    in-out property <PreviewSettings> preview: {
+        enable_previews: true,
+        preview_quality: 1,
+        filter_only_npot: false,
+        filter_only_uncompressed: false,
+        filter_only_missing_mips: false,
+        filter_only_cubemaps: false
+    };
 
+    // Global scanning parameters
+    in-out property <float> similarity_threshold: 90.0;
+    in-out property <int> batch_size: 128;
+    in-out property <int> search_method: 0; // 0: Exact, 1: Perceptual, 2: AI, 3: Inventory, 4: QC
+    in-out property <int> execution_provider: 0; // 0: CPU, 1: DirectML, 2: CUDA, 3: TensorRT, 4: CoreML
+    in-out property <int> search_precision: 1;
+    in-out property <bool> show_advanced: false;
+
+    // Table Column Widths
+    in-out property <length> col_file_w: 320px;
+    in-out property <length> col_score_w: 80px;
+    in-out property <length> col_path_w: 380px;
+    in-out property <length> col_format_w: 110px;
+    in-out property <length> col_dimensions_w: 110px;
+    in-out property <length> col_mipmaps_w: 75px;
+    in-out property <length> col_cubemap_w: 75px;
+    in-out property <length> col_size_w: 85px;
+
+    // Draggable columns for the Comparison Specifications Matrix
+    in-out property <length> col_spec_name_w: 130px;
+    in-out property <length> col_spec_val1_w: 140px;
+
+    // Active Results Data
+    in-out property <[ResultsRow]> results: [];
+    in-out property <[GridRow]> grid_row_results: [];
+    in-out property <[ResultsRow]> selected_group_files: [];
+    in-out property <string> results_search_query: "";
+    in-out property <float> results_min_similarity: 0.0;
+    in-out property <int> results_sort_index: 0;
+
+    // View State Flags
+    in-out property <bool> results_grid_mode: false;
+    in-out property <bool> has_results: false;
+    in-out property <string> active_sort_column: "";
+    in-out property <bool> sort_ascending: true;
+    in-out property <int> grid_columns: 4;
+
+    // Callbacks
+    callback select_folder_a();
+    callback select_folder_b();
+    callback select_custom_model();
+    callback select_reference_image();
+    callback trigger_action(string);
+    callback row_clicked(int, bool, int, string);
+    callback row_checkbox_toggled(int);
+    callback trigger_selection_rule(string);
+    callback expand_all_groups();
+    callback collapse_all_groups();
+    callback sort_by_column(string);
+    callback results_filter_changed();
+    callback results_sort_changed(int);
+    callback clear_cache();
+    callback clear_models();
+    callback auto_size_columns();
+    callback reset_size_columns();
+    callback context_menu_action(string, string);
+    callback thumbnail_channel_hovered(string, string);
+    callback grid_columns_changed();
+    callback save_settings();
+}
+
+export global ViewportState {
+    // Viewport image and rendering buffers
+    in-out property <image> image_original;
+    in-out property <image> image_duplicate;
+    in-out property <image> image_heatmap;
+    in-out property <image> histogram_image;
+    in-out property <image> checkerboard_pattern;
+    in-out property <image> checkerboard_pattern_light;
+
+    // Active configuration settings
     in-out property <TonemapSettings> tonemap: { tonemap_enabled: true, tonemap_auto_exposure: true, tonemap_operator: 2 };
-
     in-out property <ViewerConfig> viewer: {
         grid_cols: 1,
         grid_rows: 1,
@@ -100,49 +170,6 @@ export global Store {
         play_speed: 1.0,
         enable_frame_blending: false
     };
-
-    in-out property <PreviewSettings> preview: {
-        enable_previews: true,
-        preview_quality: 1,
-        filter_only_npot: false,
-        filter_only_uncompressed: false,
-        filter_only_missing_mips: false,
-        filter_only_cubemaps: false
-    };
-
-    // ==========================================
-    // --- GLOBAL SCANNING CONSTANTS ------------
-    // ==========================================
-    in-out property <float> similarity_threshold: 90.0;
-    in-out property <int> batch_size: 128;
-    in-out property <int> search_method: 0; // 0: Exact, 1: Perceptual, 2: AI, 3: Inventory, 4: QC
-    in-out property <int> execution_provider: 0; // 0: CPU, 1: DirectML, 2: CUDA, 3: TensorRT, 4: CoreML
-    in-out property <int> search_precision: 1;
-    in-out property <bool> show_advanced: false;
-
-    // ==========================================
-    // --- RUNTIME STATE & DATA MODELS ----------
-    // ==========================================
-    in-out property <int> active_tab: 0; // 0: Find, 1: Compare, 2: Log
-    in-out property <int> grid_columns: 4; // Tracks adaptive UI width constraint dynamically
-    in-out property <bool> is_scanning: false;
-    in-out property <float> progress: 0.0;
-    in-out property <string> status_text: "System Ready. Drop images or write path.";
-    in-out property <[string]> skipped_files_list: [];
-
-    in-out property <[ResultsRow]> results: [];
-    in-out property <[GridRow]> grid_row_results: [];
-    in-out property <[ResultsRow]> selected_group_files: [];
-
-    // ==========================================
-    // --- VIEWPORT IMAGE AND RENDERING BUFFERS --
-    // ==========================================
-    in-out property <image> image_original;
-    in-out property <image> image_duplicate;
-    in-out property <image> image_heatmap;
-    in-out property <image> histogram_image;
-    in-out property <image> checkerboard_pattern;
-    in-out property <image> checkerboard_pattern_light;
 
     // Viewport interactive parameters
     in-out property <int> compare_mode: 0; // 0: Side-by-Side, 1: Wipe, 2: Overlay, 3: Difference, 4: Flicker
@@ -204,38 +231,27 @@ export global Store {
     in-out property <bool> flicker_show_duplicate: false;
     in-out property <float> flicker_interval_val: 333.0;
 
-    // Diagnostics logs console output
+    // Callbacks
+    callback open_file_in_viewer(string);
+    callback channel_toggled();
+    callback mip_level_changed();
+    callback compare_mode_changed();
+    callback active_frame_changed();
+    callback tonemap_toggled();
+}
+
+export global Diagnostics {
+    // Process Tracking and Logging State
+    in-out property <bool> is_scanning: false;
+    in-out property <float> progress: 0.0;
+    in-out property <string> status_text: "System Ready. Drop images or write path.";
+    in-out property <[string]> skipped_files_list: [];
     in-out property <string> console_log: "Initializing ONNX Runtime Architecture...\nSystem ready.";
 
-    // Active hovered item variables
+    // Active hovered/context item variables
     in-out property <string> context_hovered_path: "";
-    in-out property <bool> results_grid_mode: false;
-    in-out property <bool> has_results: false;
 
-    // Column sorting dynamics
-    in-out property <string> active_sort_column: "";
-    in-out property <bool> sort_ascending: true;
-
-    // Results Filtering Toggles
-    in-out property <string> results_search_query: "";
-    in-out property <float> results_min_similarity: 0.0;
-    in-out property <int> results_sort_index: 0;
-
-    // Dynamic UI Columns Widths
-    in-out property <length> col_file_w: 320px;
-    in-out property <length> col_score_w: 80px;
-    in-out property <length> col_path_w: 380px;
-    in-out property <length> col_format_w: 110px;
-    in-out property <length> col_dimensions_w: 110px;
-    in-out property <length> col_mipmaps_w: 75px;
-    in-out property <length> col_cubemap_w: 75px;
-    in-out property <length> col_size_w: 85px;
-
-    // Draggable columns for the Comparison Specifications Matrix
-    in-out property <length> col_spec_name_w: 130px;
-    in-out property <length> col_spec_val1_w: 140px;
-
-    // Popup Coordinate alignments
+    // Coordinate alignments for popups
     in-out property <length> ext_popup_x: 0px;
     in-out property <length> ext_popup_y: 0px;
     in-out property <length> skipped_popup_x: 0px;
@@ -243,39 +259,12 @@ export global Store {
     in-out property <length> menu_x: 0px;
     in-out property <length> menu_y: 0px;
 
-    // ==========================================
-    // --- OPERATIONAL ACTIONS CALLBACKS --------
-    // ==========================================
-    callback select_folder_a();
-    callback select_folder_b();
+    // Shared global view tab
+    in-out property <int> active_tab: 0; // 0: Find, 1: Compare, 2: Log
+
+    // Callbacks
     callback run_scan();
     callback cancel_scan();
-    callback open_file_in_viewer(string);
-    callback trigger_action(string);
-    callback row_clicked(int, bool, int, string);
-    callback row_checkbox_toggled(int);
-    callback channel_toggled();
-    callback mip_level_changed();
-    callback compare_mode_changed();
-    callback active_frame_changed();
-    callback trigger_selection_rule(string);
-    callback save_settings();
-    callback tonemap_toggled();
     callback export_log(string);
     callback export_csv();
-    callback sort_by_column(string);
-    callback expand_all_groups();
-    callback collapse_all_groups();
-    callback results_filter_changed();
-    callback results_sort_changed(int);
-    callback clear_cache();
-    callback clear_models();
-    callback select_custom_model();
-    callback auto_size_columns();
-    callback reset_size_columns();
-    callback context_menu_action(string, string);
-    callback thumbnail_channel_hovered(string, string);
-    callback select_reference_image();
-    callback show_formats_popup();
-    callback grid_columns_changed();
 }

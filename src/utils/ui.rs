@@ -1,6 +1,6 @@
 // src/utils/ui.rs
 
-use crate::app::{GridRow, ResultsRow, SelectedFile, Store};
+use crate::app::{GridRow, ResultsRow, ScanConfig, SelectedFile, ViewportState};
 use crate::state::{AppState, DuplicateFileSummary, ResultsRowData};
 use slint::{ModelRc, SharedPixelBuffer, VecModel};
 use std::path::Path;
@@ -151,20 +151,21 @@ pub fn get_absolute_index(state: &AppState, visible_idx: usize) -> Option<usize>
 }
 
 /// Synchronizes the active Slint list results and grid representations based on filters and collapse states.
-/// NOW: Requires &mut AppState to rebuild lookup tables in a single transaction
-pub fn update_results_ui(store: &Store, state: &mut AppState) {
+pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
     let has_any = state.results.iter().any(|r| !r.is_header);
-    store.set_has_results(has_any);
+    scan_config.set_has_results(has_any);
 
-    // Rebuild lookup tables and tracking vectors in one transaction
     state.rebuild_path_to_idx();
     state.visible_to_abs.clear();
 
-    let search_query = store.get_results_search_query().to_string().to_lowercase();
-    let min_sim = store.get_results_min_similarity();
+    let search_query = scan_config
+        .get_results_search_query()
+        .to_string()
+        .to_lowercase();
+    let min_sim = scan_config.get_results_min_similarity();
 
-    // Extract smart filters from the nested `preview` configuration structure
-    let preview = store.get_preview();
+    // Extract smart filters from the nested `preview` configuration structure inside ScanConfig
+    let preview = scan_config.get_preview();
     let filter_only_npot = preview.filter_only_npot;
     let filter_uncompressed = preview.filter_only_uncompressed;
     let filter_missing_mips = preview.filter_only_missing_mips;
@@ -223,17 +224,15 @@ pub fn update_results_ui(store: &Store, state: &mut AppState) {
             slint_row.is_checked = state.collapsed_groups.contains(&row.group_index);
             slint_rows.push(slint_row);
 
-            // Map index for visible list
             state.visible_to_abs.push(abs_idx);
         } else if !state.collapsed_groups.contains(&row.group_index) {
             slint_rows.push(convert_to_slint_row(row));
 
-            // Map index for visible list
             state.visible_to_abs.push(abs_idx);
         }
     }
 
-    let cols = store.get_grid_columns().max(1) as usize;
+    let cols = scan_config.get_grid_columns().max(1) as usize;
     let mut grid_row_results = Vec::with_capacity(grid_items.len().div_ceil(cols));
     for chunk in grid_items.chunks(cols) {
         let row = GridRow {
@@ -242,18 +241,18 @@ pub fn update_results_ui(store: &Store, state: &mut AppState) {
         grid_row_results.push(row);
     }
 
-    store.set_results(ModelRc::from(Rc::new(VecModel::from(slint_rows))));
-    store.set_grid_row_results(ModelRc::from(Rc::new(VecModel::from(grid_row_results))));
+    scan_config.set_results(ModelRc::from(Rc::new(VecModel::from(slint_rows))));
+    scan_config.set_grid_row_results(ModelRc::from(Rc::new(VecModel::from(grid_row_results))));
 }
 
-pub fn get_current_active_channel(store: &Store) -> &'static str {
-    if store.get_active_r() {
+pub fn get_current_active_channel(viewport_state: &ViewportState) -> &'static str {
+    if viewport_state.get_active_r() {
         "R"
-    } else if store.get_active_g() {
+    } else if viewport_state.get_active_g() {
         "G"
-    } else if store.get_active_b() {
+    } else if viewport_state.get_active_b() {
         "B"
-    } else if store.get_active_a() {
+    } else if viewport_state.get_active_a() {
         "A"
     } else {
         "RGB"

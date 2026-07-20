@@ -8,12 +8,12 @@ import {
     CheckBox,
     SpinBox,
 } from "std-widgets.slint";
-import { Store } from "../store.slint";
+import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
 import { PanelSection, FormRow } from "./common.slint";
 import { CustomButton, ChannelButton } from "./buttons.slint";
 
 export component FindSidebar inherits Rectangle {
-    width: Store.ui.sidebar_width;
+    width: ScanConfig.ui.sidebar_width;
     background: #2b2d31;
     border-color: #1f2023;
     border-width: 1px;
@@ -41,11 +41,11 @@ export component FindSidebar inherits Rectangle {
                             "Asset Inventory (Detailed Audit)",
                             "Technical QC Audit"
                         ];
-                        current-index <=> Store.search_method;
+                        current-index <=> ScanConfig.search_method;
                         height: 32px;
                         selected(val) => {
-                            Store.qc.qc_mode = Store.search_method == 4;
-                            Store.save_settings();
+                            ScanConfig.qc.qc_mode = ScanConfig.search_method == 4;
+                            ScanConfig.save_settings();
                         }
                     }
                 }
@@ -59,47 +59,47 @@ export component FindSidebar inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 4px;
                                 LineEdit {
-                                    text <=> Store.paths.dir_a;
+                                    text <=> ScanConfig.paths.dir_a;
                                     height: 32px;
                                     placeholder-text: "Source folder...";
-                                    edited => { Store.save_settings(); }
+                                    edited => { ScanConfig.save_settings(); }
                                 }
 
                                 CustomButton {
                                     text: "...";
                                     width: 32px;
                                     height: 32px;
-                                    clicked => { Store.select_folder_a(); }
+                                    clicked => { ScanConfig.select_folder_a(); }
                                 }
                             }
                         }
 
-                        if Store.search_method == 4: FormRow {
+                        if ScanConfig.search_method == 4: FormRow {
                             title: "Folder B:";
                             HorizontalLayout {
                                 spacing: 4px;
                                 LineEdit {
-                                    text <=> Store.paths.dir_b;
+                                    text <=> ScanConfig.paths.dir_b;
                                     height: 32px;
                                     placeholder-text: "Comparison folder...";
-                                    edited => { Store.save_settings(); }
+                                    edited => { ScanConfig.save_settings(); }
                                 }
 
                                 CustomButton {
                                     text: "...";
                                     width: 32px;
                                     height: 32px;
-                                    clicked => { Store.select_folder_b(); }
+                                    clicked => { ScanConfig.select_folder_b(); }
                                 }
                             }
                         }
                         FormRow {
                             title: "Exclude:";
                             LineEdit {
-                                text <=> Store.paths.excluded_folders;
+                                text <=> ScanConfig.paths.excluded_folders;
                                 placeholder-text: "e.g. .cache, previews, temp_files";
                                 height: 22px;
-                                edited => { Store.save_settings(); }
+                                edited => { ScanConfig.save_settings(); }
                             }
                         }
 
@@ -111,8 +111,8 @@ export component FindSidebar inherits Rectangle {
                                 height: 32px;
                                 primary-color: #4e5058;
                                 clicked => {
-                                    Store.ext_popup_x = self.absolute-position.x;
-                                    Store.ext_popup_y = self.absolute-position.y + self.height;
+                                    Diagnostics.ext_popup_x = self.absolute-position.x;
+                                    Diagnostics.ext_popup_y = self.absolute-position.y + self.height;
                                     root.show_formats_popup();
                                 }
                             }
@@ -120,25 +120,25 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
 
-                if Store.search_method == 0 || Store.search_method == 1: PanelSection {
+                if ScanConfig.search_method == 0 || ScanConfig.search_method == 1: PanelSection {
                     title: "Duplicates Finder Options";
                     VerticalLayout {
                         spacing: 4px;
 
-                        if Store.search_method == 1: FormRow {
+                        if ScanConfig.search_method == 1: FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
                                 spacing: 6px;
                                 Slider {
-                                    value <=> Store.similarity_threshold;
+                                    value <=> ScanConfig.similarity_threshold;
                                     minimum: 50;
                                     maximum: 100;
                                     height: 32px;
-                                    changed(val) => { Store.save_settings(); }
+                                    changed(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
-                                    text: Math.round(Store.similarity_threshold) + "%";
+                                    text: Math.round(ScanConfig.similarity_threshold) + "%";
                                     width: 36px;
                                     font-size: 12px;
                                     color: #ffffff;
@@ -149,12 +149,12 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Save Visual Reports";
-                            checked <=> Store.visuals.save_visuals;
+                            checked <=> ScanConfig.visuals.save_visuals;
                             height: 20px;
-                            toggled => { Store.save_settings(); }
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
-                        if Store.visuals.save_visuals: VerticalLayout {
+                        if ScanConfig.visuals.save_visuals: VerticalLayout {
                             spacing: 4px;
                             padding-left: 8px;
                             HorizontalLayout {
@@ -168,12 +168,12 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals.visuals_columns;
+                                    value <=> ScanConfig.visuals.visuals_columns;
                                     minimum: 2;
                                     maximum: 12;
                                     height: 32px;
                                     width: 95px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
@@ -185,12 +185,12 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals.visuals_max_count;
+                                    value <=> ScanConfig.visuals.visuals_max_count;
                                     minimum: 1;
                                     maximum: 1000;
                                     height: 32px;
                                     width: 110px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
                             }
 
@@ -205,12 +205,12 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals.visuals_font_size;
+                                    value <=> ScanConfig.visuals.visuals_font_size;
                                     minimum: 8;
                                     maximum: 36;
                                     height: 32px;
                                     width: 95px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
@@ -222,16 +222,16 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 Slider {
-                                    value <=> Store.visuals.visuals_scale;
+                                    value <=> ScanConfig.visuals.visuals_scale;
                                     minimum: 1.0;
                                     maximum: 4.0;
                                     height: 32px;
                                     width: 70px;
-                                    changed(val) => { Store.save_settings(); }
+                                    changed(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
-                                    text: (Math.round(Store.visuals.visuals_scale * 10) / 10) + "x";
+                                    text: (Math.round(ScanConfig.visuals.visuals_scale * 10) / 10) + "x";
                                     width: 30px;
                                     font-size: 11px;
                                     color: #ffffff;
@@ -239,19 +239,19 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
                         }
-                        if Store.search_method == 1: CheckBox {
+                        if ScanConfig.search_method == 1: CheckBox {
                             text: "Compare by luminance only";
-                            checked <=> Store.prep.prep_luminance;
+                            checked <=> ScanConfig.prep.prep_luminance;
                             height: 20px;
-                            toggled => { Store.save_settings(); }
+                            toggled => { ScanConfig.save_settings(); }
                         }
-                        if Store.search_method == 1: CheckBox {
+                        if ScanConfig.search_method == 1: CheckBox {
                             text: "Compare by specific channels";
-                            checked <=> Store.prep.prep_channels;
+                            checked <=> ScanConfig.prep.prep_channels;
                             height: 20px;
-                            toggled => { Store.save_settings(); }
+                            toggled => { ScanConfig.save_settings(); }
                         }
-                        if Store.search_method == 1 && Store.prep.prep_channels: VerticalLayout {
+                        if ScanConfig.search_method == 1 && ScanConfig.prep.prep_channels: VerticalLayout {
                             spacing: 4px;
                             padding-left: 12px;
                             FormRow {
@@ -263,30 +263,30 @@ export component FindSidebar inherits Rectangle {
                                     ChannelButton {
                                         text: "R";
                                         active-color: #f23f43;
-                                        active <=> Store.prep.prep_r;
-                                        clicked => { Store.prep.prep_r = !Store.prep.prep_r; Store.save_settings(); }
+                                        active <=> ScanConfig.prep.prep_r;
+                                        clicked => { ScanConfig.prep.prep_r = !ScanConfig.prep.prep_r; ScanConfig.save_settings(); }
                                     }
 
                                     ChannelButton {
                                         text: "G";
                                         active-color: #23a55a;
-                                        active <=> Store.prep.prep_g;
-                                        clicked => { Store.prep.prep_g = !Store.prep.prep_g; Store.save_settings(); }
+                                        active <=> ScanConfig.prep.prep_g;
+                                        clicked => { ScanConfig.prep.prep_g = !ScanConfig.prep.prep_g; ScanConfig.save_settings(); }
                                     }
 
                                     ChannelButton {
                                         text: "B";
                                         active-color: #5865f2;
-                                        active <=> Store.prep.prep_b;
-                                        clicked => { Store.prep.prep_b = !Store.prep.prep_b; Store.save_settings(); }
+                                        active <=> ScanConfig.prep.prep_b;
+                                        clicked => { ScanConfig.prep.prep_b = !ScanConfig.prep.prep_b; ScanConfig.save_settings(); }
                                     }
 
                                     ChannelButton {
                                         text: "A";
                                         active-color: #ffffff;
                                         text-color: #000000;
-                                        active <=> Store.prep.prep_a;
-                                        clicked => { Store.prep.prep_a = !Store.prep.prep_a; Store.save_settings(); }
+                                        active <=> ScanConfig.prep.prep_a;
+                                        clicked => { ScanConfig.prep.prep_a = !ScanConfig.prep.prep_a; ScanConfig.save_settings(); }
                                     }
                                 }
                             }
@@ -295,24 +295,24 @@ export component FindSidebar inherits Rectangle {
                                 title: "Tags:";
                                 label-width: 40px;
                                 LineEdit {
-                                    text <=> Store.prep.prep_tags;
+                                    text <=> ScanConfig.prep.prep_tags;
                                     placeholder-text: "_mask, _ddn";
                                     height: 32px;
-                                    edited => { Store.save_settings(); }
+                                    edited => { ScanConfig.save_settings(); }
                                 }
                             }
 
                             CheckBox {
                                 text: "Ignore solid channels";
-                                checked <=> Store.prep.prep_ignore_solid;
+                                checked <=> ScanConfig.prep.prep_ignore_solid;
                                 height: 20px;
-                                toggled => { Store.save_settings(); }
+                                toggled => { ScanConfig.save_settings(); }
                             }
                         }
                     }
                 }
 
-                if Store.search_method == 2: PanelSection {
+                if ScanConfig.search_method == 2: PanelSection {
                     title: "AI Semantic Search Options";
                     VerticalLayout {
                         spacing: 4px;
@@ -321,11 +321,11 @@ export component FindSidebar inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 4px;
                                 LineEdit {
-                                    text <=> Store.paths.query_text;
+                                    text <=> ScanConfig.paths.query_text;
                                     height: 32px;
-                                    placeholder-text: Store.ai.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
-                                    enabled: Store.ai.ai_model != 4;
-                                    edited => { Store.save_settings(); }
+                                    placeholder-text: ScanConfig.ai.ai_model == 4 ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                    enabled: ScanConfig.ai.ai_model != 4;
+                                    edited => { ScanConfig.save_settings(); }
                                 }
 
                                 CustomButton {
@@ -333,26 +333,26 @@ export component FindSidebar inherits Rectangle {
                                     icon-type: 1;
                                     width: 32px;
                                     height: 32px;
-                                    enabled: Store.ai.ai_model != 4;
-                                    clicked => { Store.select_reference_image(); }
+                                    enabled: ScanConfig.ai.ai_model != 4;
+                                    clicked => { ScanConfig.select_reference_image(); }
                                 }
                             }
                         }
 
-                        if Store.paths.query_text == "": FormRow {
+                        if ScanConfig.paths.query_text == "": FormRow {
                             title: "Similarity:";
                             HorizontalLayout {
                                 spacing: 6px;
                                 Slider {
-                                    value <=> Store.similarity_threshold;
+                                    value <=> ScanConfig.similarity_threshold;
                                     minimum: 50;
                                     maximum: 100;
                                     height: 32px;
-                                    changed(val) => { Store.save_settings(); }
+                                    changed(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
-                                    text: Math.round(Store.similarity_threshold) + "%";
+                                    text: Math.round(ScanConfig.similarity_threshold) + "%";
                                     width: 36px;
                                     font-size: 12px;
                                     color: #ffffff;
@@ -374,29 +374,29 @@ export component FindSidebar inherits Rectangle {
                                     "LLM2CLIP OpenAI-B-16",
                                     "Custom (Local ONNX)"
                                 ];
-                                current-index <=> Store.ai.ai_model;
+                                current-index <=> ScanConfig.ai.ai_model;
                                 height: 32px;
-                                selected(val) => { Store.save_settings(); }
+                                selected(val) => { ScanConfig.save_settings(); }
                             }
                         }
 
-                        if Store.ai.ai_model == 7: VerticalLayout {
+                        if ScanConfig.ai.ai_model == 7: VerticalLayout {
                             spacing: 4px;
                             FormRow {
                                 title: "Local Path:";
                                 HorizontalLayout {
                                     spacing: 4px;
                                     LineEdit {
-                                        text <=> Store.ai.custom_model_path;
+                                        text <=> ScanConfig.ai.custom_model_path;
                                         height: 32px;
-                                        edited => { Store.save_settings(); }
+                                        edited => { ScanConfig.save_settings(); }
                                     }
 
                                     CustomButton {
                                         text: "...";
                                         width: 32px;
                                         height: 32px;
-                                        clicked => { Store.select_custom_model(); }
+                                        clicked => { ScanConfig.select_custom_model(); }
                                     }
                                 }
                             }
@@ -413,9 +413,9 @@ export component FindSidebar inherits Rectangle {
 
                                 ComboBox {
                                     model: ["CLIP", "SigLIP", "DINOv2"];
-                                    current-index <=> Store.ai.custom_model_arch;
+                                    current-index <=> ScanConfig.ai.custom_model_arch;
                                     height: 32px;
-                                    selected(val) => { Store.save_settings(); }
+                                    selected(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
@@ -427,23 +427,23 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value: Store.ai.custom_model_dim;
+                                    value: ScanConfig.ai.custom_model_dim;
                                     minimum: 64;
                                     maximum: 4096;
                                     height: 32px;
-                                    edited(val) => { Store.ai.custom_model_dim = val; Store.save_settings(); }
+                                    edited(val) => { ScanConfig.ai.custom_model_dim = val; ScanConfig.save_settings(); }
                                 }
                             }
                         }
 
-                        if Store.paths.query_text == "": CheckBox {
+                        if ScanConfig.paths.query_text == "": CheckBox {
                             text: "Save Visual Reports";
-                            checked <=> Store.visuals.save_visuals;
+                            checked <=> ScanConfig.visuals.save_visuals;
                             height: 20px;
-                            toggled => { Store.save_settings(); }
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
-                        if Store.paths.query_text == "" && Store.visuals.save_visuals: VerticalLayout {
+                        if ScanConfig.paths.query_text == "" && ScanConfig.visuals.save_visuals: VerticalLayout {
                             spacing: 4px;
                             padding-left: 8px;
                             HorizontalLayout {
@@ -457,12 +457,12 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals.visuals_columns;
+                                    value <=> ScanConfig.visuals.visuals_columns;
                                     minimum: 2;
                                     maximum: 12;
                                     height: 32px;
                                     width: 95px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
@@ -474,12 +474,12 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals.visuals_max_count;
+                                    value <=> ScanConfig.visuals.visuals_max_count;
                                     minimum: 1;
                                     maximum: 1000;
                                     height: 32px;
                                     width: 110px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
                             }
 
@@ -494,12 +494,12 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 SpinBox {
-                                    value <=> Store.visuals.visuals_font_size;
+                                    value <=> ScanConfig.visuals.visuals_font_size;
                                     minimum: 8;
                                     maximum: 36;
                                     height: 32px;
                                     width: 95px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
@@ -511,16 +511,16 @@ export component FindSidebar inherits Rectangle {
                                 }
 
                                 Slider {
-                                    value <=> Store.visuals.visuals_scale;
+                                    value <=> ScanConfig.visuals.visuals_scale;
                                     minimum: 1.0;
                                     maximum: 4.0;
                                     height: 32px;
                                     width: 70px;
-                                    changed(val) => { Store.save_settings(); }
+                                    changed(val) => { ScanConfig.save_settings(); }
                                 }
 
                                 Text {
-                                    text: (Math.round(Store.visuals.visuals_scale * 10) / 10) + "x";
+                                    text: (Math.round(ScanConfig.visuals.visuals_scale * 10) / 10) + "x";
                                     width: 30px;
                                     font-size: 11px;
                                     color: #ffffff;
@@ -531,7 +531,7 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
 
-                if Store.search_method == 4: PanelSection {
+                if ScanConfig.search_method == 4: PanelSection {
                     title: "QC Criteria List";
                     VerticalLayout {
                         spacing: 6px;
@@ -545,14 +545,14 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Match by stem";
-                            checked <=> Store.qc.qc_match_by_stem;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_match_by_stem;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Hide same resolution";
-                            checked <=> Store.qc.qc_hide_same_resolution;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_hide_same_resolution;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         Text {
@@ -564,32 +564,32 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Check NPOT (Power of 2)";
-                            checked <=> Store.qc.qc_npot;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_npot;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Mip-Maps";
-                            checked <=> Store.qc.qc_mipmaps;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_mipmaps;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check BlockAlignment";
-                            checked <=> Store.qc.qc_block_align;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_block_align;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Bit Depth";
-                            checked <=> Store.qc.qc_bit_depth;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_bit_depth;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Solid Colors & Empty Channels";
-                            checked <=> Store.qc.qc_solid_colors;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_solid_colors;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         Text {
@@ -601,15 +601,15 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Validate Normal Vectors";
-                            checked <=> Store.qc.qc_normals;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_normals;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
-                        if Store.qc.qc_normals: LineEdit {
-                            text <=> Store.qc.qc_normals_tags;
+                        if ScanConfig.qc.qc_normals: LineEdit {
+                            text <=> ScanConfig.qc.qc_normals_tags;
                             placeholder-text: "Tags: _norm, _ddn";
                             height: 32px;
-                            edited => { Store.save_settings(); }
+                            edited => { ScanConfig.save_settings(); }
                         }
 
                         Text {
@@ -621,26 +621,26 @@ export component FindSidebar inherits Rectangle {
 
                         CheckBox {
                             text: "Check Size Bloat";
-                            checked <=> Store.qc.qc_check_bloat;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_check_bloat;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Alpha Mismatch";
-                            checked <=> Store.qc.qc_check_alpha;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_check_alpha;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Color Space Mismatch";
-                            checked <=> Store.qc.qc_check_colorspace;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_check_colorspace;
+                            toggled => { ScanConfig.save_settings(); }
                         }
 
                         CheckBox {
                             text: "Check Compression Change";
-                            checked <=> Store.qc.qc_check_compression;
-                            toggled => { Store.save_settings(); }
+                            checked <=> ScanConfig.qc.qc_check_compression;
+                            toggled => { ScanConfig.save_settings(); }
                         }
                     }
                 }
@@ -659,68 +659,68 @@ export component FindSidebar inherits Rectangle {
                             }
 
                             CheckBox {
-                                checked <=> Store.show_advanced;
+                                checked <=> ScanConfig.show_advanced;
                             }
                         }
 
-                        if Store.show_advanced: VerticalLayout {
+                        if ScanConfig.show_advanced: VerticalLayout {
                             spacing: 4px;
                             padding-top: 6px;
 
-                            if Store.search_method == 2: FormRow {
+                            if ScanConfig.search_method == 2: FormRow {
                                 title: "Batch Size:";
                                 SpinBox {
-                                    value <=> Store.batch_size;
+                                    value <=> ScanConfig.batch_size;
                                     minimum: 16;
                                     maximum: 1024;
                                     height: 32px;
-                                    edited(val) => { Store.save_settings(); }
+                                    edited(val) => { ScanConfig.save_settings(); }
                                 }
                             }
 
-                            if Store.search_method == 2: FormRow {
+                            if ScanConfig.search_method == 2: FormRow {
                                 title: "LanceDB Prec:";
                                 ComboBox {
                                     model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
-                                    current-index <=> Store.search_precision;
+                                    current-index <=> ScanConfig.search_precision;
                                     height: 32px;
-                                    selected(val) => { Store.save_settings(); }
+                                    selected(val) => { ScanConfig.save_settings(); }
                                 }
                             }
 
-                            if Store.search_method == 2: FormRow {
+                            if ScanConfig.search_method == 2: FormRow {
                                 title: "Provider:";
                                 ComboBox {
                                     model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
-                                    current-index <=> Store.execution_provider;
+                                    current-index <=> ScanConfig.execution_provider;
                                     height: 32px;
-                                    selected(val) => { Store.save_settings(); }
+                                    selected(val) => { ScanConfig.save_settings(); }
                                 }
                             }
 
                             CheckBox {
                                 text: "Enable Previews Window";
-                                checked <=> Store.preview.enable_previews;
-                                toggled => { Store.save_settings(); }
+                                checked <=> ScanConfig.preview.enable_previews;
+                                toggled => { ScanConfig.save_settings(); }
                             }
 
-                            if Store.preview.enable_previews: FormRow {
+                            if ScanConfig.preview.enable_previews: FormRow {
                                 title: "List Thumb Size:";
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Slider {
-                                        value: Store.ui.list_preview_size / 1px;
+                                        value: ScanConfig.ui.list_preview_size / 1px;
                                         minimum: 32;
                                         maximum: 120;
                                         height: 32px;
                                         changed(val) => {
-                                            Store.ui.list_preview_size = val * 1px;
-                                            Store.save_settings();
+                                            ScanConfig.ui.list_preview_size = val * 1px;
+                                            ScanConfig.save_settings();
                                         }
                                     }
 
                                     Text {
-                                        text: Math.round(Store.ui.list_preview_size / 1px) + "px";
+                                        text: Math.round(ScanConfig.ui.list_preview_size / 1px) + "px";
                                         width: 36px;
                                         font-size: 11px;
                                         color: #ffffff;
@@ -729,23 +729,23 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            if Store.preview.enable_previews: FormRow {
+                            if ScanConfig.preview.enable_previews: FormRow {
                                 title: "Grid Card Size:";
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Slider {
-                                        value: Store.ui.grid_card_size / 1px;
+                                        value: ScanConfig.ui.grid_card_size / 1px;
                                         minimum: 100;
                                         maximum: 250;
                                         height: 32px;
                                         changed(val) => {
-                                            Store.ui.grid_card_size = val * 1px;
-                                            Store.save_settings();
+                                            ScanConfig.ui.grid_card_size = val * 1px;
+                                            ScanConfig.save_settings();
                                         }
                                     }
 
                                     Text {
-                                        text: Math.round(Store.ui.grid_card_size / 1px) + "px";
+                                        text: Math.round(ScanConfig.ui.grid_card_size / 1px) + "px";
                                         width: 36px;
                                         font-size: 11px;
                                         color: #ffffff;
@@ -754,28 +754,28 @@ export component FindSidebar inherits Rectangle {
                                 }
                             }
 
-                            if Store.preview.enable_previews: FormRow {
+                            if ScanConfig.preview.enable_previews: FormRow {
                                 title: "Preview Quality:";
                                 ComboBox {
                                     model: ["Fast (64px)", "Balanced (128px)", "High Quality (256px)"];
-                                    current-index <=> Store.preview.preview_quality;
+                                    current-index <=> ScanConfig.preview.preview_quality;
                                     height: 32px;
-                                    selected(val) => { Store.save_settings(); }
+                                    selected(val) => { ScanConfig.save_settings(); }
                                 }
                             }
                             CheckBox {
                                 text: "Enable HDR Tonemapping";
-                                checked <=> Store.tonemap.tonemap_enabled;
-                                toggled => { Store.tonemap_toggled(); }
+                                checked <=> ViewportState.tonemap.tonemap_enabled;
+                                toggled => { ViewportState.tonemap_toggled(); }
                             }
 
-                            if Store.tonemap.tonemap_enabled: CheckBox {
+                            if ViewportState.tonemap.tonemap_enabled: CheckBox {
                                 text: "Enable Auto Exposure";
-                                checked <=> Store.tonemap.tonemap_auto_exposure;
-                                toggled => { Store.tonemap_toggled(); }
+                                checked <=> ViewportState.tonemap.tonemap_auto_exposure;
+                                toggled => { ViewportState.tonemap_toggled(); }
                             }
 
-                            if Store.tonemap.tonemap_enabled: ComboBox {
+                            if ViewportState.tonemap.tonemap_enabled: ComboBox {
                                 model: [
                                     "None",
                                     "False Color",
@@ -785,9 +785,9 @@ export component FindSidebar inherits Rectangle {
                                     "ICtCp BT.2446c",
                                     "ICtCp Lumina"
                                 ];
-                                current-index <=> Store.tonemap.tonemap_operator;
+                                current-index <=> ViewportState.tonemap.tonemap_operator;
                                 height: 32px;
-                                selected(val) => { Store.tonemap_toggled(); }
+                                selected(val) => { ViewportState.tonemap_toggled(); }
                             }
                             HorizontalLayout {
                                 spacing: 6px;
@@ -796,14 +796,14 @@ export component FindSidebar inherits Rectangle {
                                     text: "Clear Caches";
                                     height: 32px;
                                     primary-color: #4e5058;
-                                    clicked => { Store.clear_cache(); }
+                                    clicked => { ScanConfig.clear_cache(); }
                                 }
 
                                 CustomButton {
                                     text: "Clear Models";
                                     height: 32px;
                                     primary-color: #4e5058;
-                                    clicked => { Store.clear_models(); }
+                                    clicked => { ScanConfig.clear_models(); }
                                 }
                             }
                         }
@@ -819,12 +819,12 @@ export component FindSidebar inherits Rectangle {
             VerticalLayout {
                 padding: 4px;
                 CustomButton {
-                    text: Store.is_scanning ? "STOP SCAN" : "RUN SCANNER";
-                    primary-color: Store.is_scanning ? #f23f43 : #23a55a;
+                    text: Diagnostics.is_scanning ? "STOP SCAN" : "RUN SCANNER";
+                    primary-color: Diagnostics.is_scanning ? #f23f43 : #23a55a;
                     height: 32px;
                     clicked => {
-                        if (Store.is_scanning) { Store.cancel_scan(); }
-                        else { Store.run_scan(); }
+                        if (Diagnostics.is_scanning) { Diagnostics.cancel_scan(); }
+                        else { Diagnostics.run_scan(); }
                     }
                 }
             }

@@ -6,6 +6,7 @@ use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
+use crate::handlers::controller::AppController;
 use crate::state::{AppSettings, AppState};
 
 // Generate Slint Rust code from the UI markup
@@ -183,15 +184,16 @@ pub fn run_gui() -> Result<()> {
     let app = AppWindow::new().context("Failed to initialize Slint UI Window")?;
     let _ = ctx.app_handle.set(app.as_weak());
 
-    let store = app.global::<crate::app::Store>(); // Retrieve the global Store handle
-
     let loaded_settings = crate::utils::settings::load_settings().unwrap_or_default();
     apply_settings_to_ui(&app, &loaded_settings);
 
     let checkerboard_dark = crate::utils::ui::generate_checkerboard(false);
     let checkerboard_light = crate::utils::ui::generate_checkerboard(true);
-    store.set_checkerboard_pattern(checkerboard_dark);
-    store.set_checkerboard_pattern_light(checkerboard_light);
+
+    // Assign patterns to the modular ViewportState singleton
+    let viewport_state = app.global::<ViewportState>();
+    viewport_state.set_checkerboard_pattern(checkerboard_dark);
+    viewport_state.set_checkerboard_pattern_light(checkerboard_light);
 
     // Initialize state context variables from AppSettings
     update_viewer_settings(|s| {
@@ -211,8 +213,8 @@ pub fn run_gui() -> Result<()> {
     if !logs_to_flush.is_empty() {
         let app_weak_init = app.as_weak();
         let _ = app_weak_init.upgrade_in_event_loop(move |ui| {
-            let store = ui.global::<crate::app::Store>();
-            let mut current = store.get_console_log().to_string();
+            let diag = ui.global::<Diagnostics>();
+            let mut current = diag.get_console_log().to_string();
             for line in logs_to_flush {
                 let cleaned = clean_sample_log(line);
                 if current.is_empty() {
@@ -221,7 +223,7 @@ pub fn run_gui() -> Result<()> {
                     current = format!("{}\n{}", current, cleaned);
                 }
             }
-            store.set_console_log(current.into());
+            diag.set_console_log(current.into());
         });
     }
     drop(startup_q); // Release the startup logs lock early
@@ -248,8 +250,8 @@ pub fn run_gui() -> Result<()> {
 
             let app_clone = app_weak_log.clone();
             let _ = app_clone.upgrade_in_event_loop(move |ui| {
-                let store = ui.global::<Store>();
-                let current_log = store.get_console_log().to_string();
+                let diag = ui.global::<Diagnostics>();
+                let current_log = diag.get_console_log().to_string();
                 let mut lines: Vec<&str> = current_log.lines().collect();
 
                 for p in &pending {
@@ -262,7 +264,7 @@ pub fn run_gui() -> Result<()> {
                     lines = lines[start..].to_vec();
                 }
 
-                store.set_console_log(lines.join("\n").into());
+                diag.set_console_log(lines.join("\n").into());
             });
         }
     });
@@ -281,15 +283,15 @@ pub fn run_gui() -> Result<()> {
                 Some(ui) => ui,
                 None => return,
             };
-            let store = ui.global::<Store>();
+            let vp = ui.global::<ViewportState>();
 
-            if store.get_compare_mode() == 4 {
+            if vp.get_compare_mode() == 4 {
                 flicker_elapsed_ms += 10;
-                let target_duration = store.get_flicker_interval_val() as u64;
+                let target_duration = vp.get_flicker_interval_val() as u64;
 
                 if flicker_elapsed_ms >= target_duration.max(50) {
                     flicker_elapsed_ms = 0; // Reset ticker accumulation
-                    store.set_flicker_show_duplicate(!store.get_flicker_show_duplicate());
+                    vp.set_flicker_show_duplicate(!vp.get_flicker_show_duplicate());
                 }
             } else {
                 flicker_elapsed_ms = 0;
@@ -311,10 +313,10 @@ pub fn run_gui() -> Result<()> {
                 Some(ui) => ui,
                 None => return,
             };
-            let store = ui.global::<Store>();
-            let viewer = store.get_viewer();
+            let vp = ui.global::<ViewportState>();
+            let viewer = vp.get_viewer();
 
-            if store.get_play_flipbook() {
+            if vp.get_play_flipbook() {
                 let cols = viewer.grid_cols.max(1) as u32;
                 let rows = viewer.grid_rows.max(1) as u32;
                 let total_frames = cols * rows;
@@ -330,24 +332,25 @@ pub fn run_gui() -> Result<()> {
                     let current_frame = (frame_position.floor() as u32) % total_frames;
                     let blend_factor = frame_position.fract() as f32;
 
-                    store.set_active_frame(current_frame as i32);
+                    vp.set_active_frame(current_frame as i32);
                     if viewer.enable_frame_blending {
-                        store.set_blend_factor(blend_factor);
+                        vp.set_blend_factor(blend_factor);
                     } else {
-                        store.set_blend_factor(0.0);
+                        vp.set_blend_factor(0.0);
                     }
-                    store.invoke_active_frame_changed(); // Trigger viewport redraw updates
+                    vp.invoke_active_frame_changed(); // Trigger viewport redraw updates
                 }
             } else {
                 let fps = viewer.flipbook_fps.max(1.0) as f64;
                 let frame_duration_ms = 1000.0 / fps;
-                continuous_time_ms = store.get_active_frame() as f64 * frame_duration_ms;
+                continuous_time_ms = vp.get_active_frame() as f64 * frame_duration_ms;
             }
         },
     );
 
-    // Delegate callback hooks registration to handlers module
-    crate::handlers::register_callbacks(&app, state, cancel_token);
+    // Initialize our Controller pattern and wire all handlers
+    let controller = AppController::new(&app, state, cancel_token);
+    controller.register_callbacks();
 
     app.run()
         .context("Slint event loop terminated with an error")?;
@@ -355,32 +358,28 @@ pub fn run_gui() -> Result<()> {
 }
 
 fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
-    let search_method = if settings.qc.qc_mode {
-        4
-    } else {
-        settings.search_method
-    };
+    let scan_config = app.global::<ScanConfig>();
+    let viewport_state = app.global::<ViewportState>();
 
-    let store = app.global::<Store>();
+    // Apply grouped structures natively (zero conversions)
+    scan_config.set_paths(settings.paths.clone());
+    scan_config.set_extensions(settings.extensions.clone());
+    scan_config.set_ui(settings.ui.clone());
+    scan_config.set_visuals(settings.visuals.clone());
+    scan_config.set_prep(settings.prep.clone());
+    scan_config.set_qc(settings.qc.clone());
+    scan_config.set_ai(settings.ai.clone());
+    scan_config.set_preview(settings.preview.clone());
 
-    // Apply grouped structures directly
-    store.set_paths(settings.paths.clone());
-    store.set_extensions(settings.extensions.clone());
-    store.set_ui(settings.ui.clone());
-    store.set_visuals(settings.visuals.clone());
-    store.set_prep(settings.prep.clone());
-    store.set_qc(settings.qc.clone());
-    store.set_ai(settings.ai.clone());
-    store.set_tonemap(settings.tonemap.clone());
-    store.set_viewer(settings.viewer.clone());
-    store.set_preview(settings.preview.clone());
+    viewport_state.set_tonemap(settings.tonemap.clone());
+    viewport_state.set_viewer(settings.viewer.clone());
 
     // Apply global scalar settings
-    store.set_similarity_threshold(settings.similarity_threshold);
-    store.set_batch_size(settings.batch_size);
-    store.set_search_method(search_method);
-    store.set_execution_provider(settings.execution_provider);
-    store.set_search_precision(settings.search_precision);
+    scan_config.set_similarity_threshold(settings.similarity_threshold);
+    scan_config.set_batch_size(settings.batch_size);
+    scan_config.set_search_method(settings.search_method);
+    scan_config.set_execution_provider(settings.execution_provider);
+    scan_config.set_search_precision(settings.search_precision);
 
     crate::scanners::ENABLE_PREVIEWS.store(settings.preview.enable_previews, Ordering::Relaxed);
     crate::scanners::PREVIEW_QUALITY.store(settings.preview.preview_quality, Ordering::Relaxed);

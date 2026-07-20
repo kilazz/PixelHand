@@ -1,10 +1,10 @@
 // src/utils/viewport.rs
 
-use crate::app::{AppWindow, Store};
+use crate::app::{AppWindow, ViewportState};
 use crate::utils;
 use slint::ComponentHandle;
 
-struct ViewportState {
+struct ViewportStateParams {
     channel: String,
     compare_mode: i32,
     mip_level: u32,
@@ -27,21 +27,21 @@ pub fn trigger_viewport_update(
         Some(ui) => ui,
         None => return,
     };
-    let store = ui.global::<Store>();
-    let viewer = store.get_viewer();
+    let viewport_state = ui.global::<ViewportState>();
+    let viewer = viewport_state.get_viewer();
 
     // Extract thread-safe viewport settings to avoid capturing Slint handles inside async tasks
-    let params = ViewportState {
-        channel: utils::ui::get_current_active_channel(&store).to_string(),
-        compare_mode: store.get_compare_mode(),
-        mip_level: store.get_active_mip_level() as u32,
+    let params = ViewportStateParams {
+        channel: utils::ui::get_current_active_channel(&viewport_state).to_string(),
+        compare_mode: viewport_state.get_compare_mode(),
+        mip_level: viewport_state.get_active_mip_level() as u32,
         brightness: viewer.manual_brightness,
         contrast: viewer.manual_contrast,
         gamma: viewer.manual_gamma,
         ratio: viewer.aspect_ratio_modifier,
         grid_cols: viewer.grid_cols as u32,
         grid_rows: viewer.grid_rows as u32,
-        active_frame: store.get_active_frame() as u32,
+        active_frame: viewport_state.get_active_frame() as u32,
         enable_blending: viewer.enable_frame_blending,
     };
 
@@ -54,7 +54,7 @@ pub fn trigger_viewport_update(
 
     // Store state before asynchronous execution
     crate::app::update_viewer_settings(|s| {
-        let tonemap = store.get_tonemap();
+        let tonemap = viewport_state.get_tonemap();
         s.tonemap_enabled = tonemap.tonemap_enabled;
         s.auto_exposure_enabled = tonemap.tonemap_auto_exposure;
         s.tonemap_operator = tonemap.tonemap_operator as usize;
@@ -92,7 +92,6 @@ pub fn trigger_viewport_update(
         };
 
         // Offload ALL CPU-bound image operations to a dedicated blocking worker thread.
-        // We handle the result using a match block to completely eliminate the unwrap() panic risk.
         let result = tokio::task::spawn_blocking(move || {
             let mut o = raw_orig;
             let mut d = raw_dup;
@@ -226,32 +225,36 @@ pub fn trigger_viewport_update(
         match result {
             Ok((sprite_w, sprite_h, o, d, o_n, d_n, raw_diff, hist_img)) => {
                 let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
-                    let store = ui.global::<Store>();
-                    store.set_sprite_width(sprite_w);
-                    store.set_sprite_height(sprite_h);
-                    store.set_sprites_count(total_frames as i32);
+                    let viewport_state = ui.global::<ViewportState>();
+
+                    viewport_state.set_sprite_width(sprite_w);
+                    viewport_state.set_sprite_height(sprite_h);
+                    viewport_state.set_sprites_count(total_frames as i32);
 
                     if let Some(img) = o {
-                        store.set_image_original(utils::ui::convert_to_slint_image(&img));
+                        viewport_state.set_image_original(utils::ui::convert_to_slint_image(&img));
                     }
                     if let Some(img) = d {
-                        store.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
+                        viewport_state.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
                     }
 
                     if params.enable_blending {
                         if let Some(img) = o_n {
-                            store.set_image_original_next(utils::ui::convert_to_slint_image(&img));
+                            viewport_state
+                                .set_image_original_next(utils::ui::convert_to_slint_image(&img));
                         }
                         if let Some(img) = d_n {
-                            store.set_image_duplicate_next(utils::ui::convert_to_slint_image(&img));
+                            viewport_state
+                                .set_image_duplicate_next(utils::ui::convert_to_slint_image(&img));
                         }
                     }
 
                     if let Some(diff) = raw_diff {
-                        store.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
+                        viewport_state.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
                     }
                     if let Some(hist) = hist_img {
-                        store.set_histogram_image(utils::ui::convert_to_slint_image(&hist));
+                        viewport_state
+                            .set_histogram_image(utils::ui::convert_to_slint_image(&hist));
                     }
                 });
             }

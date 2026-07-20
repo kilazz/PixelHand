@@ -3,23 +3,39 @@
 import { CheckBox } from "std-widgets.slint";
 import { ResultsRow } from "../structs.slint";
 import { InteractiveThumbnail } from "./thumbnail.slint";
-import { Store } from "../store.slint";
 
 export component ListRow inherits Rectangle {
+    // Decoupled properties passed as inputs
     in property <ResultsRow> row-data;
+    in property <length> list-preview-size: 40px;
+    in property <bool> enable-previews: true;
+    in property <int> search-method: 0;
+    in property <image> checkerboard-pattern;
 
+    // Draggable Table Column Widths passed from the parent container
+    in property <length> col-file-w: 320px;
+    in property <length> col-score-w: 80px;
+    in property <length> col-path-w: 380px;
+    in property <length> col-format-w: 110px;
+    in property <length> col-dimensions-w: 110px;
+    in property <length> col-mipmaps-w: 75px;
+    in property <length> col-cubemap-w: 75px;
+    in property <length> col-size-w: 85px;
+
+    // Callbacks to emit context events to parent controllers
     callback row_clicked(bool, int, string);
     callback checkbox_toggled();
     callback right_clicked(length, length);
     callback channel_hovered(string, string);
+    callback delete_group_clicked(int);
 
-    height: row-data.is_header ? 28px : (Store.ui.list_preview_size + 8px);
+    height: row-data.is_header ? 28px : (root.list-preview-size + 8px);
     background: row-data.is_header ? #1e1f22 : (row-data.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
     border-color: #1f2023;
     border-width: 1px;
 
     main_row_ta := TouchArea {
-        x: 28px + 24px + 8px + Store.ui.list_preview_size + 8px;
+        x: 28px + 24px + 8px + root.list-preview-size + 8px;
         width: parent.width - self.x;
         height: 100%;
         clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
@@ -33,6 +49,7 @@ export component ListRow inherits Rectangle {
     if row-data.is_header: Rectangle {
         background: transparent;
 
+        // Click anywhere else to expand/collapse
         header_ta := TouchArea {
             width: 100%;
             height: 100%;
@@ -53,6 +70,7 @@ export component ListRow inherits Rectangle {
                 alignment: start;
                 cross-axis-alignment: center;
 
+                // Expand/Collapse arrow icon
                 Text {
                     text: row-data.is_checked ? "▶" : "▼";
                     color: #949ba4;
@@ -60,11 +78,12 @@ export component ListRow inherits Rectangle {
                     vertical-alignment: center;
                 }
 
+                // Inline Trash action placed right at the front for ergonomic reasons
                 trash_ta := TouchArea {
                     width: 22px;
                     height: 22px;
                     mouse-cursor: pointer;
-                    clicked => { Store.context_menu_action("trash_group", "\{row-data.group_index}"); }
+                    clicked => { root.delete_group_clicked(row-data.group_index); }
                     Rectangle {
                         width: 100%;
                         height: 100%;
@@ -79,6 +98,7 @@ export component ListRow inherits Rectangle {
                     }
                 }
 
+                // Group details label
                 Text {
                     text: row-data.is_qc ? ("QC Issue: " + row-data.hash_or_issue) : ("Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
                     color: header_ta.has-hover ? #ffffff : #949ba4;
@@ -113,17 +133,17 @@ export component ListRow inherits Rectangle {
             width: 8px;
         }
 
-        if Store.preview.enable_previews: InteractiveThumbnail {
+        if root.enable-previews: InteractiveThumbnail {
             source: row-data.thumbnail;
             path: row-data.path;
             show_corners: true;
-            checkerboard: Store.checkerboard_pattern;
-            width: Store.ui.list_preview_size;
-            height: Store.ui.list_preview_size;
+            checkerboard: root.checkerboard-pattern;
+            width: root.list-preview-size;
+            height: root.list-preview-size;
             corner_hovered(path, chan) => { root.channel_hovered(path, chan); }
             clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
         }
-        if Store.preview.enable_previews: Rectangle {
+        if root.enable-previews: Rectangle {
             width: 8px;
         }
 
@@ -135,7 +155,7 @@ export component ListRow inherits Rectangle {
                 height: 100%;
 
                 HorizontalLayout {
-                    width: Store.preview.enable_previews ? (Store.col_file_w - Store.ui.list_preview_size - 8px) : Store.col_file_w;
+                    width: root.enable-previews ? (root.col-file-w - root.list-preview-size - 8px) : root.col-file-w;
                     Text {
                         text: row-data.name;
                         color: #dcddde;
@@ -149,10 +169,10 @@ export component ListRow inherits Rectangle {
                     width: 8px;
                 }
 
-                if Store.search_method != 3: HorizontalLayout {
+                if root.search-method != 3: HorizontalLayout {
                     spacing: 0px;
                     HorizontalLayout {
-                        width: Store.col_score_w;
+                        width: root.col-score-w;
                         Text {
                             text: row-data.is_best ? "[Best]" : row-data.score_or_detail;
                             color: row-data.is_best ? #f0b132 : #dcddde;
@@ -168,7 +188,7 @@ export component ListRow inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        width: Store.col_path_w;
+                        width: root.col-path-w;
                         Text {
                             text: row-data.path;
                             color: #949ba4;
@@ -194,10 +214,10 @@ export component ListRow inherits Rectangle {
                     }
                 }
 
-                if Store.search_method == 3: HorizontalLayout {
+                if root.search-method == 3: HorizontalLayout {
                     spacing: 0px;
                     HorizontalLayout {
-                        width: Store.col_format_w;
+                        width: root.col-format-w;
                         Text {
                             text: row-data.format_str;
                             color: #dcddde;
@@ -211,7 +231,7 @@ export component ListRow inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        width: Store.col_dimensions_w;
+                        width: root.col-dimensions-w;
                         Text {
                             text: row-data.dimensions_str;
                             color: #dcddde;
@@ -225,7 +245,7 @@ export component ListRow inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        width: Store.col_mipmaps_w;
+                        width: root.col-mipmaps-w;
                         Text {
                             text: row-data.mipmaps_str;
                             color: #dcddde;
@@ -239,7 +259,7 @@ export component ListRow inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        width: Store.col_cubemap_w;
+                        width: root.col-cubemap-w;
                         Text {
                             text: row-data.cubemap_str;
                             color: row-data.cubemap_str == "YES" ? #f0b132 : #dcddde;
@@ -254,7 +274,7 @@ export component ListRow inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        width: Store.col_size_w;
+                        width: root.col-size-w;
                         Text {
                             text: row-data.size_str;
                             color: #dcddde;

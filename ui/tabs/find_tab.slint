@@ -14,7 +14,7 @@ import {
 } from "std-widgets.slint";
 
 import { ResultsRow, SelectedFile, GridRow } from "../structs.slint";
-import { Store } from "../store.slint";
+import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
 import {
     TabButton,
     ChannelButton,
@@ -58,7 +58,7 @@ export component FindTab inherits HorizontalLayout {
 
         sidebar-splitter-ta := TouchArea {
             mouse-cursor: MouseCursor.col-resize;
-            moved => { if (self.pressed) { Store.ui.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); } }
+            moved => { if (self.pressed) { ScanConfig.ui.sidebar_width = (self.x + self.mouse-x - self.pressed-x).clamp(320px, 600px); } }
         }
     }
 
@@ -77,7 +77,7 @@ export component FindTab inherits HorizontalLayout {
                 HorizontalLayout {
                     spacing: 12px;
                     Text {
-                        text: "Results (" + Store.results.length + " items)";
+                        text: "Results (" + ScanConfig.results.length + " items)";
                         font-size: 14px;
                         font-weight: 700;
                         color: #ffffff;
@@ -85,57 +85,57 @@ export component FindTab inherits HorizontalLayout {
                     }
 
                     LineEdit {
-                        text <=> Store.results_search_query;
+                        text <=> ScanConfig.results_search_query;
                         placeholder-text: "Filter by name...";
                         height: 24px;
                         width: 130px;
-                        edited => { Store.results_filter_changed(); }
+                        edited => { ScanConfig.results_filter_changed(); }
                     }
 
                     ComboBox {
-                        model: Store.search_method == 3 ? ["By Format Type", "By Size on Disk", "By Filename"] : ["By Duplicate Count", "By Size on Disk", "By Filename"];
-                        current-index <=> Store.results_sort_index;
+                        model: ScanConfig.search_method == 3 ? ["By Format Type", "By Size on Disk", "By Filename"] : ["By Duplicate Count", "By Size on Disk", "By Filename"];
+                        current-index <=> ScanConfig.results_sort_index;
                         height: 24px;
                         width: 145px;
-                        selected(val) => { Store.results_sort_changed(Store.results_sort_index); }
+                        selected(val) => { ScanConfig.results_sort_changed(ScanConfig.results_sort_index); }
                     }
 
-                    if !Store.results_grid_mode && Store.has_results: CustomButton {
+                    if !ScanConfig.results_grid_mode && ScanConfig.has_results: CustomButton {
                         text: "Expand All";
                         height: 24px;
                         primary-color: #474747;
-                        clicked => { Store.expand_all_groups(); }
+                        clicked => { ScanConfig.expand_all_groups(); }
                     }
 
-                    if !Store.results_grid_mode && Store.has_results: CustomButton {
+                    if !ScanConfig.results_grid_mode && ScanConfig.has_results: CustomButton {
                         text: "Collapse All";
                         height: 24px;
                         primary-color: #474747;
-                        clicked => { Store.collapse_all_groups(); }
+                        clicked => { ScanConfig.collapse_all_groups(); }
                     }
 
-                    if Store.has_results: CustomButton {
+                    if ScanConfig.has_results: CustomButton {
                         text: "Auto Cols";
                         height: 24px;
                         primary-color: #474747;
-                        clicked => { Store.auto_size_columns(); }
+                        clicked => { ScanConfig.auto_size_columns(); }
                     }
 
-                    if Store.has_results: CustomButton {
+                    if ScanConfig.has_results: CustomButton {
                         text: "Reset Cols";
                         height: 24px;
                         primary-color: #474747;
-                        clicked => { Store.reset_size_columns(); }
+                        clicked => { ScanConfig.reset_size_columns(); }
                     }
 
-                    if Store.has_results: CustomButton {
+                    if ScanConfig.has_results: CustomButton {
                         text: "Export CSV";
                         height: 24px;
                         primary-color: #3e6a90;
-                        clicked => { Store.export_csv(); }
+                        clicked => { Diagnostics.export_csv(); }
                     }
 
-                    if Store.search_method == 2: HorizontalLayout {
+                    if ScanConfig.search_method == 2: HorizontalLayout {
                         spacing: 6px;
                         Text {
                             text: "Min Sim:";
@@ -145,16 +145,16 @@ export component FindTab inherits HorizontalLayout {
                         }
 
                         Slider {
-                            value <=> Store.results_min_similarity;
+                            value <=> ScanConfig.results_min_similarity;
                             minimum: 0.0;
                             maximum: 100.0;
                             width: 80px;
                             height: 24px;
-                            changed(val) => { Store.results_filter_changed(); }
+                            changed(val) => { ScanConfig.results_filter_changed(); }
                         }
 
                         Text {
-                            text: Math.round(Store.results_min_similarity) + "%";
+                            text: Math.round(ScanConfig.results_min_similarity) + "%";
                             vertical-alignment: center;
                             font-size: 12px;
                             color: #ffffff;
@@ -165,22 +165,22 @@ export component FindTab inherits HorizontalLayout {
 
                 HorizontalLayout {
                     spacing: 8px;
-                    if Store.skipped_files_list.length > 0: CustomButton {
-                        text: "⚠️ Skipped Files (" + Store.skipped_files_list.length + ")";
+                    if Diagnostics.skipped_files_list.length > 0: CustomButton {
+                        text: "⚠️ Skipped Files (" + Diagnostics.skipped_files_list.length + ")";
                         primary-color: #aa3838;
                         height: 24px;
                         clicked => { root.show_skipped_popup(self.absolute-position.x - 120px, self.absolute-position.y + self.height); }
                     }
                     CustomButton {
-                        text: Store.results_grid_mode ? "List Mode" : "Grid Mode";
-                        icon-type: Store.results_grid_mode ? 2 : 3;
+                        text: ScanConfig.results_grid_mode ? "List Mode" : "Grid Mode";
+                        icon-type: ScanConfig.results_grid_mode ? 2 : 3;
                         height: 24px;
-                        clicked => { Store.results_grid_mode = !Store.results_grid_mode; }
+                        clicked => { ScanConfig.results_grid_mode = !ScanConfig.results_grid_mode; }
                     }
                 }
             }
 
-            if Store.has_results: HorizontalLayout {
+            if ScanConfig.has_results: HorizontalLayout {
                 spacing: 12px;
                 padding-left: 4px;
                 padding-bottom: 4px;
@@ -194,26 +194,26 @@ export component FindTab inherits HorizontalLayout {
 
                 CheckBox {
                     text: "NPOT Only";
-                    checked <=> Store.preview.filter_only_npot;
-                    toggled => { Store.results_filter_changed(); }
+                    checked <=> ScanConfig.preview.filter_only_npot;
+                    toggled => { ScanConfig.results_filter_changed(); }
                 }
 
                 CheckBox {
                     text: "Uncompressed Only";
-                    checked <=> Store.preview.filter_only_uncompressed;
-                    toggled => { Store.results_filter_changed(); }
+                    checked <=> ScanConfig.preview.filter_only_uncompressed;
+                    toggled => { ScanConfig.results_filter_changed(); }
                 }
 
                 CheckBox {
                     text: "Missing Mips Only";
-                    checked <=> Store.preview.filter_only_missing_mips;
-                    toggled => { Store.results_filter_changed(); }
+                    checked <=> ScanConfig.preview.filter_only_missing_mips;
+                    toggled => { ScanConfig.results_filter_changed(); }
                 }
 
                 CheckBox {
                     text: "Cubemaps Only";
-                    checked <=> Store.preview.filter_only_cubemaps;
-                    toggled => { Store.results_filter_changed(); }
+                    checked <=> ScanConfig.preview.filter_only_cubemaps;
+                    toggled => { ScanConfig.results_filter_changed(); }
                 }
             }
 
@@ -227,35 +227,51 @@ export component FindTab inherits HorizontalLayout {
                 clip: true;
 
                 VerticalLayout {
-                    if !Store.results_grid_mode && Store.results.length > 0: TableHeader { }
-                    if !Store.results_grid_mode && Store.results.length > 0: ListView {
-                        for row[idx] in Store.results: ListRow {
+                    if !ScanConfig.results_grid_mode && ScanConfig.results.length > 0: TableHeader { }
+                    if !ScanConfig.results_grid_mode && ScanConfig.results.length > 0: ListView {
+                        for row[idx] in ScanConfig.results: ListRow {
                             row-data: row;
-                            row_clicked(is_header, grp_idx, pth) => { Store.row_clicked(idx, is_header, grp_idx, pth); if !is_header { Store.active_tab = 1; } }
-                            checkbox_toggled() => { Store.row_checkbox_toggled(idx); }
+
+                            // Clean decoupled parameters mapping
+                            list-preview-size: ScanConfig.ui.list_preview_size;
+                            enable-previews: ScanConfig.preview.enable_previews;
+                            search-method: ScanConfig.search_method;
+                            checkerboard-pattern: ViewportState.checkerboard_pattern;
+                            col-file-w: ScanConfig.col_file_w;
+                            col-score-w: ScanConfig.col_score_w;
+                            col-path-w: ScanConfig.col_path_w;
+                            col-format-w: ScanConfig.col_format_w;
+                            col-dimensions-w: ScanConfig.col_dimensions_w;
+                            col-mipmaps-w: ScanConfig.col_mipmaps_w;
+                            col-cubemap-w: ScanConfig.col_cubemap_w;
+                            col-size-w: ScanConfig.col_size_w;
+
+                            row_clicked(is_header, grp_idx, pth) => { ScanConfig.row_clicked(idx, is_header, grp_idx, pth); if !is_header { Diagnostics.active_tab = 1; } }
+                            checkbox_toggled() => { ScanConfig.row_checkbox_toggled(idx); }
                             right_clicked(mx, my) => { root.show_context_menu(mx, my, row.path); }
-                            channel_hovered(pth, chan) => { Store.thumbnail_channel_hovered(pth, chan); }
+                            channel_hovered(pth, chan) => { ScanConfig.thumbnail_channel_hovered(pth, chan); }
+                            delete_group_clicked(grp_idx) => { ScanConfig.context_menu_action("trash_group", "\{grp_idx}"); }
                         }
                     }
-                    if Store.results_grid_mode && Store.grid_row_results.length > 0: ListView {
-                        for row in Store.grid_row_results: HorizontalLayout {
+                    if ScanConfig.results_grid_mode && ScanConfig.grid_row_results.length > 0: ListView {
+                        for row in ScanConfig.grid_row_results: HorizontalLayout {
                             spacing: 12px;
                             padding: 10px;
                             alignment: start;
 
                             for item in row.items: GridCard {
                                 row-data: item;
-                                checkerboard: Store.checkerboard_pattern;
-                                width: Store.ui.grid_card_size;
-                                height: Store.ui.grid_card_size + 45px;
-                                clicked => { Store.row_clicked(-1, false, item.group_index, item.path); Store.active_tab = 1; }
+                                checkerboard: ViewportState.checkerboard_pattern;
+                                width: ScanConfig.ui.grid_card_size;
+                                height: ScanConfig.ui.grid_card_size + 45px;
+                                clicked => { ScanConfig.row_clicked(-1, false, item.group_index, item.path); Diagnostics.active_tab = 1; }
                                 right_clicked(mx, my) => { root.show_context_menu(mx, my, item.path); }
-                                channel_hovered(path, chan) => { Store.thumbnail_channel_hovered(path, chan); }
+                                channel_hovered(path, chan) => { ScanConfig.thumbnail_channel_hovered(path, chan); }
                             }
                         }
                     }
 
-                    if !Store.has_results: VerticalLayout {
+                    if !ScanConfig.has_results: VerticalLayout {
                         alignment: center;
                         spacing: 12px;
                         Text {
@@ -267,7 +283,7 @@ export component FindTab inherits HorizontalLayout {
                         }
                     }
 
-                    if Store.has_results && Store.results.length == 0: VerticalLayout {
+                    if ScanConfig.has_results && ScanConfig.results.length == 0: VerticalLayout {
                         alignment: center;
                         spacing: 12px;
                         Text {
@@ -305,25 +321,25 @@ export component FindTab inherits HorizontalLayout {
                     CustomButton {
                         text: "Select All";
                         primary-color: #474747;
-                        clicked => { Store.trigger_selection_rule("all"); }
+                        clicked => { ScanConfig.trigger_selection_rule("all"); }
                     }
 
                     CustomButton {
                         text: "Deselect All";
                         primary-color: #474747;
-                        clicked => { Store.trigger_selection_rule("none"); }
+                        clicked => { ScanConfig.trigger_selection_rule("none"); }
                     }
 
                     CustomButton {
                         text: "Select All Except Best";
                         primary-color: #474747;
-                        clicked => { Store.trigger_selection_rule("except_best"); }
+                        clicked => { ScanConfig.trigger_selection_rule("except_best"); }
                     }
 
                     CustomButton {
                         text: "Invert Selection";
                         primary-color: #474747;
-                        clicked => { Store.trigger_selection_rule("invert"); }
+                        clicked => { ScanConfig.trigger_selection_rule("invert"); }
                     }
                 }
             }
@@ -335,13 +351,13 @@ export component FindTab inherits HorizontalLayout {
             CustomButton {
                 text: "Replace with Hardlink";
                 primary-color: #3e6a90;
-                clicked => { Store.trigger_action("hardlink"); }
+                clicked => { ScanConfig.trigger_action("hardlink"); }
             }
 
             CustomButton {
                 text: "Replace with Reflink";
                 primary-color: #3e6a90;
-                clicked => { Store.trigger_action("reflink"); }
+                clicked => { ScanConfig.trigger_action("reflink"); }
             }
 
             Rectangle {
@@ -351,7 +367,7 @@ export component FindTab inherits HorizontalLayout {
             CustomButton {
                 text: "Move to Trash";
                 primary-color: #aa3838;
-                clicked => { Store.trigger_action("trash"); }
+                clicked => { ScanConfig.trigger_action("trash"); }
             }
         }
     }

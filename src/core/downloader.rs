@@ -227,19 +227,19 @@ pub async fn verify_and_download_models(
             let app_copy = app_weak.clone();
             let file_name = name.to_string();
 
-            // Force scanning banner to show so the user sees progress
+            // Force scanning banner to show progress via the Diagnostics singleton
             let _ = app_copy.upgrade_in_event_loop(|ui| {
-                let store = ui.global::<crate::app::Store>();
-                store.set_is_scanning(true);
+                let diag = ui.global::<crate::app::Diagnostics>();
+                diag.set_is_scanning(true);
             });
 
             let download_res = download_file_with_progress(
                 move |percentage| {
                     let f_name = file_name.clone();
                     let _ = app_copy.upgrade_in_event_loop(move |ui| {
-                        let store = ui.global::<crate::app::Store>();
-                        store.set_progress(percentage / 100.0);
-                        store.set_status_text(
+                        let diag = ui.global::<crate::app::Diagnostics>();
+                        diag.set_progress(percentage / 100.0);
+                        diag.set_status_text(
                             format!("Downloading {}: {:.1}%", f_name, percentage).into(),
                         );
                     });

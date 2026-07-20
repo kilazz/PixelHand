@@ -1,7 +1,7 @@
 // ui/tabs/log_tab.slint
 
 import { TextEdit } from "std-widgets.slint";
-import { Store } from "../store.slint";
+import { Diagnostics } from "../store.slint";
 import { CustomButton } from "../components/buttons.slint";
 
 export component LogTab inherits VerticalLayout {
@@ -18,7 +18,7 @@ export component LogTab inherits VerticalLayout {
     }
 
     TextEdit {
-        text <=> Store.console_log;
+        text <=> Diagnostics.console_log;
         read-only: true;
         font-family: "Consolas";
         font-size: 12px;
@@ -31,13 +31,13 @@ export component LogTab inherits VerticalLayout {
         CustomButton {
             text: "Export Log Output...";
             primary-color: #3e6a90;
-            clicked => { Store.export_log(Store.console_log); }
+            clicked => { Diagnostics.export_log(Diagnostics.console_log); }
         }
 
         CustomButton {
             text: "Clear Console Buffer";
             primary-color: #474747;
-            clicked => { Store.console_log = "Buffer cleared."; }
+            clicked => { Diagnostics.console_log = "Buffer cleared."; }
         }
 
         Rectangle {

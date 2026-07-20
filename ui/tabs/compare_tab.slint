@@ -12,7 +12,7 @@ import {
 } from "std-widgets.slint";
 
 import { ResultsRow, SelectedFile, GridRow } from "../structs.slint";
-import { Store } from "../store.slint";
+import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
 import {
     TabButton,
     ChannelButton,
@@ -52,12 +52,12 @@ export component CompareTab inherits HorizontalLayout {
                     "Difference Heatmap",
                     "Flicker Mode"
                 ];
-                current-index <=> Store.compare_mode;
+                current-index <=> ViewportState.compare_mode;
                 width: 160px;
-                selected(val) => { Store.compare_mode_changed(); }
+                selected(val) => { ViewportState.compare_mode_changed(); }
             }
 
-            if Store.compare_mode == 1 || Store.compare_mode == 2: HorizontalLayout {
+            if ViewportState.compare_mode == 1 || ViewportState.compare_mode == 2: HorizontalLayout {
                 spacing: 8px;
                 horizontal-stretch: 0;
                 Text {
@@ -68,14 +68,14 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Slider {
-                    value <=> Store.wipe_slider_val;
+                    value <=> ViewportState.wipe_slider_val;
                     minimum: 0.0;
                     maximum: 1.0;
                     height: 24px;
                     width: 120px;
                 }
             }
-            if Store.compare_mode == 4: HorizontalLayout {
+            if ViewportState.compare_mode == 4: HorizontalLayout {
                 spacing: 8px;
                 horizontal-stretch: 0;
                 Text {
@@ -86,7 +86,7 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Slider {
-                    value <=> Store.flicker_interval_val;
+                    value <=> ViewportState.flicker_interval_val;
                     minimum: 30.0;
                     maximum: 2000.0;
                     height: 24px;
@@ -94,7 +94,7 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Text {
-                    text: Math.round(Store.flicker_interval_val) + "ms";
+                    text: Math.round(ViewportState.flicker_interval_val) + "ms";
                     vertical-alignment: center;
                     font-size: 11px;
                     color: #cfcfcf;
@@ -108,35 +108,35 @@ export component CompareTab inherits HorizontalLayout {
                     text: "Mip Level:";
                     vertical-alignment: center;
                     font-size: 12px;
-                    color: Store.max_available_mips > 1 ? #cfcfcf : #555555;
+                    color: ViewportState.max_available_mips > 1 ? #cfcfcf : #555555;
                 }
 
                 SpinBox {
-                    value: Store.active_mip_level;
+                    value: ViewportState.active_mip_level;
                     minimum: 0;
-                    maximum: Store.max_available_mips > 1 ? Store.max_available_mips - 1 : 0;
+                    maximum: ViewportState.max_available_mips > 1 ? ViewportState.max_available_mips - 1 : 0;
                     height: 24px;
                     width: 100px;
-                    enabled: Store.max_available_mips > 1;
-                    edited(val) => { Store.active_mip_level = val; Store.mip_level_changed(); }
+                    enabled: ViewportState.max_available_mips > 1;
+                    edited(val) => { ViewportState.active_mip_level = val; ViewportState.mip_level_changed(); }
                 }
             }
 
             CheckBox {
                 text: "HDR";
-                checked <=> Store.tonemap.tonemap_enabled;
+                checked <=> ViewportState.tonemap.tonemap_enabled;
                 height: 24px;
-                toggled => { Store.tonemap_toggled(); }
+                toggled => { ViewportState.tonemap_toggled(); }
             }
 
-            if Store.tonemap.tonemap_enabled: CheckBox {
+            if ViewportState.tonemap.tonemap_enabled: CheckBox {
                 text: "Auto Exp";
-                checked <=> Store.tonemap.tonemap_auto_exposure;
+                checked <=> ViewportState.tonemap.tonemap_auto_exposure;
                 height: 24px;
-                toggled => { Store.tonemap_toggled(); }
+                toggled => { ViewportState.tonemap_toggled(); }
             }
 
-            if Store.tonemap.tonemap_enabled: ComboBox {
+            if ViewportState.tonemap.tonemap_enabled: ComboBox {
                 model: [
                     "None",
                     "False Color",
@@ -146,10 +146,10 @@ export component CompareTab inherits HorizontalLayout {
                     "ICtCp BT.2446c",
                     "ICtCp Lumina"
                 ];
-                current-index <=> Store.tonemap.tonemap_operator;
+                current-index <=> ViewportState.tonemap.tonemap_operator;
                 height: 24px;
                 width: 165px;
-                selected(val) => { Store.tonemap_toggled(); }
+                selected(val) => { ViewportState.tonemap_toggled(); }
             }
 
             Rectangle {
@@ -162,13 +162,13 @@ export component CompareTab inherits HorizontalLayout {
 
                 // Zoom Input SpinBox
                 SpinBox {
-                    value: Math.round(Store.zoom_factor * 100);
+                    value: Math.round(ViewportState.zoom_factor * 100);
                     minimum: 10;
                     maximum: 1000;
                     height: 24px;
                     width: 100px;
                     edited(val) => {
-                        Store.zoom_factor = val / 100.0;
+                        ViewportState.zoom_factor = val / 100.0;
                     }
                 }
 
@@ -184,12 +184,12 @@ export component CompareTab inherits HorizontalLayout {
                     text: "Fit";
                     height: 24px;
                     width: 45px;
-                    primary-color: Store.viewer.fit_to_window ? #3e6a90 : #474747;
+                    primary-color: ViewportState.viewer.fit_to_window ? #3e6a90 : #474747;
                     clicked => {
-                        Store.viewer.fit_to_window = true;
-                        Store.zoom_factor = 1.0;
-                        Store.pan_x = 0px;
-                        Store.pan_y = 0px;
+                        ViewportState.viewer.fit_to_window = true;
+                        ViewportState.zoom_factor = 1.0;
+                        ViewportState.pan_x = 0px;
+                        ViewportState.pan_y = 0px;
                     }
                 }
 
@@ -198,12 +198,12 @@ export component CompareTab inherits HorizontalLayout {
                     text: "1:1";
                     height: 24px;
                     width: 45px;
-                    primary-color: !Store.viewer.fit_to_window ? #3e6a90 : #474747;
+                    primary-color: !ViewportState.viewer.fit_to_window ? #3e6a90 : #474747;
                     clicked => {
-                        Store.viewer.fit_to_window = false;
-                        Store.zoom_factor = 1.0;
-                        Store.pan_x = 0px;
-                        Store.pan_y = 0px;
+                        ViewportState.viewer.fit_to_window = false;
+                        ViewportState.zoom_factor = 1.0;
+                        ViewportState.pan_x = 0px;
+                        ViewportState.pan_y = 0px;
                     }
                 }
 
@@ -213,10 +213,10 @@ export component CompareTab inherits HorizontalLayout {
                     height: 24px;
                     primary-color: #474747;
                     clicked => {
-                        Store.viewer.fit_to_window = true;
-                        Store.zoom_factor = 1.0;
-                        Store.pan_x = 0px;
-                        Store.pan_y = 0px;
+                        ViewportState.viewer.fit_to_window = true;
+                        ViewportState.zoom_factor = 1.0;
+                        ViewportState.pan_x = 0px;
+                        ViewportState.pan_y = 0px;
                     }
                 }
             }
@@ -235,12 +235,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             SpinBox {
-                value <=> Store.viewer.grid_cols;
+                value <=> ViewportState.viewer.grid_cols;
                 minimum: 1;
                 maximum: 64;
                 height: 24px;
                 width: 90px;
-                edited(val) => { Store.viewer.grid_cols = val; Store.active_frame_changed(); }
+                edited(val) => { ViewportState.viewer.grid_cols = val; ViewportState.active_frame_changed(); }
             }
 
             Text {
@@ -251,12 +251,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             SpinBox {
-                value <=> Store.viewer.grid_rows;
+                value <=> ViewportState.viewer.grid_rows;
                 minimum: 1;
                 maximum: 64;
                 height: 24px;
                 width: 90px;
-                edited(val) => { Store.viewer.grid_rows = val; Store.active_frame_changed(); }
+                edited(val) => { ViewportState.viewer.grid_rows = val; ViewportState.active_frame_changed(); }
             }
 
             Rectangle {
@@ -278,10 +278,10 @@ export component CompareTab inherits HorizontalLayout {
 
             ComboBox {
                 model: ["Dark Checkerboard", "Light Checkerboard", "Solid Black", "Solid White"];
-                current-index <=> Store.viewer.background_mode;
+                current-index <=> ViewportState.viewer.background_mode;
                 height: 24px;
                 width: 135px;
-                selected(val) => { Store.active_frame_changed(); }
+                selected(val) => { ViewportState.active_frame_changed(); }
             }
 
             Text {
@@ -292,12 +292,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.viewer.manual_brightness;
+                value <=> ViewportState.viewer.manual_brightness;
                 minimum: 0.1;
                 maximum: 3.0;
                 height: 24px;
                 width: 100px;
-                changed(val) => { Store.active_frame_changed(); }
+                changed(val) => { ViewportState.active_frame_changed(); }
             }
 
             Text {
@@ -308,12 +308,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.viewer.manual_contrast;
+                value <=> ViewportState.viewer.manual_contrast;
                 minimum: 0.1;
                 maximum: 3.0;
                 height: 24px;
                 width: 100px;
-                changed(val) => { Store.active_frame_changed(); }
+                changed(val) => { ViewportState.active_frame_changed(); }
             }
 
             Text {
@@ -324,12 +324,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.viewer.manual_gamma;
+                value <=> ViewportState.viewer.manual_gamma;
                 minimum: 0.1;
                 maximum: 3.0;
                 height: 24px;
                 width: 100px;
-                changed(val) => { Store.active_frame_changed(); }
+                changed(val) => { ViewportState.active_frame_changed(); }
             }
 
             Text {
@@ -340,12 +340,12 @@ export component CompareTab inherits HorizontalLayout {
             }
 
             Slider {
-                value <=> Store.viewer.aspect_ratio_modifier;
+                value <=> ViewportState.viewer.aspect_ratio_modifier;
                 minimum: 0.2;
                 maximum: 3.0;
                 height: 24px;
                 width: 100px;
-                changed(val) => { Store.active_frame_changed(); }
+                changed(val) => { ViewportState.active_frame_changed(); }
             }
 
             CustomButton {
@@ -353,11 +353,11 @@ export component CompareTab inherits HorizontalLayout {
                 height: 24px;
                 primary-color: #474747;
                 clicked => {
-                    Store.viewer.manual_brightness = 1.0;
-                    Store.viewer.manual_contrast = 1.0;
-                    Store.viewer.manual_gamma = 1.0;
-                    Store.viewer.aspect_ratio_modifier = 1.0;
-                    Store.active_frame_changed();
+                    ViewportState.viewer.manual_brightness = 1.0;
+                    ViewportState.viewer.manual_contrast = 1.0;
+                    ViewportState.viewer.manual_gamma = 1.0;
+                    ViewportState.viewer.aspect_ratio_modifier = 1.0;
+                    ViewportState.active_frame_changed();
                 }
             }
 
@@ -370,7 +370,7 @@ export component CompareTab inherits HorizontalLayout {
         InteractiveCompareViewport { }
 
         // FIXED BOTTOM TIMELINE PLAYER
-        if Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1: Rectangle {
+        if ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1: Rectangle {
             height: 38px;
             background: #1e1e1e;
             border-color: #353535;
@@ -397,8 +397,8 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            Store.active_frame = 0;
-                            Store.active_frame_changed();
+                            ViewportState.active_frame = 0;
+                            ViewportState.active_frame_changed();
                         }
                     }
 
@@ -410,20 +410,20 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            Store.active_frame = Math.max(0, Store.active_frame - 1);
-                            Store.active_frame_changed();
+                            ViewportState.active_frame = Math.max(0, ViewportState.active_frame - 1);
+                            ViewportState.active_frame_changed();
                         }
                     }
 
                     // Play / Pause
                     CustomButton {
-                        text: Store.play_flipbook ? "||" : ">";
+                        text: ViewportState.play_flipbook ? "||" : ">";
                         height: 24px;
                         width: 28px;
                         compact: true;
-                        primary-color: Store.play_flipbook ? #aa3838 : #23a55a;
+                        primary-color: ViewportState.play_flipbook ? #aa3838 : #23a55a;
                         clicked => {
-                            Store.play_flipbook = !Store.play_flipbook;
+                            ViewportState.play_flipbook = !ViewportState.play_flipbook;
                         }
                     }
 
@@ -435,9 +435,9 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
-                            Store.active_frame = Math.min(total_frames - 1, Store.active_frame + 1);
-                            Store.active_frame_changed();
+                            let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
+                            ViewportState.active_frame = Math.min(total_frames - 1, ViewportState.active_frame + 1);
+                            ViewportState.active_frame_changed();
                         }
                     }
 
@@ -449,23 +449,23 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
-                            Store.active_frame = total_frames - 1;
-                            Store.active_frame_changed();
+                            let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
+                            ViewportState.active_frame = total_frames - 1;
+                            ViewportState.active_frame_changed();
                         }
                     }
                 }
 
                 // Current Frame Input
                 SpinBox {
-                    value: Store.active_frame + 1;
+                    value: ViewportState.active_frame + 1;
                     minimum: 1;
-                    maximum: Math.max(1, Store.viewer.grid_cols * Store.viewer.grid_rows);
+                    maximum: Math.max(1, ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows);
                     height: 24px;
                     width: 90px;
                     edited(val) => {
-                        Store.active_frame = val - 1;
-                        Store.active_frame_changed();
+                        ViewportState.active_frame = val - 1;
+                        ViewportState.active_frame_changed();
                     }
                 }
 
@@ -478,13 +478,13 @@ export component CompareTab inherits HorizontalLayout {
 
                 // FPS Input
                 SpinBox {
-                    value: Math.round(Store.viewer.flipbook_fps);
+                    value: Math.round(ViewportState.viewer.flipbook_fps);
                     minimum: 1;
                     maximum: 144;
                     height: 24px;
                     width: 90px;
                     edited(val) => {
-                        Store.viewer.flipbook_fps = val;
+                        ViewportState.viewer.flipbook_fps = val;
                     }
                 }
 
@@ -504,7 +504,7 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Slider {
-                    value <=> Store.viewer.play_speed;
+                    value <=> ViewportState.viewer.play_speed;
                     minimum: 0.1;
                     maximum: 4.0;
                     height: 24px;
@@ -512,7 +512,7 @@ export component CompareTab inherits HorizontalLayout {
                 }
 
                 Text {
-                    text: (Math.round(Store.viewer.play_speed * 10) / 10) + "x";
+                    text: (Math.round(ViewportState.viewer.play_speed * 10) / 10) + "x";
                     font-size: 11px;
                     color: #ffffff;
                     vertical-alignment: center;
@@ -522,7 +522,7 @@ export component CompareTab inherits HorizontalLayout {
                 // Frame Blending CheckBox
                 CheckBox {
                     text: "Blend";
-                    checked <=> Store.viewer.enable_frame_blending;
+                    checked <=> ViewportState.viewer.enable_frame_blending;
                     height: 24px;
                 }
 
@@ -541,7 +541,7 @@ export component CompareTab inherits HorizontalLayout {
                         // Fill bar
                         Rectangle {
                             x: 0px;
-                            width: parent.width * (Store.active_frame / Math.max(1, (Store.viewer.grid_cols * Store.viewer.grid_rows) - 1));
+                            width: parent.width * (ViewportState.active_frame / Math.max(1, (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows) - 1));
                             height: 100%;
                             background: #e59535;
                             border-radius: 5px;
@@ -549,7 +549,7 @@ export component CompareTab inherits HorizontalLayout {
 
                         // Handle
                         Rectangle {
-                            x: (parent.width - self.width) * (Store.active_frame / Math.max(1, (Store.viewer.grid_cols * Store.viewer.grid_rows) - 1));
+                            x: (parent.width - self.width) * (ViewportState.active_frame / Math.max(1, (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows) - 1));
                             y: (parent.height - self.height) / 2;
                             width: 14px;
                             height: 14px;
@@ -564,19 +564,19 @@ export component CompareTab inherits HorizontalLayout {
                             height: 100%;
                             moved => {
                                 if (self.pressed) {
-                                    let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
+                                    let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
                                     let ratio = self.mouse-x / parent.width;
                                     let raw_frame = Math.round(ratio * (total_frames - 1));
-                                    Store.active_frame = raw_frame.clamp(0, total_frames - 1);
-                                    Store.active_frame_changed();
+                                    ViewportState.active_frame = raw_frame.clamp(0, total_frames - 1);
+                                    ViewportState.active_frame_changed();
                                 }
                             }
                             clicked => {
-                                let total_frames = Store.viewer.grid_cols * Store.viewer.grid_rows;
+                                let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
                                 let ratio = self.mouse-x / parent.width;
                                 let raw_frame = Math.round(ratio * (total_frames - 1));
-                                Store.active_frame = raw_frame.clamp(0, total_frames - 1);
-                                Store.active_frame_changed();
+                                ViewportState.active_frame = raw_frame.clamp(0, total_frames - 1);
+                                ViewportState.active_frame_changed();
                             }
                         }
                     }
@@ -591,30 +591,30 @@ export component CompareTab inherits HorizontalLayout {
             ChannelButton {
                 text: "R";
                 active-color: #aa3838;
-                active <=> Store.active_r;
-                clicked => { Store.active_r = !Store.active_r; if Store.active_r { Store.active_g = false; Store.active_b = false; Store.active_a = false; } Store.channel_toggled(); }
+                active <=> ViewportState.active_r;
+                clicked => { ViewportState.active_r = !ViewportState.active_r; if ViewportState.active_r { ViewportState.active_g = false; ViewportState.active_b = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
             }
 
             ChannelButton {
                 text: "G";
                 active-color: #3e7a5a;
-                active <=> Store.active_g;
-                clicked => { Store.active_g = !Store.active_g; if Store.active_g { Store.active_r = false; Store.active_b = false; Store.active_a = false; } Store.channel_toggled(); }
+                active <=> ViewportState.active_g;
+                clicked => { ViewportState.active_g = !ViewportState.active_g; if ViewportState.active_g { ViewportState.active_r = false; ViewportState.active_b = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
             }
 
             ChannelButton {
                 text: "B";
                 active-color: #3e6a90;
-                active <=> Store.active_b;
-                clicked => { Store.active_b = !Store.active_b; if Store.active_b { Store.active_r = false; Store.active_g = false; Store.active_a = false; } Store.channel_toggled(); }
+                active <=> ViewportState.active_b;
+                clicked => { ViewportState.active_b = !ViewportState.active_b; if ViewportState.active_b { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
             }
 
             ChannelButton {
                 text: "A";
                 active-color: #ffffff;
                 text-color: #000000;
-                active <=> Store.active_a;
-                clicked => { Store.active_a = !Store.active_a; if Store.active_a { Store.active_r = false; Store.active_g = false; Store.active_b = false; } Store.channel_toggled(); }
+                active <=> ViewportState.active_a;
+                clicked => { ViewportState.active_a = !ViewportState.active_a; if ViewportState.active_a { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_b = false; } ViewportState.channel_toggled(); }
             }
         }
     }
@@ -635,38 +635,38 @@ export component CompareTab inherits HorizontalLayout {
 
         compare-splitter-ta := TouchArea {
             mouse-cursor: MouseCursor.col-resize;
-            moved => { if (self.pressed) { Store.ui.compare_sidebar_width = (Store.ui.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); } }
+            moved => { if (self.pressed) { ScanConfig.ui.compare_sidebar_width = (ScanConfig.ui.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); } }
         }
     }
 
     // COMPARISON SIDEBAR
     VerticalLayout {
-        width: Store.ui.compare_sidebar_width;
+        width: ScanConfig.ui.compare_sidebar_width;
         padding-left: 12px;
         spacing: 12px;
         Text {
-            text: "Group Duplicates (" + Store.selected_group_files.length + " items)";
+            text: "Group Duplicates (" + ScanConfig.selected_group_files.length + " items)";
             font-size: 13px;
             font-weight: 700;
             color: #808080;
         }
 
         Rectangle {
-            height: Store.ui.duplicates_panel_height;
+            height: ScanConfig.ui.duplicates_panel_height;
             background: #181818;
             border-color: #353535;
             border-width: 1px;
             border-radius: 4px;
-            if Store.selected_group_files.length > 0: ListView {
-                for row[idx] in Store.selected_group_files: Rectangle {
+            if ScanConfig.selected_group_files.length > 0: ListView {
+                for row[idx] in ScanConfig.selected_group_files: Rectangle {
                     height: 38px;
-                    background: (row.path == Store.duplicate_meta.path) ? #36536d : (right_row_ta.has-hover ? #474747 : #181818);
+                    background: (row.path == ViewportState.duplicate_meta.path) ? #36536d : (right_row_ta.has-hover ? #474747 : #181818);
                     border-radius: 4px;
                     right_row_ta := TouchArea {
                         x: 46px;
                         width: parent.width - self.x;
                         height: 100%;
-                        clicked => { Store.row_clicked(idx, false, row.group_index, row.path); }
+                        clicked => { ScanConfig.row_clicked(idx, false, row.group_index, row.path); }
                     }
 
                     HorizontalLayout {
@@ -678,11 +678,11 @@ export component CompareTab inherits HorizontalLayout {
                             source: row.thumbnail;
                             path: row.path;
                             show_corners: true;
-                            checkerboard: Store.checkerboard_pattern;
+                            checkerboard: ViewportState.checkerboard_pattern;
                             width: 32px;
                             height: 32px;
-                            corner_hovered(path, chan) => { Store.thumbnail_channel_hovered(path, chan); }
-                            clicked => { Store.row_clicked(idx, false, row.group_index, row.path); }
+                            corner_hovered(path, chan) => { ScanConfig.thumbnail_channel_hovered(path, chan); }
+                            clicked => { ScanConfig.row_clicked(idx, false, row.group_index, row.path); }
                         }
 
                         Text {
@@ -721,7 +721,7 @@ export component CompareTab inherits HorizontalLayout {
 
             splitter-ta := TouchArea {
                 mouse-cursor: row-resize;
-                moved => { if (self.pressed) { Store.ui.duplicates_panel_height = (self.y + self.mouse-y - self.pressed-y).clamp(80px, 450px); } }
+                moved => { if (self.pressed) { ScanConfig.ui.duplicates_panel_height = (self.y + self.mouse-y - self.pressed-y).clamp(80px, 450px); } }
             }
         }
 
@@ -740,7 +740,7 @@ export component CompareTab inherits HorizontalLayout {
             border-radius: 4px;
             clip: true;
             Image {
-                source: Store.histogram_image;
+                source: ViewportState.histogram_image;
                 width: 100%;
                 height: 100%;
                 image-fit: contain;
@@ -768,7 +768,7 @@ export component CompareTab inherits HorizontalLayout {
                         spacing: 8px;
                         Text {
                             text: "Specification";
-                            width: Store.col_spec_name_w;
+                            width: ScanConfig.col_spec_name_w;
                             font-weight: 700;
                             color: #808080;
                             font-size: 12px;
@@ -783,7 +783,7 @@ export component CompareTab inherits HorizontalLayout {
                                 mouse-cursor: col-resize;
                                 moved => {
                                     if (self.pressed) {
-                                        Store.col_spec_name_w = (Store.col_spec_name_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
+                                        ScanConfig.col_spec_name_w = (ScanConfig.col_spec_name_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
                                     }
                                 }
                             }
@@ -791,7 +791,7 @@ export component CompareTab inherits HorizontalLayout {
 
                         Text {
                             text: "Original [Best]";
-                            width: Store.col_spec_val1_w;
+                            width: ScanConfig.col_spec_val1_w;
                             font-weight: 700;
                             color: #e59535;
                             font-size: 12px;
@@ -806,7 +806,7 @@ export component CompareTab inherits HorizontalLayout {
                                 mouse-cursor: col-resize;
                                 moved => {
                                     if (self.pressed) {
-                                        Store.col_spec_val1_w = (Store.col_spec_val1_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
+                                        ScanConfig.col_spec_val1_w = (ScanConfig.col_spec_val1_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
                                     }
                                 }
                             }
@@ -829,68 +829,90 @@ export component CompareTab inherits HorizontalLayout {
 
                     SpecsRow {
                         name: "File Name";
-                        val1: Store.original_meta.name;
-                        val2: Store.duplicate_meta.name;
+                        val1: ViewportState.original_meta.name;
+                        val2: ViewportState.duplicate_meta.name;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "File Size";
-                        val1: Store.original_meta.size_str;
-                        val2: Store.duplicate_meta.size_str;
+                        val1: ViewportState.original_meta.size_str;
+                        val2: ViewportState.duplicate_meta.size_str;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Format / Codec";
-                        val1: Store.original_meta.format;
-                        val2: Store.duplicate_meta.format;
+                        val1: ViewportState.original_meta.format;
+                        val2: ViewportState.duplicate_meta.format;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Resolution";
-                        val1: Store.original_meta.resolution;
-                        val2: Store.duplicate_meta.resolution;
+                        val1: ViewportState.original_meta.resolution;
+                        val2: ViewportState.duplicate_meta.resolution;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Bit Depth";
-                        val1: Store.original_meta.bit_depth;
-                        val2: Store.duplicate_meta.bit_depth;
+                        val1: ViewportState.original_meta.bit_depth;
+                        val2: ViewportState.duplicate_meta.bit_depth;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Color Space";
-                        val1: Store.original_meta.color_space;
-                        val2: Store.duplicate_meta.color_space;
+                        val1: ViewportState.original_meta.color_space;
+                        val2: ViewportState.duplicate_meta.color_space;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Mipmaps";
-                        val1: Store.original_meta.mipmaps;
-                        val2: Store.duplicate_meta.mipmaps;
+                        val1: ViewportState.original_meta.mipmaps;
+                        val2: ViewportState.duplicate_meta.mipmaps;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Alpha Channel";
-                        val1: Store.original_meta.alpha;
-                        val2: Store.duplicate_meta.alpha;
+                        val1: ViewportState.original_meta.alpha;
+                        val2: ViewportState.duplicate_meta.alpha;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Similarity";
                         val1: "100.0%";
-                        val2: Store.duplicate_meta.similarity;
+                        val2: ViewportState.duplicate_meta.similarity;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Sprites Count";
-                        val1: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? Store.sprites_count : "-";
-                        val2: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? Store.sprites_count : "-";
+                        val1: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? ViewportState.sprites_count : "-";
+                        val2: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? ViewportState.sprites_count : "-";
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     SpecsRow {
                         name: "Sprite Size";
-                        val1: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
-                        val2: Store.viewer.grid_cols > 1 || Store.viewer.grid_rows > 1 ? "\{Store.sprite_width}x\{Store.sprite_height}" : "-";
+                        val1: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? "\{ViewportState.sprite_width}x\{ViewportState.sprite_height}" : "-";
+                        val2: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? "\{ViewportState.sprite_width}x\{ViewportState.sprite_height}" : "-";
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     Rectangle {
@@ -901,8 +923,10 @@ export component CompareTab inherits HorizontalLayout {
 
                     SpecsRow {
                         name: "Full Path";
-                        val1: Store.original_meta.path;
-                        val2: Store.duplicate_meta.path;
+                        val1: ViewportState.original_meta.path;
+                        val2: ViewportState.duplicate_meta.path;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
                     }
 
                     Rectangle {

@@ -1,7 +1,5 @@
 // ui/components/common.slint
 
-import { Store } from "../store.slint";
-
 export component FormRow {
     in property <string> title;
     in property <length> label-width: 90px;
@@ -24,12 +22,17 @@ export component SpecsRow {
     in property <string> name;
     in property <string> val1;
     in property <string> val2;
+
+    // Decoupled properties passed as inputs
+    in property <length> col-spec-name-w: 130px;
+    in property <length> col-spec-val1-w: 140px;
+
     height: 24px;
     HorizontalLayout {
         spacing: 8px;
         Text {
             text: name;
-            width: Store.col_spec_name_w;
+            width: root.col-spec-name-w;
             color: #808080;
             font-size: 12px;
             vertical-alignment: center;
@@ -43,7 +46,7 @@ export component SpecsRow {
 
         Text {
             text: val1;
-            width: Store.col_spec_val1_w;
+            width: root.col-spec-val1-w;
             color: #e59535;
             font-size: 12px;
             vertical-alignment: center;
@@ -99,14 +102,18 @@ export component PanelSection {
 export component WipeViewport {
     in property <image> original;
     in property <image> duplicate;
-    in-out property <float> wipe-val; // Changed to in-out to support direct viewport dragging
+    in-out property <float> wipe-val;
     in property <image> checkerboard;
 
+    // Decoupled background modes and properties passed as inputs
+    in property <int> background-mode: 0;
+    in property <image> checkerboard-light;
+
     viewport-root := Rectangle {
-        background: Store.viewer.background_mode == 2 ? #000000 : (Store.viewer.background_mode == 3 ? #ffffff : #181818);
+        background: root.background-mode == 2 ? #000000 : (root.background-mode == 3 ? #ffffff : #181818);
         clip: true;
 
-        if Store.viewer.background_mode == 0: Image {
+        if root.background-mode == 0: Image {
             source: checkerboard;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
@@ -114,8 +121,8 @@ export component WipeViewport {
             height: 100%;
         }
 
-        if Store.viewer.background_mode == 1: Image {
-            source: Store.checkerboard_pattern_light;
+        if root.background-mode == 1: Image {
+            source: root.checkerboard-light;
             horizontal-tiling: repeat;
             vertical-tiling: repeat;
             width: 100%;
@@ -146,7 +153,7 @@ export component WipeViewport {
             }
         }
 
-        // Interactive orange separator line with an extended TouchArea bounding box
+        // Interactive separator line with TouchArea bounding box
         Rectangle {
             x: parent.width * wipe-val - 6px;
             y: 0px;

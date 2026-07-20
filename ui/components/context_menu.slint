@@ -1,13 +1,13 @@
 // ui/components/context_menu.slint
 
 import { MenuItem } from "./buttons.slint";
-import { Store } from "../store.slint";
+import { ScanConfig, Diagnostics } from "../store.slint";
 
 export component ContextMenuPopup inherits PopupWindow {
     width: 160px;
     close-policy: close-on-click;
-    x: Store.menu_x;
-    y: Store.menu_y;
+    x: Diagnostics.menu_x;
+    y: Diagnostics.menu_y;
 
     Rectangle {
         background: #2b2d31;
@@ -22,7 +22,7 @@ export component ContextMenuPopup inherits PopupWindow {
             MenuItem {
                 text: "Open File";
                 clicked => {
-                    Store.context_menu_action("open", Store.context_hovered_path);
+                    ScanConfig.context_menu_action("open", Diagnostics.context_hovered_path);
                     root.close();
                 }
             }
@@ -30,7 +30,7 @@ export component ContextMenuPopup inherits PopupWindow {
             MenuItem {
                 text: "Show in Explorer";
                 clicked => {
-                    Store.context_menu_action("explore", Store.context_hovered_path);
+                    ScanConfig.context_menu_action("explore", Diagnostics.context_hovered_path);
                     root.close();
                 }
             }
@@ -44,7 +44,7 @@ export component ContextMenuPopup inherits PopupWindow {
                 text: "Move to Trash";
                 text-color: #f23f43;
                 clicked => {
-                    Store.context_menu_action("trash", Store.context_hovered_path);
+                    ScanConfig.context_menu_action("trash", Diagnostics.context_hovered_path);
                     root.close();
                 }
             }

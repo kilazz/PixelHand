@@ -105,18 +105,18 @@ pub struct ScanParams {
 }
 
 impl ScanParams {
-    /// Compiles Slint UI properties from the global Store singleton into thread-safe ScanParams.
+    /// Compiles Slint UI properties from the global ScanConfig singleton into thread-safe ScanParams.
     pub fn from_store(
-        store: &crate::app::Store,
+        scan_config: &crate::app::ScanConfig,
         cancel_token: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
-        // Fetch nested settings from Slint
-        let paths = store.get_paths();
-        let ext = store.get_extensions();
-        let qc = store.get_qc();
-        let visuals = store.get_visuals();
-        let prep = store.get_prep();
-        let ai = store.get_ai();
+        // Fetch nested settings from ScanConfig
+        let paths = scan_config.get_paths();
+        let ext = scan_config.get_extensions();
+        let qc = scan_config.get_qc();
+        let visuals = scan_config.get_visuals();
+        let prep = scan_config.get_prep();
+        let ai = scan_config.get_ai();
 
         let mut extensions = Vec::new();
 
@@ -167,7 +167,7 @@ impl ScanParams {
             extensions.push(".avif".to_string());
         }
 
-        let execution_provider = match store.get_execution_provider() {
+        let execution_provider = match scan_config.get_execution_provider() {
             1 => "DirectML".to_string(),
             2 => "CUDA".to_string(),
             3 => "TensorRT".to_string(),
@@ -183,7 +183,7 @@ impl ScanParams {
                 excluded_folders: paths.excluded_folders.to_string(),
             },
             qc: ScanQcRules {
-                qc_mode: store.get_search_method() == 4,
+                qc_mode: scan_config.get_search_method() == 4,
                 qc_npot: qc.qc_npot,
                 qc_mipmaps: qc.qc_mipmaps,
                 qc_block_align: qc.qc_block_align,
@@ -216,16 +216,16 @@ impl ScanParams {
                 prep_ignore_solid: prep.prep_ignore_solid,
             },
             ai: ScanAiSettings {
-                search_precision: store.get_search_precision(),
+                search_precision: scan_config.get_search_precision(),
                 ai_model: AiModelType::from_i32(ai.ai_model),
                 custom_model_path: ai.custom_model_path.to_string(),
                 custom_model_arch: ai.custom_model_arch,
                 custom_model_dim: ai.custom_model_dim,
             },
 
-            similarity: store.get_similarity_threshold(),
-            batch_size: store.get_batch_size() as usize,
-            search_method: SearchMethod::from_i32(store.get_search_method()),
+            similarity: scan_config.get_similarity_threshold(),
+            batch_size: scan_config.get_batch_size() as usize,
+            search_method: SearchMethod::from_i32(scan_config.get_search_method()),
             execution_provider,
             extensions,
             cancel_token,

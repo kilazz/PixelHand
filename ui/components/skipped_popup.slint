@@ -2,14 +2,14 @@
 
 import { ListView } from "std-widgets.slint";
 import { CustomButton } from "./buttons.slint";
-import { Store } from "../store.slint";
+import { Diagnostics } from "../store.slint";
 
 export component SkippedFilesPopup inherits PopupWindow {
     width: 450px;
     height: 300px;
     close-policy: close-on-click;
-    x: Store.skipped_popup_x;
-    y: Store.skipped_popup_y;
+    x: Diagnostics.skipped_popup_x;
+    y: Diagnostics.skipped_popup_y;
 
     Rectangle {
         background: #2b2d31;
@@ -38,7 +38,7 @@ export component SkippedFilesPopup inherits PopupWindow {
                     width: 100%;
                     height: 100%;
 
-                    for file in Store.skipped_files_list: Rectangle {
+                    for file in Diagnostics.skipped_files_list: Rectangle {
                         height: 26px;
                         HorizontalLayout {
                             padding-left: 8px;
