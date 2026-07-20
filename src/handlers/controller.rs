@@ -101,17 +101,27 @@ impl AppController {
 
         let self_clone = self.clone();
         scan_config.on_sort_by_column(move |col| {
-            self_clone.sort_by_column(col.as_str());
+            let col_str = col.to_string();
+            let self_inner = self_clone.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                self_inner.sort_by_column(&col_str);
+            });
         });
 
         let self_clone = self.clone();
         scan_config.on_results_filter_changed(move || {
-            self_clone.results_filter_changed();
+            let self_inner = self_clone.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                self_inner.results_filter_changed();
+            });
         });
 
         let self_clone = self.clone();
         scan_config.on_results_sort_changed(move |idx| {
-            self_clone.results_sort_changed(idx);
+            let self_inner = self_clone.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                self_inner.results_sort_changed(idx);
+            });
         });
 
         let self_clone = self.clone();
@@ -146,7 +156,10 @@ impl AppController {
 
         let self_clone = self.clone();
         scan_config.on_grid_columns_changed(move || {
-            self_clone.grid_columns_changed();
+            let self_inner = self_clone.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                self_inner.grid_columns_changed();
+            });
         });
 
         let self_clone = self.clone();
