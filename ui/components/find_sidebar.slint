@@ -666,7 +666,8 @@ export component FindSidebar inherits Rectangle {
                         if Store.show_advanced: VerticalLayout {
                             spacing: 4px;
                             padding-top: 6px;
-                            FormRow {
+
+                            if Store.search_method == 2: FormRow {
                                 title: "Batch Size:";
                                 SpinBox {
                                     value <=> Store.batch_size;
