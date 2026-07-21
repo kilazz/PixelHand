@@ -4,8 +4,7 @@
 // --- RUNTIME NATIVE ENUMS -----------------
 // ==========================================
 
-@ rust-attr (
-    derive(serde::Serialize, serde::Deserialize))
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export enum SearchMethod {
     exact,
     perceptual,
@@ -14,8 +13,7 @@ export enum SearchMethod {
     qc
 }
 
-@ rust-attr (
-        derive(serde::Serialize, serde::Deserialize))
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export enum ExecutionProvider {
     cpu,
     direct-ml,
@@ -24,8 +22,7 @@ export enum ExecutionProvider {
     core-ml
 }
 
-@ rust-attr (
-            derive(serde::Serialize, serde::Deserialize))
+@rust-attr(derive(serde::Serialize, serde::Deserialize))
 export enum AiModelType {
     clip-vit-b32,
     clip-vit-l14,
@@ -42,41 +39,41 @@ export enum AiModelType {
 // ==========================================
 
 export struct ResultsRow {
-                is_header: bool,
-                is_qc: bool,
-                is_ai: bool,
-                group_index: int,
-                hash_or_issue: string,
-                path: string,
-                name: string,
-                score_or_detail: string,
-                format_str: string,
-                dimensions_str: string,
-                mipmaps_str: string,
-                cubemap_str: string,
-                size_str: string,
-                meta_str: string,
-                is_best: bool,
-                is_checked: bool,
-                thumbnail: image,
-            }
+    is_header: bool,
+    is_qc: bool,
+    is_ai: bool,
+    group_index: int,
+    hash_or_issue: string,
+    path: string,
+    name: string,
+    score_or_detail: string,
+    format_str: string,
+    dimensions_str: string,
+    mipmaps_str: string,
+    cubemap_str: string,
+    size_str: string,
+    meta_str: string,
+    is_best: bool,
+    is_checked: bool,
+    thumbnail: image,
+}
 
 export struct SelectedFile {
-                name: string,
-                size_str: string,
-                format: string,
-                resolution: string,
-                bit_depth: string,
-                color_space: string,
-                mipmaps: string,
-                alpha: string,
-                similarity: string,
-                path: string,
-            }
+    name: string,
+    size_str: string,
+    format: string,
+    resolution: string,
+    bit_depth: string,
+    color_space: string,
+    mipmaps: string,
+    alpha: string,
+    similarity: string,
+    path: string,
+}
 
 export struct GridRow {
-                items: [ResultsRow],
-            }
+    items: [ResultsRow],
+}
 
 // ==========================================
 // --- GROUPED CONFIGURATION STRUCTURES -----
@@ -84,118 +81,125 @@ export struct GridRow {
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PathSettings {
-                dir_a: string,
-                dir_b: string,
-                excluded_folders: string,
-                query_text: string,
-            }
+    dir_a: string,
+    dir_b: string,
+    excluded_folders: string,
+    query_text: string,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct ExtensionSettings {
-                ext_png: bool,
-                ext_jpg: bool,
-                ext_tga: bool,
-                ext_dds: bool,
-                ext_bmp: bool,
-                ext_exr: bool,
-                ext_hdr: bool,
-                ext_tif: bool,
-                ext_webp: bool,
-                ext_gif: bool,
-                ext_psd: bool,
-                ext_jxl: bool,
-                ext_heic: bool,
-                ext_avif: bool,
-            }
+    ext_png: bool,
+    ext_jpg: bool,
+    ext_tga: bool,
+    ext_dds: bool,
+    ext_bmp: bool,
+    ext_exr: bool,
+    ext_hdr: bool,
+    ext_tif: bool,
+    ext_webp: bool,
+    ext_gif: bool,
+    ext_psd: bool,
+    ext_jxl: bool,
+    ext_heic: bool,
+    ext_avif: bool,
+    ext_ktx2: bool,
+    ext_raw: bool,
+    ext_svg: bool,
+    ext_astc: bool,
+    ext_qoi: bool,
+    ext_ico: bool,
+    ext_pvr: bool,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct UiLayoutSettings {
-                duplicates_panel_height: length,
-                sidebar_width: length,
-                compare_sidebar_width: length,
-                list_preview_size: length,
-                grid_card_size: length,
-            }
+    duplicates_panel_height: length,
+    sidebar_width: length,
+    compare_sidebar_width: length,
+    list_preview_size: length,
+    grid_card_size: length,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct VisualReportSettings {
-                save_visuals: bool,
-                visuals_columns: int,
-                visuals_max_count: int,
-                visuals_font_size: int,
-                visuals_scale: float,
-            }
+    save_visuals: bool,
+    visuals_columns: int,
+    visuals_max_count: int,
+    visuals_font_size: int,
+    visuals_scale: float,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PreprocessingSettings {
-                prep_luminance: bool,
-                prep_channels: bool,
-                prep_r: bool,
-                prep_g: bool,
-                prep_b: bool,
-                prep_a: bool,
-                prep_tags: string,
-                prep_ignore_solid: bool,
-            }
+    prep_luminance: bool,
+    prep_channels: bool,
+    prep_r: bool,
+    prep_g: bool,
+    prep_b: bool,
+    prep_a: bool,
+    prep_tags: string,
+    prep_ignore_solid: bool,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct QcSettings {
-                qc_mode: bool,
-                qc_npot: bool,
-                qc_mipmaps: bool,
-                qc_block_align: bool,
-                qc_bit_depth: bool,
-                qc_solid_colors: bool,
-                qc_normals: bool,
-                qc_normal_target: int,
-                qc_normals_tags: string,
-                qc_seamless_tiling: bool,
-                qc_check_oversize: bool,
-                qc_max_resolution: int,
-                qc_match_by_stem: bool,
-                qc_hide_same_resolution: bool,
-                qc_check_bloat: bool,
-                qc_check_alpha: bool,
-                qc_check_colorspace: bool,
-                qc_check_compression: bool,
-            }
+    qc_mode: bool,
+    qc_npot: bool,
+    qc_mipmaps: bool,
+    qc_block_align: bool,
+    qc_bit_depth: bool,
+    qc_solid_colors: bool,
+    qc_normals: bool,
+    qc_normal_target: int,
+    qc_normals_tags: string,
+    qc_seamless_tiling: bool,
+    qc_check_oversize: bool,
+    qc_max_resolution: int,
+    qc_match_by_stem: bool,
+    qc_hide_same_resolution: bool,
+    qc_check_bloat: bool,
+    qc_check_alpha: bool,
+    qc_check_colorspace: bool,
+    qc_check_compression: bool,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct AiSettings {
-                ai_model: AiModelType,
-                custom_model_path: string,
-                custom_model_arch: int,
-                custom_model_dim: int,
-            }
+    ai_model: AiModelType,
+    custom_model_path: string,
+    custom_model_arch: int,
+    custom_model_dim: int,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct TonemapSettings {
-                tonemap_enabled: bool,
-                tonemap_auto_exposure: bool,
-                tonemap_operator: int,
-            }
+    tonemap_enabled: bool,
+    tonemap_auto_exposure: bool,
+    tonemap_operator: int,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct ViewerConfig {
-                grid_cols: int,
-                grid_rows: int,
-                manual_brightness: float,
-                manual_contrast: float,
-                manual_gamma: float,
-                aspect_ratio_modifier: float,
-                background_mode: int,
-                flipbook_fps: float,
-                fit_to_window: bool,
-                play_speed: float,
-                enable_frame_blending: bool,
-            }
+    grid_cols: int,
+    grid_rows: int,
+    manual_brightness: float,
+    manual_contrast: float,
+    manual_gamma: float,
+    aspect_ratio_modifier: float,
+    background_mode: int,
+    flipbook_fps: float,
+    fit_to_window: bool,
+    play_speed: float,
+    enable_frame_blending: bool,
+}
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct PreviewSettings {
-                enable_previews: bool,
-                preview_quality: int,
-                filter_only_npot: bool,
-                filter_only_uncompressed: bool,
-                filter_only_missing_mips: bool,
-                filter_only_cubemaps: bool,
-            }
+    enable_previews: bool,
+    preview_quality: int,
+    filter_only_npot: bool,
+    filter_only_uncompressed: bool,
+    filter_only_missing_mips: bool,
+    filter_only_cubemaps: bool,
+}

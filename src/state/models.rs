@@ -219,20 +219,32 @@ impl ScanParams {
         if ext.ext_avif {
             extensions.push(".avif".to_string());
         }
-
-        // Additional format support
-        extensions.push(".ktx2".to_string());
-        extensions.push(".basis".to_string());
-        extensions.push(".cr2".to_string());
-        extensions.push(".nef".to_string());
-        extensions.push(".arw".to_string());
-        extensions.push(".dng".to_string());
-        extensions.push(".cr3".to_string());
-        extensions.push(".svg".to_string());
-        extensions.push(".astc".to_string());
-        extensions.push(".qoi".to_string());
-        extensions.push(".ico".to_string());
-        extensions.push(".pvr".to_string());
+        if ext.ext_ktx2 {
+            extensions.push(".ktx2".to_string());
+            extensions.push(".basis".to_string());
+        }
+        if ext.ext_raw {
+            extensions.push(".cr2".to_string());
+            extensions.push(".nef".to_string());
+            extensions.push(".arw".to_string());
+            extensions.push(".dng".to_string());
+            extensions.push(".cr3".to_string());
+        }
+        if ext.ext_svg {
+            extensions.push(".svg".to_string());
+        }
+        if ext.ext_astc {
+            extensions.push(".astc".to_string());
+        }
+        if ext.ext_qoi {
+            extensions.push(".qoi".to_string());
+        }
+        if ext.ext_ico {
+            extensions.push(".ico".to_string());
+        }
+        if ext.ext_pvr {
+            extensions.push(".pvr".to_string());
+        }
 
         let execution_provider = match scan_config.get_execution_provider() {
             ExecutionProvider::DirectMl => "DirectML".to_string(),
@@ -353,6 +365,13 @@ impl Default for AppSettings {
                 ext_jxl: true,
                 ext_heic: true,
                 ext_avif: true,
+                ext_ktx2: true,
+                ext_raw: true,
+                ext_svg: true,
+                ext_astc: true,
+                ext_qoi: true,
+                ext_ico: true,
+                ext_pvr: true,
             },
             ui: UiLayoutSettings {
                 duplicates_panel_height: 180.0,
