@@ -562,7 +562,7 @@ impl ScanController {
                 return;
             }
 
-            let (max_file_len, max_path_len) = self.store.read(|state| {
+            let (max_file_len, max_path_len, has_qc) = self.store.read(|state| {
                 let mut f_len = 4;
                 let mut p_len = 4;
                 for group in &state.groups {
@@ -591,11 +591,11 @@ impl ScanController {
                     f_len = f_len.max(name.chars().count());
                     p_len = p_len.max(file.path.chars().count());
                 }
-                (f_len, p_len)
+                (f_len, p_len, !state.qc_issues.is_empty())
             });
 
             let file_w = (max_file_len as f32 * 7.2) + 68.0;
-            let score_w = 80.0f32;
+            let score_w = if has_qc { 230.0f32 } else { 80.0f32 };
             let path_w = (max_path_len as f32 * 6.5) + 20.0;
 
             let scan_config = ui.global::<ScanConfig>();
