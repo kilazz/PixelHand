@@ -9,6 +9,7 @@ use crate::utils::slint_conversions::{convert_to_slint_image, get_current_active
 use crate::viewer::tonemapping::{apply_manual_corrections, calculate_difference_map};
 use slint::ComponentHandle;
 
+/// Isolated parameter DTO extracted from UI thread state for safe background processing.
 struct ViewportStateParams {
     channel: String,
     compare_mode: i32,
@@ -76,12 +77,9 @@ pub fn trigger_viewport_update(
             get_channel_preview_image(&orig_path, &params.channel, params.mip_level).await;
         let raw_dup = get_channel_preview_image(&dup_path, &params.channel, params.mip_level).await;
 
-        // Fetch next frame channel preview buffers if blending is enabled
+        // Reuse fetched base image buffers for the next frame if animation blending is active
         let (raw_orig_next, raw_dup_next) = if params.enable_blending && total_frames > 1 {
-            (
-                get_channel_preview_image(&orig_path, &params.channel, params.mip_level).await,
-                get_channel_preview_image(&dup_path, &params.channel, params.mip_level).await,
-            )
+            (raw_orig.clone(), raw_dup.clone())
         } else {
             (None, None)
         };
@@ -133,7 +131,7 @@ pub fn trigger_viewport_update(
                 }
             }
 
-            // Apply Brightness, Contrast, and Gamma mathematical corrections (Current Frame)
+            // Apply Brightness, Contrast, and Gamma mathematical corrections via LUT (Current Frame)
             if let Some(ref mut img) = o {
                 apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
             }
@@ -141,7 +139,7 @@ pub fn trigger_viewport_update(
                 apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
             }
 
-            // Apply Brightness, Contrast, and Gamma mathematical corrections (Next Frame)
+            // Apply Brightness, Contrast, and Gamma mathematical corrections via LUT (Next Frame)
             if params.enable_blending {
                 if let Some(ref mut img) = o_n {
                     apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
@@ -177,12 +175,10 @@ pub fn trigger_viewport_update(
             };
 
             // Compute difference heatmap or raw subtraction difference matrix
-            let raw_diff = if params.compare_mode == 3 {
-                if let (Some(orig), Some(dup)) = (&o, &d) {
-                    calculate_difference_map(orig, dup, true).ok()
-                } else {
-                    None
-                }
+            let raw_diff = if params.compare_mode == 3
+                && let (Some(orig), Some(dup)) = (&o, &d)
+            {
+                calculate_difference_map(orig, dup, true).ok()
             } else {
                 None
             };

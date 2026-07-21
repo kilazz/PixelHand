@@ -582,33 +582,35 @@ pub fn tonemap_hdr_to_ldr_rgba(
     RgbaImage::from_raw(width, height, ldr_pixels).ok_or(TonemapError::ImageBuildFailed)
 }
 
-/// Applies manual Brightness, Contrast, and Gamma adjustments to an RgbaImage in parallel.
+/// Applies Brightness, Contrast, and Gamma adjustments to an 8-bit RgbaImage using a 256-entry LUT.
 pub fn apply_manual_corrections(img: &mut RgbaImage, brightness: f32, contrast: f32, gamma: f32) {
     if (brightness - 1.0).abs() < 1e-3
         && (contrast - 1.0).abs() < 1e-3
         && (gamma - 1.0).abs() < 1e-3
     {
-        return; // Early return if properties are at default values
+        return;
+    }
+
+    let mut lut = [0u8; 256];
+    for (i, slot) in lut.iter_mut().enumerate() {
+        let mut val = i as f32 / 255.0;
+        val *= brightness;
+        val = (val - 0.5) * contrast + 0.5;
+        if val > 0.0 && (gamma - 1.0).abs() >= 1e-3 {
+            val = val.powf(gamma);
+        }
+        *slot = (val.clamp(0.0, 1.0) * 255.0) as u8;
     }
 
     let raw = img.as_mut();
     raw.par_chunks_exact_mut(4).for_each(|pixel| {
-        for ch in pixel.iter_mut().take(3) {
-            let mut val = *ch as f32 / 255.0;
-
-            val *= brightness;
-            val = (val - 0.5) * contrast + 0.5;
-
-            if val > 0.0 && gamma != 1.0 {
-                val = val.powf(gamma);
-            }
-
-            *ch = (val.clamp(0.0, 1.0) * 255.0) as u8;
-        }
+        pixel[0] = lut[pixel[0] as usize];
+        pixel[1] = lut[pixel[1] as usize];
+        pixel[2] = lut[pixel[2] as usize];
     });
 }
 
-/// Computes pixel differences between two Rgba buffers in parallel using SIMD-vectorized chunks (AVX2/NEON).
+/// Computes pixel differences between two Rgba buffers in parallel using SIMD-vectorized chunks.
 pub fn calculate_difference_map(
     img1: &RgbaImage,
     img2: &RgbaImage,
@@ -627,7 +629,6 @@ pub fn calculate_difference_map(
 
     let mut diff_img = RgbaImage::new(w1, h1);
 
-    // SIMD chunk vectorization (16 RGBA pixels = 64 bytes per iteration)
     diff_img
         .as_mut()
         .par_chunks_exact_mut(64)
@@ -651,7 +652,7 @@ pub fn calculate_difference_map(
             } else {
                 for i in 0..64 {
                     if (i + 1) % 4 == 0 {
-                        out_chunk[i] = 255; // Alpha
+                        out_chunk[i] = 255;
                     } else {
                         out_chunk[i] = p1_chunk[i].abs_diff(p2_chunk[i]);
                     }
@@ -659,7 +660,6 @@ pub fn calculate_difference_map(
             }
         });
 
-    // Handle tail bytes (< 16 pixels)
     let total_bytes = (w1 * h1 * 4) as usize;
     let remainder = total_bytes % 64;
     if remainder > 0 {
