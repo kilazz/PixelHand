@@ -109,6 +109,7 @@ pub struct InferenceEngine {
     pub model_dim: usize,
     visual_output_mode: VisualOutputMode,
     fallback_output_name: String,
+    pub actual_provider: String,
 }
 
 impl InferenceEngine {
@@ -124,8 +125,8 @@ impl InferenceEngine {
         let tokenizer_path = model_dir.join("tokenizer.json");
 
         // Self-healing: If compilation fails, automatically delete the corrupted file via inspect_err to trigger a clean re-download next time
-        let visual_session = create_session(&visual_path, threads, execution_provider)
-            .inspect_err(|e| {
+        let (visual_session, actual_provider) =
+            create_session(&visual_path, threads, execution_provider).inspect_err(|e| {
                 tracing::warn!(
                     "Corrupted visual model detected. Auto-deleting '{}' to heal. Error: {:?}",
                     visual_path.display(),
@@ -162,8 +163,8 @@ impl InferenceEngine {
         );
 
         let text_session = if text_path.exists() {
-            let session =
-                create_session(&text_path, threads, execution_provider).inspect_err(|e| {
+            let (session, _) = create_session(&text_path, threads, execution_provider)
+                .inspect_err(|e| {
                     tracing::warn!(
                         "Corrupted text model detected. Auto-deleting '{}' to heal. Error: {:?}",
                         text_path.display(),
@@ -191,6 +192,7 @@ impl InferenceEngine {
             model_dim,
             visual_output_mode,
             fallback_output_name,
+            actual_provider,
         })
     }
 
@@ -381,33 +383,87 @@ impl InferenceEngine {
 }
 
 /// Helper function to create an ONNX Runtime session cleanly, handling fallback steps gracefully.
-fn create_session(model_path: &Path, threads: usize, provider: &str) -> Result<Session> {
-    let mut builder = Session::builder()
+fn create_session(model_path: &Path, threads: usize, provider: &str) -> Result<(Session, String)> {
+    let builder = Session::builder()
         .map_err(|e| anyhow::anyhow!("Failed to instantiate session builder: {:?}", e))?
         .with_intra_threads(threads)
         .map_err(|e| anyhow::anyhow!("Failed to set thread pool limit: {:?}", e))?;
 
-    builder = match provider {
-        "DirectML" => builder.with_execution_providers([ort::ep::DirectML::default().build()]),
-        "CUDA" => builder.with_execution_providers([ort::ep::CUDA::default().build()]),
-        "TensorRT" => builder.with_execution_providers([ort::ep::TensorRT::default().build()]),
-        "CoreML" => builder.with_execution_providers([ort::ep::CoreML::default().build()]),
-        _ => Ok(builder),
-    }
-    .unwrap_or_else(|e| {
-        tracing::warn!(
-            "Failed to bind hardware EP '{}', falling back to CPU: {:?}",
-            provider,
-            e
-        );
-        // Fall back to clean CPU builder state
-        Session::builder()
-            .unwrap()
-            .with_intra_threads(threads)
-            .unwrap()
-    });
+    let (mut builder, actual_provider) = match provider {
+        "DirectML" => {
+            match builder.with_execution_providers([ort::ep::DirectML::default().build()]) {
+                Ok(b) => (b, "DirectML".to_string()),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to bind hardware EP 'DirectML', falling back to CPU: {:?}",
+                        e
+                    );
+                    (
+                        Session::builder()
+                            .unwrap()
+                            .with_intra_threads(threads)
+                            .unwrap(),
+                        "CPU (Fallback)".to_string(),
+                    )
+                }
+            }
+        }
+        "CUDA" => match builder.with_execution_providers([ort::ep::CUDA::default().build()]) {
+            Ok(b) => (b, "CUDA".to_string()),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to bind hardware EP 'CUDA', falling back to CPU: {:?}",
+                    e
+                );
+                (
+                    Session::builder()
+                        .unwrap()
+                        .with_intra_threads(threads)
+                        .unwrap(),
+                    "CPU (Fallback)".to_string(),
+                )
+            }
+        },
+        "TensorRT" => {
+            match builder.with_execution_providers([ort::ep::TensorRT::default().build()]) {
+                Ok(b) => (b, "TensorRT".to_string()),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to bind hardware EP 'TensorRT', falling back to CPU: {:?}",
+                        e
+                    );
+                    (
+                        Session::builder()
+                            .unwrap()
+                            .with_intra_threads(threads)
+                            .unwrap(),
+                        "CPU (Fallback)".to_string(),
+                    )
+                }
+            }
+        }
+        "CoreML" => match builder.with_execution_providers([ort::ep::CoreML::default().build()]) {
+            Ok(b) => (b, "CoreML".to_string()),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to bind hardware EP 'CoreML', falling back to CPU: {:?}",
+                    e
+                );
+                (
+                    Session::builder()
+                        .unwrap()
+                        .with_intra_threads(threads)
+                        .unwrap(),
+                    "CPU (Fallback)".to_string(),
+                )
+            }
+        },
+        _ => (builder, "CPU".to_string()),
+    };
 
-    builder
+    let session = builder
         .commit_from_file(model_path)
-        .map_err(|e| anyhow::anyhow!("Model compilation run failed: {:?}", e))
+        .map_err(|e| anyhow::anyhow!("Model compilation run failed: {:?}", e))?;
+
+    Ok((session, actual_provider))
 }

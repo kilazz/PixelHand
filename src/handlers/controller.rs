@@ -10,11 +10,30 @@ use crate::scanners::ScanParams;
 use crate::state::AppState;
 use crate::state::models::{SearchMethod, SortColumn};
 use crate::utils;
+use crate::utils::notification::NotificationService;
+
+// ==========================================
+// --- CENTRALIZED GENERIC SORT HELPERS -----
+// ==========================================
+
+/// Compares types implementing complete ordering (Ord), taking direction into account.
+#[inline]
+fn compare_ord<T: Ord>(a: T, b: T, asc: bool) -> std::cmp::Ordering {
+    if asc { a.cmp(&b) } else { b.cmp(&a) }
+}
+
+/// Compares types implementing partial ordering (PartialOrd), wrapping float fallback cases safely.
+#[inline]
+fn compare_partial<T: PartialOrd>(a: T, b: T, asc: bool) -> std::cmp::Ordering {
+    let order = a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
+    if asc { order } else { order.reverse() }
+}
 
 pub struct AppController {
     ui_weak: slint::Weak<AppWindow>,
     state: Arc<parking_lot::Mutex<AppState>>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
+    notifier: Arc<NotificationService>,
 }
 
 impl AppController {
@@ -23,10 +42,13 @@ impl AppController {
         state: Arc<parking_lot::Mutex<AppState>>,
         cancel_token: Arc<std::sync::atomic::AtomicBool>,
     ) -> Arc<Self> {
+        let ui_weak = ui.as_weak();
+        let notifier = Arc::new(NotificationService::new(ui_weak.clone()));
         Arc::new(Self {
-            ui_weak: ui.as_weak(),
+            ui_weak,
             state,
             cancel_token,
+            notifier,
         })
     }
 
@@ -99,6 +121,7 @@ impl AppController {
             self_clone.collapse_all_groups();
         });
 
+        // Event-Loop Thread Safety Wrapper for Column Sorting Callback
         let self_clone = self.clone();
         scan_config.on_sort_by_column(move |col| {
             let col_str = col.to_string();
@@ -108,6 +131,7 @@ impl AppController {
             });
         });
 
+        // Event-Loop Thread Safety Wrapper for Results Filter Changes Callback
         let self_clone = self.clone();
         scan_config.on_results_filter_changed(move || {
             let self_inner = self_clone.clone();
@@ -116,6 +140,7 @@ impl AppController {
             });
         });
 
+        // Event-Loop Thread Safety Wrapper for Sorting Method Changes Callback
         let self_clone = self.clone();
         scan_config.on_results_sort_changed(move |idx| {
             let self_inner = self_clone.clone();
@@ -154,6 +179,7 @@ impl AppController {
             self_clone.thumbnail_channel_hovered(path.as_str(), channel.as_str());
         });
 
+        // Event-Loop Thread Safety Wrapper for Grid Layout Changes Callback
         let self_clone = self.clone();
         scan_config.on_grid_columns_changed(move || {
             let self_inner = self_clone.clone();
@@ -227,7 +253,7 @@ impl AppController {
     }
 
     // ---------------------------------------------------------
-    // --- PRIVATE SORTING HELPERS -----------------------------
+    // --- PRIVATE DE-DUPLICATED SORTING COMPONENT -------------
     // ---------------------------------------------------------
 
     fn compare_duplicate_files(
@@ -237,18 +263,14 @@ impl AppController {
         b: &crate::state::DuplicateFileSummary,
         asc: bool,
     ) -> std::cmp::Ordering {
-        let order = match col {
+        match col {
             SortColumn::Name | SortColumn::Path => {
-                a.path.to_lowercase().cmp(&b.path.to_lowercase())
+                compare_ord(&a.path.to_lowercase(), &b.path.to_lowercase(), asc)
             }
-            SortColumn::Size => a.size.cmp(&b.size),
-            SortColumn::Score => a
-                .similarity
-                .partial_cmp(&b.similarity)
-                .unwrap_or(std::cmp::Ordering::Equal),
+            SortColumn::Size => compare_ord(a.size, b.size, asc),
+            SortColumn::Score => compare_partial(a.similarity, b.similarity, asc),
             _ => std::cmp::Ordering::Equal,
-        };
-        if asc { order } else { order.reverse() }
+        }
     }
 
     fn compare_duplicate_groups(
@@ -258,7 +280,7 @@ impl AppController {
         b: &crate::state::DuplicateGroupSummary,
         asc: bool,
     ) -> std::cmp::Ordering {
-        let order = match col {
+        match col {
             SortColumn::Name | SortColumn::Path => {
                 let p_a = a
                     .files
@@ -270,23 +292,20 @@ impl AppController {
                     .first()
                     .map(|f| f.path.to_lowercase())
                     .unwrap_or_default();
-                p_a.cmp(&p_b)
+                compare_ord(p_a, p_b, asc)
             }
             SortColumn::Size => {
                 let s_a = a.files.first().map(|f| f.size).unwrap_or(0);
                 let s_b = b.files.first().map(|f| f.size).unwrap_or(0);
-                s_a.cmp(&s_b)
+                compare_ord(s_a, s_b, asc)
             }
             SortColumn::Score => {
                 let sim_a = a.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
                 let sim_b = b.files.iter().map(|f| f.similarity).fold(0.0, f32::max);
-                sim_a
-                    .partial_cmp(&sim_b)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                compare_partial(sim_a, sim_b, asc)
             }
             _ => std::cmp::Ordering::Equal,
-        };
-        if asc { order } else { order.reverse() }
+        }
     }
 
     fn compare_results_rows(
@@ -296,28 +315,25 @@ impl AppController {
         b: &crate::state::ResultsRowData,
         asc: bool,
     ) -> std::cmp::Ordering {
-        let order = match col {
-            SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            SortColumn::Format => a
-                .format_str
-                .to_lowercase()
-                .cmp(&b.format_str.to_lowercase()),
-            SortColumn::Dimensions => a.pixels_count.cmp(&b.pixels_count),
+        match col {
+            SortColumn::Name => compare_ord(&a.name.to_lowercase(), &b.name.to_lowercase(), asc),
+            SortColumn::Format => compare_ord(
+                &a.format_str.to_lowercase(),
+                &b.format_str.to_lowercase(),
+                asc,
+            ),
+            SortColumn::Dimensions => compare_ord(a.pixels_count, b.pixels_count, asc),
             SortColumn::Mipmaps => {
                 let m_a = a.mipmaps_str.parse::<u32>().unwrap_or(0);
                 let m_b = b.mipmaps_str.parse::<u32>().unwrap_or(0);
-                m_a.cmp(&m_b)
+                compare_ord(m_a, m_b, asc)
             }
-            SortColumn::Cubemap => a.cubemap_str.cmp(&b.cubemap_str),
-            SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
-            SortColumn::Path => a.path.to_lowercase().cmp(&b.path.to_lowercase()),
-            SortColumn::Score => a
-                .similarity
-                .partial_cmp(&b.similarity)
-                .unwrap_or(std::cmp::Ordering::Equal),
+            SortColumn::Cubemap => compare_ord(&a.cubemap_str, &b.cubemap_str, asc),
+            SortColumn::Size => compare_ord(a.size_bytes, b.size_bytes, asc),
+            SortColumn::Path => compare_ord(&a.path.to_lowercase(), &b.path.to_lowercase(), asc),
+            SortColumn::Score => compare_partial(a.similarity, b.similarity, asc),
             _ => std::cmp::Ordering::Equal,
-        };
-        if asc { order } else { order.reverse() }
+        }
     }
 
     // ---------------------------------------------------------
@@ -374,7 +390,7 @@ impl AppController {
                 let mut paths = scan_config.get_paths();
                 paths.query_text = path_str.into();
                 scan_config.set_paths(paths);
-                scan_config.set_search_method(SearchMethod::Ai); // Configured directly with typed Slint Enum
+                scan_config.set_search_method(SearchMethod::Ai);
                 utils::settings::save_settings(&scan_config, &ui.global::<ViewportState>());
             }
         }
@@ -398,7 +414,8 @@ impl AppController {
 
     fn cancel_scan(&self) {
         self.cancel_token.store(true, Ordering::Relaxed);
-        tracing::warn!("User requested scan cancellation. Waiting for threads to stop...");
+        self.notifier
+            .notify_info("User requested scan cancellation. Waiting for threads to stop...");
     }
 
     fn run_scan(&self) {
@@ -414,7 +431,6 @@ impl AppController {
         utils::settings::save_settings(&scan_config, &viewport_state);
         self.cancel_token.store(false, Ordering::Relaxed);
 
-        // Fetch scan parameters cleanly from ScanConfig
         let mut params = ScanParams::from_store(&scan_config, self.cancel_token.clone());
 
         let ui_weak_progress = self.ui_weak.clone();
@@ -429,14 +445,16 @@ impl AppController {
         }));
 
         diagnostics.set_is_scanning(true);
-        diagnostics.set_status_text("Scanning assets...".into());
-        diagnostics.set_progress(0.0);
-        tracing::info!("Starting scan on directory: {}", params.paths.dir_a);
+        self.notifier.notify_info(&format!(
+            "Starting scan on directory: {}",
+            params.paths.dir_a
+        ));
 
         let params_for_task = params.clone();
         let ui_weak_download = self.ui_weak.clone();
         let state_clone = self.state.clone();
         let ui_weak_finish = self.ui_weak.clone();
+        let notifier_clone = self.notifier.clone();
 
         tokio::spawn(async move {
             // Verify models on Hugging Face if AI search method is selected
@@ -449,10 +467,10 @@ impl AppController {
                 .await
             {
                 let _ = ui_weak_download.upgrade_in_event_loop(move |ui| {
-                    let diag = ui.global::<Diagnostics>();
-                    diag.set_is_scanning(false);
-                    diag.set_status_text(format!("AI Model download failed: {}", e).into());
+                    ui.global::<crate::app::Diagnostics>()
+                        .set_is_scanning(false);
                 });
+                notifier_clone.notify_error(&e, "AI model verification failed");
                 return;
             }
 
@@ -512,7 +530,6 @@ impl AppController {
                         state_lock.groups = groups;
                         state_lock.results = rows;
 
-                        // Unified UI layout update transaction
                         utils::ui::update_results_ui(&scan_cfg, &mut state_lock);
 
                         let msg = if params_for_task.visuals.save_visuals {
@@ -520,12 +537,10 @@ impl AppController {
                         } else {
                             "Scan finished successfully!"
                         };
-                        diag.set_status_text(msg.into());
-                        tracing::info!("Scan completed.");
+                        notifier_clone.notify_success(msg);
                     }
                     Err(e) => {
-                        diag.set_status_text(format!("Scan stopped: {}", e).into());
-                        tracing::warn!("Scan interrupted: {}", e);
+                        notifier_clone.notify_error(&e, "Scanning process halted");
                     }
                 }
             });
@@ -540,10 +555,10 @@ impl AppController {
         let self_weak = self.ui_weak.clone();
         let state_clone = self.state.clone();
         let action_owned = action.to_string();
+        let notifier_clone = self.notifier.clone();
 
         tokio::spawn(async move {
             let (checked_files, pairs) = {
-                // Keep the Mutex lock brief to avoid starvation or thread contention during I/O
                 let lock = state_clone.lock();
                 utils::fs::extract_selected_files(&lock)
             };
@@ -552,24 +567,18 @@ impl AppController {
                 return;
             }
 
-            let _ = self_weak.upgrade_in_event_loop({
-                let act = action_owned.clone();
-                move |ui| {
-                    let diag = ui.global::<Diagnostics>();
-                    diag.set_status_text(format!("Processing selection: {}...", act).into());
-                }
-            });
+            notifier_clone.notify_info(&format!("Processing selection: {}...", action_owned));
 
             let res = utils::fs::execute_file_action(&action_owned, checked_files, pairs).await;
 
             let _ = self_weak.upgrade_in_event_loop(move |ui| {
-                let diag = ui.global::<Diagnostics>();
                 let scan_cfg = ui.global::<ScanConfig>();
                 match res {
                     Ok(_) => {
-                        diag.set_status_text(
-                            format!("Successfully completed {} operation.", action_owned).into(),
-                        );
+                        notifier_clone.notify_success(&format!(
+                            "Successfully completed {} operation.",
+                            action_owned
+                        ));
                         scan_cfg.set_results(ModelRc::from(std::rc::Rc::new(VecModel::from(
                             Vec::new(),
                         ))));
@@ -583,8 +592,8 @@ impl AppController {
                         lock.visible_to_abs.clear();
                     }
                     Err(e) => {
-                        diag.set_status_text(format!("Action failed: {}", e).into());
-                        tracing::error!("Action failed: {}", e);
+                        notifier_clone
+                            .notify_error(&e, &format!("Operation '{}' failed", action_owned));
                     }
                 }
             });
@@ -782,18 +791,15 @@ impl AppController {
             for group in &mut lock.groups {
                 if group.files.len() > 1 {
                     let (_, duplicates) = group.files.split_at_mut(1);
-                    // Deduplicated: sorting of duplicate items inside groups
                     duplicates.sort_by(|a, b| self.compare_duplicate_files(col_type, a, b, asc));
                 }
             }
 
-            // Deduplicated: sorting of duplicate groups
             lock.groups
                 .sort_by(|a, b| self.compare_duplicate_groups(col_type, a, b, asc));
 
             lock.results = crate::scanners::map_groups_to_rows(&lock.groups);
         } else if !lock.results.is_empty() {
-            // Deduplicated: sorting of results rows in flat list mode
             lock.results
                 .sort_by(|a, b| self.compare_results_rows(col_type, a, b, asc));
         }
@@ -854,6 +860,8 @@ impl AppController {
         manager.thumbnails.invalidate_all();
 
         let self_weak = self.ui_weak.clone();
+        let notifier_clone = self.notifier.clone();
+
         tokio::spawn(async move {
             if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
                 let lancedb_dir = app_dir.join(".lancedb_cache");
@@ -875,12 +883,11 @@ impl AppController {
                 }
 
                 let _ = self_weak.upgrade_in_event_loop(move |_ui| {
-                    let log_str = if success {
-                        "Scan database and thumbnail caches cleared successfully."
+                    if success {
+                        notifier_clone.notify_success("Scan database and thumbnail caches cleared successfully.");
                     } else {
-                        "Warning: Some cache files could not be cleared (files might be in use)."
-                    };
-                    crate::app::append_to_console_log(log_str);
+                        notifier_clone.notify_info("Warning: Some cache files could not be cleared (files might be in use).");
+                    }
                 });
             }
         });
@@ -889,9 +896,8 @@ impl AppController {
     fn clear_models(&self) {
         if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
             let _ = std::fs::remove_dir_all(app_dir.join("models"));
-            crate::app::append_to_console_log(
-                "Downloaded AI model weights successfully cleared from disk.",
-            );
+            self.notifier
+                .notify_success("Downloaded AI model weights successfully cleared from disk.");
         }
     }
 
@@ -923,12 +929,10 @@ impl AppController {
             scan_config.set_col_score_w(score_w.clamp(60.0, 150.0));
             scan_config.set_col_path_w(path_w.clamp(150.0, 800.0));
 
-            tracing::info!(
+            self.notifier.notify_info(&format!(
                 "Columns auto-resized. FILE: {:.0}px, SCORE: {:.0}px, PATH: {:.0}px",
-                file_w,
-                score_w,
-                path_w
-            );
+                file_w, score_w, path_w
+            ));
         }
     }
 
@@ -943,7 +947,7 @@ impl AppController {
             scan_config.set_col_mipmaps_w(75.0);
             scan_config.set_col_cubemap_w(75.0);
             scan_config.set_col_size_w(85.0);
-            tracing::info!("Column sizes reset to defaults.");
+            self.notifier.notify_info("Column sizes reset to defaults.");
         }
     }
 
@@ -964,15 +968,11 @@ impl AppController {
                     && trash::delete(&p).is_ok()
                     && let Some(ui) = self.ui_weak.upgrade()
                 {
-                    let diag = ui.global::<Diagnostics>();
                     let scan_cfg = ui.global::<ScanConfig>();
-                    diag.set_status_text(
-                        format!(
-                            "Moved to trash: {}",
-                            p.file_name().unwrap_or_default().to_string_lossy()
-                        )
-                        .into(),
-                    );
+                    self.notifier.notify_success(&format!(
+                        "Moved to trash: {}",
+                        p.file_name().unwrap_or_default().to_string_lossy()
+                    ));
 
                     let mut lock = self.state.lock();
                     let normalized = utils::fs::normalize_path(&path_str);
@@ -986,7 +986,10 @@ impl AppController {
                     let mut lock = self.state.lock();
                     let mut paths_to_delete = Vec::new();
 
-                    // If groups list is empty, we are likely in a flat/QC results list
+                    if lock.results.is_empty() {
+                        return;
+                    }
+
                     if lock.groups.is_empty() {
                         for row in &lock.results {
                             if row.group_index == group_idx && !row.is_header {
@@ -1022,15 +1025,11 @@ impl AppController {
                     }
 
                     if let Some(ui) = self.ui_weak.upgrade() {
-                        let diag = ui.global::<Diagnostics>();
                         let scan_cfg = ui.global::<ScanConfig>();
-                        diag.set_status_text(
-                            format!(
-                                "Moved {} files in the selected group to trash.",
-                                paths_to_delete.len()
-                            )
-                            .into(),
-                        );
+                        self.notifier.notify_success(&format!(
+                            "Moved {} files in the selected group to trash.",
+                            paths_to_delete.len()
+                        ));
                         utils::ui::update_results_ui(&scan_cfg, &mut lock);
                     }
                 }
@@ -1058,7 +1057,6 @@ impl AppController {
                 let channel_img = cached_thumb.get_channel(&channel_std);
 
                 {
-                    // Confining the Mutex lock strictly to the index-insertion logic to avoid long lockups
                     let mut lock = state_clone.lock();
                     if let Some(&idx) = lock.path_to_idx.get(&normalized_path_fs) {
                         lock.results[idx].thumbnail_data = Some(channel_img.clone());
@@ -1137,7 +1135,6 @@ impl AppController {
     }
 }
 
-// Helper functions to fetch original/duplicate paths from ViewportState safely without thread leaks
 fn viewport_state_changed_orig_path(ui: &AppWindow) -> String {
     let vp = ui.global::<ViewportState>();
     vp.get_original_meta().path.to_string()

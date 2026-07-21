@@ -144,6 +144,13 @@ async fn scan_and_index_directory(
         4,
         &params.execution_provider,
     )?);
+
+    // Provide dynamic console logging about which acceleration engine was successfully compiled
+    crate::app::append_to_console_log(&format!(
+        "[AI] ONNX Session successfully compiled. Active hardware acceleration provider: {}",
+        engine.actual_provider
+    ));
+
     let items = super::generate_analysis_items(&paths, params);
 
     let mut final_records = Vec::with_capacity(items.len());
@@ -259,7 +266,7 @@ async fn scan_and_index_directory(
                         let img = crate::format_loaders::open_image_with_dds_fallback(
                             p,
                             Some(target_size),
-                            None, // Decoupled: pass None explicitly
+                            None,
                         )
                         .ok()?;
 
@@ -430,7 +437,6 @@ pub async fn run_ai_duplicate_scan(
             let record = &records[idx];
             let p = PathBuf::from(&record.path);
 
-            // DRY implementation: Safely extract metadata using the robust fallback factory
             let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&p);
 
             file_summaries.push(DuplicateFileSummary {
@@ -510,12 +516,8 @@ pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResu
     let query_vector = if query_path.is_file() {
         tracing::info!("Query target detected as a file. Loading and running vision encoder...");
 
-        let img = crate::format_loaders::open_image_with_dds_fallback(
-            query_path,
-            Some(256), // Use standard downscale size for rapid embedding calculations
-            None,      // Decoupled: pass None explicitly
-        )
-        .map_err(|e| anyhow!("Failed to load reference image for visual query: {}", e))?;
+        let img = crate::format_loaders::open_image_with_dds_fallback(query_path, Some(256), None)
+            .map_err(|e| anyhow!("Failed to load reference image for visual query: {}", e))?;
 
         let config =
             PreprocessingConfig::for_model(params.ai.ai_model, params.ai.custom_model_arch);
