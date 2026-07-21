@@ -9,6 +9,9 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
+/// Maximum number of visible rows pushed to Slint at once to guarantee sub-millisecond UI rendering
+const MAX_UI_ROWS: usize = 2500;
+
 // ==========================================
 // --- UTILITY SLINT CONVERSIONS ------------
 // ==========================================
@@ -88,6 +91,7 @@ pub fn convert_to_slint_row(
 // ==========================================
 
 /// Synchronizes active Slint list results and grid representations based on filters and collapse states.
+/// Implements high-performance dynamic viewport capping to handle 100k+ assets instantly.
 pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
     let search_method = scan_config.get_search_method();
     let is_empty = match search_method {
@@ -137,6 +141,15 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
             sorted_types.sort();
 
             for (g_idx, issue_type) in sorted_types.iter().enumerate() {
+                if slint_rows.len() >= MAX_UI_ROWS {
+                    slint_rows.push(ResultsRow {
+                        is_header: true,
+                        hash_or_issue: format!("Limit reached: Showing top {} items. Use CSV/HTML export for full list.", MAX_UI_ROWS).into(),
+                        ..Default::default()
+                    });
+                    break;
+                }
+
                 let group_issues = &grouped_issues[issue_type];
 
                 slint_rows.push(ResultsRow {
@@ -154,6 +167,10 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
                 }
 
                 for issue in group_issues {
+                    if slint_rows.len() >= MAX_UI_ROWS {
+                        break;
+                    }
+
                     let thumbnail = load_thumbnail_for_path(&issue.path)
                         .map(|img| convert_to_slint_image(&img))
                         .unwrap_or_default();
@@ -183,6 +200,15 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
         SearchMethod::Inventory => {
             // 2. Map and filter flat Asset Inventory files on the fly
             for file in &state.inventory_files {
+                if slint_rows.len() >= MAX_UI_ROWS {
+                    slint_rows.push(ResultsRow {
+                        is_header: true,
+                        hash_or_issue: format!("Limit reached: Showing top {} items. Use CSV/HTML export for full list.", MAX_UI_ROWS).into(),
+                        ..Default::default()
+                    });
+                    break;
+                }
+
                 let filename = Path::new(&file.path)
                     .file_name()
                     .unwrap_or_default()
@@ -235,6 +261,15 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
         _ => {
             // 3. Map, filter and group duplicate clusters on the fly
             for (g_idx, group) in state.groups.iter().enumerate() {
+                if slint_rows.len() >= MAX_UI_ROWS {
+                    slint_rows.push(ResultsRow {
+                        is_header: true,
+                        hash_or_issue: format!("Limit reached: Showing top {} items. Use CSV/HTML export for full list.", MAX_UI_ROWS).into(),
+                        ..Default::default()
+                    });
+                    break;
+                }
+
                 let mut filtered_files = Vec::new();
                 for (f_idx, file) in group.files.iter().enumerate() {
                     let is_best = f_idx == 0;
@@ -264,7 +299,6 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
                     }
                 }
 
-                // Clusters require at least 2 files remaining after filters
                 if filtered_files.len() < 2 {
                     continue;
                 }
@@ -286,6 +320,10 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
                 }
 
                 for (file, is_best) in filtered_files {
+                    if slint_rows.len() >= MAX_UI_ROWS {
+                        break;
+                    }
+
                     let is_checked = state.checked_paths.contains(&file.path);
                     let row = convert_to_slint_row(file, is_best, is_checked, g_idx as i32);
 

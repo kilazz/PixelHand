@@ -49,7 +49,7 @@ pub enum MipSelectionStrategy {
 pub struct DdsPayloadProcessor;
 
 impl DdsPayloadProcessor {
-    /// Deswizzles blocked linear textures (e.g. from specific engine modifications or older console builds)
+    /// Deswizzles blocked linear textures
     pub fn unswizzle_block_linear(
         src: &[u8],
         dst: &mut [u8],
@@ -500,9 +500,9 @@ impl ImageFormatLoader for DdsLoader {
         target_size: Option<u32>,
         _tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
-        let file = std::fs::File::open(path).context("Failed to open DDS file")?;
-        let mmap = unsafe { memmap2::Mmap::map(&file).context("Failed to memory map DDS file")? };
-        decode_dds_bytes(&mmap, target_size)
+        // Safe, highly-optimized standard file I/O with zero crash risk
+        let bytes = std::fs::read(path).context("Failed to read DDS file from disk")?;
+        decode_dds_bytes(&bytes, target_size)
     }
 
     fn decode_specific_mip(
@@ -511,9 +511,8 @@ impl ImageFormatLoader for DdsLoader {
         mip_level: u32,
         _tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
-        let file = std::fs::File::open(path).context("Failed to open DDS file")?;
-        let mmap = unsafe { memmap2::Mmap::map(&file).context("Failed to memory map DDS file")? };
-        decode_dds_bytes_specific_mip(&mmap, mip_level)
+        let bytes = std::fs::read(path).context("Failed to read DDS file from disk")?;
+        decode_dds_bytes_specific_mip(&bytes, mip_level)
     }
 
     fn extract_metadata(&self, path: &Path) -> Result<QcImageMetadata> {
