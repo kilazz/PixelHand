@@ -16,6 +16,43 @@ use crate::state::models::AiModelType;
 // Global lock to prevent conflicts between concurrent download requests and manual scan threads
 static DOWNLOAD_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 
+/// Evaluates expected minimum byte threshold based on file type to prevent caching 404/Error HTML pages.
+fn get_expected_min_bytes(file_name: &str) -> u64 {
+    if file_name.ends_with(".onnx") {
+        10 * 1024 * 1024 // ONNX weights must be at least 10 MB
+    } else if file_name.ends_with(".json") {
+        10 * 1024 // Tokenizer configs must be at least 10 KB
+    } else {
+        1024
+    }
+}
+
+/// Validates file existence and verifies that size matches expected minimum byte thresholds.
+pub async fn verify_file_integrity(path: &Path) -> bool {
+    let Ok(meta) = tokio::fs::metadata(path).await else {
+        return false;
+    };
+
+    let file_name = path
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let min_expected = get_expected_min_bytes(&file_name);
+
+    if meta.len() < min_expected {
+        tracing::warn!(
+            "Model file '{}' failed integrity check (Found {} bytes, expected >= {} bytes). Preparing re-download...",
+            path.display(),
+            meta.len(),
+            min_expected
+        );
+        return false;
+    }
+
+    true
+}
+
 /// Downloads a file from a specified URL to the local destination path with progress reporting and cooperative cancellation.
 pub async fn download_file_with_progress<F>(
     progress_callback: F,
@@ -211,11 +248,8 @@ pub async fn verify_and_download_models(
     for (name, url) in files {
         let dest = model_dir.join(name);
 
-        // Verification step: checks file existence and ensures it is not a corrupted empty download (< 1KB)
-        let is_valid = match tokio::fs::metadata(&dest).await {
-            Ok(meta) => meta.len() > 1024,
-            Err(_) => false,
-        };
+        // Verification step: checks file existence and ensures it meets minimum byte thresholds
+        let is_valid = verify_file_integrity(&dest).await;
 
         if is_valid {
             tracing::info!(
@@ -265,6 +299,15 @@ pub async fn verify_and_download_models(
                 );
                 let _ = tokio::fs::remove_file(&tmp_dest).await;
                 return Err(e);
+            }
+
+            // Verify integrity of downloaded temporary file before moving into place
+            if !verify_file_integrity(&tmp_dest).await {
+                let _ = tokio::fs::remove_file(&tmp_dest).await;
+                return Err(anyhow!(
+                    "Downloaded file '{}' failed integrity check (incomplete or corrupted download)",
+                    name
+                ));
             }
 
             // Atomically finalize downloaded file on success

@@ -2,15 +2,21 @@
 
 use crate::app::{GridRow, ResultsRow, ScanConfig, SelectedFile, ViewportState};
 use crate::state::AppState;
-use crate::state::models::{DuplicateFileSummary, QcIssueSummary, SearchMethod};
+use crate::state::models::{
+    DuplicateFileSummary, DuplicateGroupSummary, QcIssueSummary, SearchMethod,
+};
 use crate::utils::cache::load_thumbnail_for_path;
 use slint::{ModelRc, SharedPixelBuffer, VecModel};
 use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-/// Maximum number of visible rows pushed to Slint at once to guarantee sub-millisecond UI rendering
-const MAX_UI_ROWS: usize = 2500;
+// Type alias to prevent Clippy type_complexity warning
+type FilteredGroupMatch<'a> = (
+    usize,
+    &'a DuplicateGroupSummary,
+    Vec<(&'a DuplicateFileSummary, bool)>,
+);
 
 // ==========================================
 // --- UTILITY SLINT CONVERSIONS ------------
@@ -91,7 +97,7 @@ pub fn convert_to_slint_row(
 // ==========================================
 
 /// Synchronizes active Slint list results and grid representations based on filters and collapse states.
-/// Implements high-performance dynamic viewport capping to handle 100k+ assets instantly.
+/// Implements high-performance dynamic viewport pagination to handle 100k+ assets instantly.
 pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
     let search_method = scan_config.get_search_method();
     let is_empty = match search_method {
@@ -115,6 +121,10 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
     let filter_cubemaps = preview.filter_only_cubemaps;
 
     let is_pow2 = |n: usize| n != 0 && (n & (n - 1)) == 0;
+
+    // Viewport Virtualization & Pagination configuration
+    let items_per_page = (scan_config.get_items_per_page() as usize).clamp(100, 5000);
+    let requested_page = scan_config.get_active_page() as usize;
 
     let mut slint_rows = Vec::new();
     let mut grid_items = Vec::new();
@@ -140,100 +150,116 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
             let mut sorted_types: Vec<String> = grouped_issues.keys().cloned().collect();
             sorted_types.sort();
 
-            for (g_idx, issue_type) in sorted_types.iter().enumerate() {
-                if slint_rows.len() >= MAX_UI_ROWS {
+            let total_groups = sorted_types.len();
+            let total_pages = (total_groups + items_per_page - 1) / items_per_page.max(1);
+            let total_pages = total_pages.max(1);
+            scan_config.set_total_pages(total_pages as i32);
+
+            let current_page = requested_page.min(total_pages - 1);
+            scan_config.set_active_page(current_page as i32);
+
+            let start_idx = current_page * items_per_page;
+            let end_idx = (start_idx + items_per_page).min(total_groups);
+
+            if total_groups > 0 {
+                for (rel_idx, issue_type) in sorted_types[start_idx..end_idx].iter().enumerate() {
+                    let g_idx = start_idx + rel_idx;
+                    let group_issues = &grouped_issues[issue_type];
+
                     slint_rows.push(ResultsRow {
                         is_header: true,
-                        hash_or_issue: format!("Limit reached: Showing top {} items. Use CSV/HTML export for full list.", MAX_UI_ROWS).into(),
-                        ..Default::default()
-                    });
-                    break;
-                }
-
-                let group_issues = &grouped_issues[issue_type];
-
-                slint_rows.push(ResultsRow {
-                    is_header: true,
-                    is_qc: true,
-                    group_index: g_idx as i32,
-                    hash_or_issue: issue_type.clone().into(),
-                    size_str: format!("{} files", group_issues.len()).into(),
-                    is_checked: state.collapsed_groups.contains(&(g_idx as i32)),
-                    ..Default::default()
-                });
-
-                if state.collapsed_groups.contains(&(g_idx as i32)) {
-                    continue;
-                }
-
-                for issue in group_issues {
-                    if slint_rows.len() >= MAX_UI_ROWS {
-                        break;
-                    }
-
-                    let thumbnail = load_thumbnail_for_path(&issue.path)
-                        .map(|img| convert_to_slint_image(&img))
-                        .unwrap_or_default();
-                    let is_checked = state.checked_paths.contains(&issue.path);
-
-                    slint_rows.push(ResultsRow {
-                        is_header: false,
                         is_qc: true,
                         group_index: g_idx as i32,
-                        hash_or_issue: issue.issue.clone().into(),
-                        path: issue.path.clone().into(),
-                        name: Path::new(&issue.path)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string()
-                            .into(),
-                        score_or_detail: issue.issue.clone().into(),
-                        meta_str: issue.details.clone().into(),
-                        is_checked,
-                        thumbnail,
+                        hash_or_issue: issue_type.clone().into(),
+                        size_str: format!("{} files", group_issues.len()).into(),
+                        is_checked: state.collapsed_groups.contains(&(g_idx as i32)),
                         ..Default::default()
                     });
+
+                    if state.collapsed_groups.contains(&(g_idx as i32)) {
+                        continue;
+                    }
+
+                    for issue in group_issues {
+                        let thumbnail = load_thumbnail_for_path(&issue.path)
+                            .map(|img| convert_to_slint_image(&img))
+                            .unwrap_or_default();
+                        let is_checked = state.checked_paths.contains(&issue.path);
+
+                        slint_rows.push(ResultsRow {
+                            is_header: false,
+                            is_qc: true,
+                            group_index: g_idx as i32,
+                            hash_or_issue: issue.issue.clone().into(),
+                            path: issue.path.clone().into(),
+                            name: Path::new(&issue.path)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                                .to_string()
+                                .into(),
+                            score_or_detail: issue.issue.clone().into(),
+                            meta_str: issue.details.clone().into(),
+                            is_checked,
+                            thumbnail,
+                            ..Default::default()
+                        });
+                    }
                 }
             }
         }
         SearchMethod::Inventory => {
             // 2. Map and filter flat Asset Inventory files on the fly
-            for file in &state.inventory_files {
-                if slint_rows.len() >= MAX_UI_ROWS {
-                    slint_rows.push(ResultsRow {
-                        is_header: true,
-                        hash_or_issue: format!("Limit reached: Showing top {} items. Use CSV/HTML export for full list.", MAX_UI_ROWS).into(),
-                        ..Default::default()
-                    });
-                    break;
-                }
+            let filtered_files: Vec<&DuplicateFileSummary> = state
+                .inventory_files
+                .iter()
+                .filter(|file| {
+                    let filename = Path::new(&file.path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
 
-                let filename = Path::new(&file.path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
+                    let matches_query =
+                        search_query.is_empty() || filename.to_lowercase().contains(&search_query);
+                    let is_npot_bool = !is_pow2(file.width) || !is_pow2(file.height);
+                    let matches_npot = !filter_only_npot || is_npot_bool;
+                    let is_uncompressed_bool = file
+                        .compression_format
+                        .to_lowercase()
+                        .contains("uncompressed");
+                    let matches_uncompressed = !filter_uncompressed || is_uncompressed_bool;
+                    let is_missing_mips_bool = file.mipmap_count <= 1;
+                    let matches_missing_mips = !filter_missing_mips || is_missing_mips_bool;
+                    let matches_cubemaps = !filter_cubemaps || file.is_cubemap;
 
-                let matches_query =
-                    search_query.is_empty() || filename.to_lowercase().contains(&search_query);
-                let is_npot_bool = !is_pow2(file.width) || !is_pow2(file.height);
-                let matches_npot = !filter_only_npot || is_npot_bool;
-                let is_uncompressed_bool = file
-                    .compression_format
-                    .to_lowercase()
-                    .contains("uncompressed");
-                let matches_uncompressed = !filter_uncompressed || is_uncompressed_bool;
-                let is_missing_mips_bool = file.mipmap_count <= 1;
-                let matches_missing_mips = !filter_missing_mips || is_missing_mips_bool;
-                let matches_cubemaps = !filter_cubemaps || file.is_cubemap;
+                    matches_query
+                        && matches_npot
+                        && matches_uncompressed
+                        && matches_missing_mips
+                        && matches_cubemaps
+                })
+                .collect();
 
-                if matches_query
-                    && matches_npot
-                    && matches_uncompressed
-                    && matches_missing_mips
-                    && matches_cubemaps
-                {
+            let total_items = filtered_files.len();
+            let total_pages = (total_items + items_per_page - 1) / items_per_page.max(1);
+            let total_pages = total_pages.max(1);
+            scan_config.set_total_pages(total_pages as i32);
+
+            let current_page = requested_page.min(total_pages - 1);
+            scan_config.set_active_page(current_page as i32);
+
+            let start_idx = current_page * items_per_page;
+            let end_idx = (start_idx + items_per_page).min(total_items);
+
+            if total_items > 0 {
+                for file in &filtered_files[start_idx..end_idx] {
+                    let filename = Path::new(&file.path)
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+
                     let thumbnail = load_thumbnail_for_path(&file.path)
                         .map(|img| convert_to_slint_image(&img))
                         .unwrap_or_default();
@@ -259,78 +285,89 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
             }
         }
         _ => {
-            // 3. Map, filter and group duplicate clusters on the fly
-            for (g_idx, group) in state.groups.iter().enumerate() {
-                if slint_rows.len() >= MAX_UI_ROWS {
+            // 3. Map, filter and group duplicate clusters on the fly (using FilteredGroupMatch type)
+            let filtered_groups: Vec<FilteredGroupMatch> = state
+                .groups
+                .iter()
+                .enumerate()
+                .filter_map(|(orig_g_idx, group)| {
+                    let mut filtered_files = Vec::new();
+                    for (f_idx, file) in group.files.iter().enumerate() {
+                        let is_best = f_idx == 0;
+
+                        let matches_query = search_query.is_empty()
+                            || file.path.to_lowercase().contains(&search_query);
+                        let is_npot_bool = !is_pow2(file.width) || !is_pow2(file.height);
+                        let matches_npot = !filter_only_npot || is_npot_bool;
+                        let is_uncompressed_bool = file
+                            .compression_format
+                            .to_lowercase()
+                            .contains("uncompressed");
+                        let matches_uncompressed = !filter_uncompressed || is_uncompressed_bool;
+                        let is_missing_mips_bool = file.mipmap_count <= 1;
+                        let matches_missing_mips = !filter_missing_mips || is_missing_mips_bool;
+                        let matches_cubemaps = !filter_cubemaps || file.is_cubemap;
+                        let matches_similarity = is_best || file.similarity >= min_sim;
+
+                        if matches_query
+                            && matches_npot
+                            && matches_uncompressed
+                            && matches_missing_mips
+                            && matches_cubemaps
+                            && matches_similarity
+                        {
+                            filtered_files.push((file, is_best));
+                        }
+                    }
+
+                    if filtered_files.len() >= 2 {
+                        Some((orig_g_idx, group, filtered_files))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            let total_groups = filtered_groups.len();
+            let total_pages = (total_groups + items_per_page - 1) / items_per_page.max(1);
+            let total_pages = total_pages.max(1);
+            scan_config.set_total_pages(total_pages as i32);
+
+            let current_page = requested_page.min(total_pages - 1);
+            scan_config.set_active_page(current_page as i32);
+
+            let start_idx = current_page * items_per_page;
+            let end_idx = (start_idx + items_per_page).min(total_groups);
+
+            if total_groups > 0 {
+                for (orig_g_idx, group, files) in &filtered_groups[start_idx..end_idx] {
+                    let g_idx = *orig_g_idx as i32;
+
                     slint_rows.push(ResultsRow {
                         is_header: true,
-                        hash_or_issue: format!("Limit reached: Showing top {} items. Use CSV/HTML export for full list.", MAX_UI_ROWS).into(),
+                        group_index: g_idx,
+                        hash_or_issue: group.hash.clone().into(),
+                        size_str: crate::utils::helpers::format_size(
+                            group.files.first().map(|f| f.size).unwrap_or(0),
+                        )
+                        .into(),
+                        is_checked: state.collapsed_groups.contains(&g_idx),
                         ..Default::default()
                     });
-                    break;
-                }
 
-                let mut filtered_files = Vec::new();
-                for (f_idx, file) in group.files.iter().enumerate() {
-                    let is_best = f_idx == 0;
-
-                    let matches_query =
-                        search_query.is_empty() || file.path.to_lowercase().contains(&search_query);
-                    let is_npot_bool = !is_pow2(file.width) || !is_pow2(file.height);
-                    let matches_npot = !filter_only_npot || is_npot_bool;
-                    let is_uncompressed_bool = file
-                        .compression_format
-                        .to_lowercase()
-                        .contains("uncompressed");
-                    let matches_uncompressed = !filter_uncompressed || is_uncompressed_bool;
-                    let is_missing_mips_bool = file.mipmap_count <= 1;
-                    let matches_missing_mips = !filter_missing_mips || is_missing_mips_bool;
-                    let matches_cubemaps = !filter_cubemaps || file.is_cubemap;
-                    let matches_similarity = is_best || file.similarity >= min_sim;
-
-                    if matches_query
-                        && matches_npot
-                        && matches_uncompressed
-                        && matches_missing_mips
-                        && matches_cubemaps
-                        && matches_similarity
-                    {
-                        filtered_files.push((file, is_best));
-                    }
-                }
-
-                if filtered_files.len() < 2 {
-                    continue;
-                }
-
-                slint_rows.push(ResultsRow {
-                    is_header: true,
-                    group_index: g_idx as i32,
-                    hash_or_issue: group.hash.clone().into(),
-                    size_str: crate::utils::helpers::format_size(
-                        group.files.first().map(|f| f.size).unwrap_or(0),
-                    )
-                    .into(),
-                    is_checked: state.collapsed_groups.contains(&(g_idx as i32)),
-                    ..Default::default()
-                });
-
-                if state.collapsed_groups.contains(&(g_idx as i32)) {
-                    continue;
-                }
-
-                for (file, is_best) in filtered_files {
-                    if slint_rows.len() >= MAX_UI_ROWS {
-                        break;
+                    if state.collapsed_groups.contains(&g_idx) {
+                        continue;
                     }
 
-                    let is_checked = state.checked_paths.contains(&file.path);
-                    let row = convert_to_slint_row(file, is_best, is_checked, g_idx as i32);
+                    for (file, is_best) in files {
+                        let is_checked = state.checked_paths.contains(&file.path);
+                        let row = convert_to_slint_row(file, *is_best, is_checked, g_idx);
 
-                    if is_best {
-                        grid_items.push(row.clone());
+                        if *is_best {
+                            grid_items.push(row.clone());
+                        }
+                        slint_rows.push(row);
                     }
-                    slint_rows.push(row);
                 }
             }
         }

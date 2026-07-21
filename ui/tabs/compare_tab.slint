@@ -40,7 +40,7 @@ export component CompareTab inherits HorizontalLayout {
             color: #ffffff;
         }
 
-        // Comparison Modes & HDR parameters
+        // TOOLBAR 1: Comparison Modes, HDR, Mips & Zoom / Loupe Controls
         HorizontalLayout {
             spacing: 8px;
             height: 28px;
@@ -160,13 +160,23 @@ export component CompareTab inherits HorizontalLayout {
                 spacing: 4px;
                 alignment: end;
 
+                // Interactive Loupe (Magnifier 2.5x) Toggle Button
+                CustomButton {
+                    text: "🔍 Loupe";
+                    height: 24px;
+                    primary-color: ViewportState.enable_loupe ? #f0b132 : #474747;
+                    clicked => {
+                        ViewportState.enable_loupe = !ViewportState.enable_loupe;
+                    }
+                }
+
                 // Zoom Input SpinBox
                 SpinBox {
                     value: Math.round(ViewportState.zoom_factor * 100);
                     minimum: 10;
                     maximum: 1000;
                     height: 24px;
-                    width: 100px;
+                    width: 90px;
                     edited(val) => {
                         ViewportState.zoom_factor = val / 100.0;
                     }
@@ -222,7 +232,7 @@ export component CompareTab inherits HorizontalLayout {
             }
         }
 
-        // Spritesheet slicing subdivision & Animation Flipbook controls
+        // TOOLBAR 2: Spritesheet slicing subdivision & Animation Flipbook controls
         HorizontalLayout {
             spacing: 8px;
             height: 28px;
@@ -606,7 +616,7 @@ export component CompareTab inherits HorizontalLayout {
                 text: "B";
                 active-color: #3e6a90;
                 active <=> ViewportState.active_b;
-                clicked => { ViewportState.active_b = !ViewportState.active_b; if ViewportState.active_b { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
+                clicked => { ViewportState.active_b = !ViewportState.active_b; if ViewportState.active_b { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_b = false; } ViewportState.channel_toggled(); }
             }
 
             ChannelButton {

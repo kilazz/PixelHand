@@ -56,160 +56,154 @@ export component InteractiveCompareViewport inherits Rectangle {
     }
 
     // =========================================================================
-    // MODE 0: SIDE-BY-SIDE (With Synchronized 4x Magnifier Loupe Overlay)
+    // MODE 0: SIDE-BY-SIDE (With Precise Synchronized 2.5x Loupe Magnifier)
     // =========================================================================
     if ViewportState.compare_mode == 0: Rectangle {
         width: 100%;
         height: 100%;
 
         // Left Viewport (Original / Master Source)
-        Rectangle {
+        left_box := Rectangle {
             x: 0px;
             y: 0px;
-            width: parent.width / 2 - 6px;
+            width: parent.width / 2 - 4px;
             height: parent.height;
             clip: true;
+            background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
+            border-color: #3e3e42;
+            border-width: 1px;
+            border-radius: 4px;
 
-            Rectangle {
-                width: parent.width;
-                height: parent.height;
-                background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
-                border-color: #3e3e42;
-                border-width: 1px;
-                border-radius: 4px;
+            if ViewportState.viewer.background_mode == 0: Image {
+                source: ViewportState.checkerboard_pattern;
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+                width: 100%;
+                height: 100%;
+            }
+
+            if ViewportState.viewer.background_mode == 1: Image {
+                source: ViewportState.checkerboard_pattern_light;
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+                width: 100%;
+                height: 100%;
+            }
+
+            orig_img := Image {
+                source: ViewportState.image_original;
+                image-fit: contain;
+                width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+                y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
+            }
+
+            if ViewportState.viewer.enable_frame_blending: Image {
+                source: ViewportState.image_original_next;
+                opacity: ViewportState.blend_factor;
+                image-fit: contain;
+                width: orig_img.width;
+                height: orig_img.height;
+                x: orig_img.x;
+                y: orig_img.y;
+            }
+
+            // Left Viewport Loupe (Active only when enable_loupe is true and cursor is on the left side)
+            if ViewportState.enable_loupe && main_ta.has-hover && main_ta.mouse-x < root.width / 2: Rectangle {
+                property <length> local-x: main_ta.mouse-x;
+                property <length> local-y: main_ta.mouse-y;
+
+                x: local-x - 75px;
+                y: local-y - 75px;
+                width: 150px;
+                height: 150px;
+                border-radius: 75px;
+                border-color: #f0b132;
+                border-width: 2.5px;
+                background: #111214;
                 clip: true;
-
-                if ViewportState.viewer.background_mode == 0: Image {
-                    source: ViewportState.checkerboard_pattern;
-                    horizontal-tiling: repeat;
-                    vertical-tiling: repeat;
-                    width: 100%;
-                    height: 100%;
-                }
-
-                if ViewportState.viewer.background_mode == 1: Image {
-                    source: ViewportState.checkerboard_pattern_light;
-                    horizontal-tiling: repeat;
-                    vertical-tiling: repeat;
-                    width: 100%;
-                    height: 100%;
-                }
 
                 Image {
                     source: ViewportState.image_original;
                     image-fit: contain;
-                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
-                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
-                }
-
-                if ViewportState.viewer.enable_frame_blending: Image {
-                    source: ViewportState.image_original_next;
-                    opacity: ViewportState.blend_factor;
-                    image-fit: contain;
-                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
-                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
-                }
-
-                // Left Viewport Synchronized 4x Loupe Lens Overlay
-                if main_ta.has-hover && main_ta.mouse-x < parent.width: Rectangle {
-                    x: main_ta.mouse-x - 60px;
-                    y: main_ta.mouse-y - 60px;
-                    width: 120px;
-                    height: 120px;
-                    border-radius: 60px;
-                    border-color: #f0b132;
-                    border-width: 2.5px;
-                    background: #111214;
-                    clip: true;
-
-                    Image {
-                        source: ViewportState.image_original;
-                        image-fit: contain;
-                        width: parent.width * 4 * ViewportState.zoom_factor;
-                        height: parent.height * 4 * ViewportState.zoom_factor;
-                        x: -main_ta.mouse-x * 3 + 180px;
-                        y: -main_ta.mouse-y * 3 + 180px;
-                    }
+                    width: orig_img.width * 2.5;
+                    height: orig_img.height * 2.5;
+                    x: 75px - (local-x - orig_img.x) * 2.5;
+                    y: 75px - (local-y - orig_img.y) * 2.5;
                 }
             }
         }
 
         // Right Viewport (Duplicate / Target Candidate)
-        Rectangle {
-            x: parent.width / 2 + 6px;
+        right_box := Rectangle {
+            x: parent.width / 2 + 4px;
             y: 0px;
-            width: parent.width / 2 - 6px;
+            width: parent.width / 2 - 4px;
             height: parent.height;
             clip: true;
+            background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
+            border-color: #3e3e42;
+            border-width: 1px;
+            border-radius: 4px;
 
-            Rectangle {
-                width: parent.width;
-                height: parent.height;
-                background: ViewportState.viewer.background_mode == 2 ? #000000 : (ViewportState.viewer.background_mode == 3 ? #ffffff : #111214);
-                border-color: #3e3e42;
-                border-width: 1px;
-                border-radius: 4px;
+            if ViewportState.viewer.background_mode == 0: Image {
+                source: ViewportState.checkerboard_pattern;
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+                width: 100%;
+                height: 100%;
+            }
+
+            if ViewportState.viewer.background_mode == 1: Image {
+                source: ViewportState.checkerboard_pattern_light;
+                horizontal-tiling: repeat;
+                vertical-tiling: repeat;
+                width: 100%;
+                height: 100%;
+            }
+
+            dup_img := Image {
+                source: ViewportState.image_duplicate;
+                image-fit: contain;
+                width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
+                y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
+            }
+
+            if ViewportState.viewer.enable_frame_blending: Image {
+                source: ViewportState.image_duplicate_next;
+                opacity: ViewportState.blend_factor;
+                image-fit: contain;
+                width: dup_img.width;
+                height: dup_img.height;
+                x: dup_img.x;
+                y: dup_img.y;
+            }
+
+            // Right Viewport Loupe (Active only when enable_loupe is true and cursor is on the right side)
+            if ViewportState.enable_loupe && main_ta.has-hover && main_ta.mouse-x >= root.width / 2: Rectangle {
+                property <length> local-x: main_ta.mouse-x - (root.width / 2 + 4px);
+                property <length> local-y: main_ta.mouse-y;
+
+                x: local-x - 75px;
+                y: local-y - 75px;
+                width: 150px;
+                height: 150px;
+                border-radius: 75px;
+                border-color: #f0b132;
+                border-width: 2.5px;
+                background: #111214;
                 clip: true;
-
-                if ViewportState.viewer.background_mode == 0: Image {
-                    source: ViewportState.checkerboard_pattern;
-                    horizontal-tiling: repeat;
-                    vertical-tiling: repeat;
-                    width: 100%;
-                    height: 100%;
-                }
-
-                if ViewportState.viewer.background_mode == 1: Image {
-                    source: ViewportState.checkerboard_pattern_light;
-                    horizontal-tiling: repeat;
-                    vertical-tiling: repeat;
-                    width: 100%;
-                    height: 100%;
-                }
 
                 Image {
                     source: ViewportState.image_duplicate;
                     image-fit: contain;
-                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
-                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
-                }
-
-                if ViewportState.viewer.enable_frame_blending: Image {
-                    source: ViewportState.image_duplicate_next;
-                    opacity: ViewportState.blend_factor;
-                    image-fit: contain;
-                    width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-                    height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
-                    x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
-                    y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
-                }
-
-                // Right Viewport Synchronized 4x Loupe Lens Overlay (Parallel Cursor Mirroring)
-                if main_ta.has-hover && main_ta.mouse-x < parent.width: Rectangle {
-                    x: (main_ta.mouse-x - parent.width / 2) - 60px;
-                    y: main_ta.mouse-y - 60px;
-                    width: 120px;
-                    height: 120px;
-                    border-radius: 60px;
-                    border-color: #f0b132;
-                    border-width: 2.5px;
-                    background: #111214;
-                    clip: true;
-
-                    Image {
-                        source: ViewportState.image_duplicate;
-                        image-fit: contain;
-                        width: parent.width * 4 * ViewportState.zoom_factor;
-                        height: parent.height * 4 * ViewportState.zoom_factor;
-                        x: -(main_ta.mouse-x - parent.width / 2) * 3 + 180px;
-                        y: -main_ta.mouse-y * 3 + 180px;
-                    }
+                    width: dup_img.width * 2.5;
+                    height: dup_img.height * 2.5;
+                    x: 75px - (local-x - dup_img.x) * 2.5;
+                    y: 75px - (local-y - dup_img.y) * 2.5;
                 }
             }
         }

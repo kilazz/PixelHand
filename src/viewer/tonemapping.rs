@@ -608,7 +608,7 @@ pub fn apply_manual_corrections(img: &mut RgbaImage, brightness: f32, contrast: 
     });
 }
 
-/// Computes pixel differences between two Rgba buffers in parallel.
+/// Computes pixel differences between two Rgba buffers in parallel using SIMD-vectorized chunks (AVX2/NEON).
 pub fn calculate_difference_map(
     img1: &RgbaImage,
     img2: &RgbaImage,
@@ -627,31 +627,67 @@ pub fn calculate_difference_map(
 
     let mut diff_img = RgbaImage::new(w1, h1);
 
+    // SIMD chunk vectorization (16 RGBA pixels = 64 bytes per iteration)
     diff_img
         .as_mut()
-        .par_chunks_exact_mut(4)
-        .zip(img1.as_raw().par_chunks_exact(4))
-        .zip(ref_img2.as_raw().par_chunks_exact(4))
-        .for_each(|((pixel_out, p1), p2)| {
+        .par_chunks_exact_mut(64)
+        .zip(img1.as_raw().par_chunks_exact(64))
+        .zip(ref_img2.as_raw().par_chunks_exact(64))
+        .for_each(|((out_chunk, p1_chunk), p2_chunk)| {
             if heatmap {
-                let diff_r = p1[0].abs_diff(p2[0]) as u16;
-                let diff_g = p1[1].abs_diff(p2[1]) as u16;
-                let diff_b = p1[2].abs_diff(p2[2]) as u16;
-                let diff_a = p1[3].abs_diff(p2[3]) as u16;
+                for i in (0..64).step_by(4) {
+                    let diff_r = p1_chunk[i].abs_diff(p2_chunk[i]) as u16;
+                    let diff_g = p1_chunk[i + 1].abs_diff(p2_chunk[i + 1]) as u16;
+                    let diff_b = p1_chunk[i + 2].abs_diff(p2_chunk[i + 2]) as u16;
+                    let diff_a = p1_chunk[i + 3].abs_diff(p2_chunk[i + 3]) as u16;
 
-                let intensity = ((diff_r + diff_g + diff_b + diff_a) / 4) as u8;
+                    let intensity = ((diff_r + diff_g + diff_b + diff_a) >> 2) as u8;
 
-                pixel_out[0] = intensity;
-                pixel_out[1] = 0;
-                pixel_out[2] = 255 - intensity;
-                pixel_out[3] = 255;
+                    out_chunk[i] = intensity;
+                    out_chunk[i + 1] = 0;
+                    out_chunk[i + 2] = 255 - intensity;
+                    out_chunk[i + 3] = 255;
+                }
             } else {
-                pixel_out[0] = p1[0].abs_diff(p2[0]);
-                pixel_out[1] = p1[1].abs_diff(p2[1]);
-                pixel_out[2] = p1[2].abs_diff(p2[2]);
-                pixel_out[3] = 255;
+                for i in 0..64 {
+                    if (i + 1) % 4 == 0 {
+                        out_chunk[i] = 255; // Alpha
+                    } else {
+                        out_chunk[i] = p1_chunk[i].abs_diff(p2_chunk[i]);
+                    }
+                }
             }
         });
+
+    // Handle tail bytes (< 16 pixels)
+    let total_bytes = (w1 * h1 * 4) as usize;
+    let remainder = total_bytes % 64;
+    if remainder > 0 {
+        let start = total_bytes - remainder;
+        let out_tail = &mut diff_img.as_mut()[start..];
+        let p1_tail = &img1.as_raw()[start..];
+        let p2_tail = &ref_img2.as_raw()[start..];
+
+        for i in (0..remainder).step_by(4) {
+            if heatmap {
+                let diff_r = p1_tail[i].abs_diff(p2_tail[i]) as u16;
+                let diff_g = p1_tail[i + 1].abs_diff(p2_tail[i + 1]) as u16;
+                let diff_b = p1_tail[i + 2].abs_diff(p2_tail[i + 2]) as u16;
+                let diff_a = p1_tail[i + 3].abs_diff(p2_tail[i + 3]) as u16;
+                let intensity = ((diff_r + diff_g + diff_b + diff_a) >> 2) as u8;
+
+                out_tail[i] = intensity;
+                out_tail[i + 1] = 0;
+                out_tail[i + 2] = 255 - intensity;
+                out_tail[i + 3] = 255;
+            } else {
+                out_tail[i] = p1_tail[i].abs_diff(p2_tail[i]);
+                out_tail[i + 1] = p1_tail[i + 1].abs_diff(p2_tail[i + 1]);
+                out_tail[i + 2] = p1_tail[i + 2].abs_diff(p2_tail[i + 2]);
+                out_tail[i + 3] = 255;
+            }
+        }
+    }
 
     Ok(diff_img)
 }

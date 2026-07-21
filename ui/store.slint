@@ -123,6 +123,11 @@ export global ScanConfig {
     in-out property <float> results_min_similarity: 0.0;
     in-out property <int> results_sort_index: 0;
 
+    // Pagination / Lazy Viewport Properties for 100,000+ files
+    in-out property <int> active_page: 0;
+    in-out property <int> total_pages: 1;
+    in-out property <int> items_per_page: 1000;
+
     // View State Flags
     in-out property <bool> results_grid_mode: false;
     in-out property <bool> has_results: false;
@@ -188,6 +193,9 @@ export global ViewportState {
     in-out property <float> zoom_factor: 1.0;
     in-out property <length> pan_x: 0px;
     in-out property <length> pan_y: 0px;
+
+    // Interactive Loupe (Magnifier) Toggle
+    in-out property <bool> enable_loupe: false;
 
     // Viewport channel-isolation layers
     in-out property <bool> active_r: false;
