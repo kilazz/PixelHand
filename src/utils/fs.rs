@@ -25,18 +25,32 @@ pub fn extract_selected_files(lock: &AppState) -> (Vec<String>, Vec<(String, Str
     let mut checked_files = Vec::new();
     let mut pairs = Vec::new();
 
-    for row in &lock.results {
-        if !row.is_header && row.is_checked {
-            checked_files.push(row.path.clone());
-
-            // Resolve the corresponding master file within the target duplicate group
-            if let Some(group) = lock.groups.get(row.group_index as usize)
-                && let Some(orig) = group.files.first()
-            {
-                pairs.push((orig.path.clone(), row.path.clone()));
+    // Check duplicate groups
+    for group in &lock.groups {
+        for file in &group.files {
+            if lock.checked_paths.contains(&file.path) {
+                checked_files.push(file.path.clone());
+                if let Some(orig) = group.files.first() {
+                    pairs.push((orig.path.clone(), file.path.clone()));
+                }
             }
         }
     }
+
+    // Check QC issues
+    for issue in &lock.qc_issues {
+        if lock.checked_paths.contains(&issue.path) {
+            checked_files.push(issue.path.clone());
+        }
+    }
+
+    // Check Asset Inventory files
+    for file in &lock.inventory_files {
+        if lock.checked_paths.contains(&file.path) {
+            checked_files.push(file.path.clone());
+        }
+    }
+
     (checked_files, pairs)
 }
 
@@ -49,7 +63,7 @@ pub async fn execute_file_action(
 ) -> anyhow::Result<()> {
     let action_owned = action.to_string();
 
-    // Safety check: run blocking filesystem operations inside the dedicated Tokio blocking pool
+    // Run blocking filesystem operations inside the dedicated Tokio blocking pool
     tokio::task::spawn_blocking(move || match action_owned.as_str() {
         "trash" => delete_files_sync(files),
         "hardlink" => create_hardlinks_sync(pairs),
@@ -59,7 +73,7 @@ pub async fn execute_file_action(
     .await?
 }
 
-/// Safely moves targeted duplicate files to the operating system recycle bin (Synchronous blocking runner).
+/// Safely moves targeted duplicate files to the operating system recycle bin.
 fn delete_files_sync(paths: Vec<String>) -> anyhow::Result<()> {
     let files_to_delete: Vec<PathBuf> = paths
         .into_iter()
@@ -72,45 +86,58 @@ fn delete_files_sync(paths: Vec<String>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Transforms duplicates into hard links pointing to the master source file (Synchronous blocking runner).
+/// Transforms duplicates into hard links pointing to the master source file safely.
+/// Uses atomic creation to guarantee target file protection if hardlinking fails (e.g., cross-drive EXDEV).
 fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     let mut error_count = 0;
 
     for (source_str, target_str) in pairs {
-        let source = PathBuf::from(source_str);
-        let target = PathBuf::from(target_str);
+        let source = PathBuf::from(&source_str);
+        let target = PathBuf::from(&target_str);
 
         if !source.exists() {
             tracing::warn!("Deduplication source does not exist: {}", source.display());
             continue;
         }
 
-        if target.exists()
-            && let Err(e) = fs::remove_file(&target)
-        {
+        if !target.exists() {
+            tracing::warn!("Deduplication target does not exist: {}", target.display());
+            continue;
+        }
+
+        // 1. Create temporary hard link alongside target path
+        let temp_target = target.with_extension("ph_tmp_hardlink");
+
+        if temp_target.exists() {
+            let _ = fs::remove_file(&temp_target);
+        }
+
+        if let Err(e) = fs::hard_link(&source, &temp_target) {
             tracing::error!(
-                "Failed to remove target duplicate '{}' before linking: {}",
-                target.display(),
+                "Failed to generate hard link from '{}' to temp target '{}': {}. Original file preserved.",
+                source.display(),
+                temp_target.display(),
                 e
             );
             error_count += 1;
             continue;
         }
 
-        if let Err(e) = fs::hard_link(&source, &target) {
+        // 2. Atomically replace the original target file with the validated hard link
+        if let Err(e) = fs::rename(&temp_target, &target) {
             tracing::error!(
-                "Failed to generate hard link from '{}' to '{}': {}",
-                source.display(),
+                "Failed to atomically replace target '{}' with created hard link: {}",
                 target.display(),
                 e
             );
+            let _ = fs::remove_file(&temp_target);
             error_count += 1;
         }
     }
 
     if error_count > 0 {
         Err(anyhow::anyhow!(
-            "Failed to create {} hard links. Ensure source and target are on the same disk drive.",
+            "Failed to process {} hard link operations. Ensure source and target are on the same disk partition.",
             error_count
         ))
     } else {
@@ -118,40 +145,52 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     }
 }
 
-/// Transforms duplicates into reflinks pointing to the master source file (Synchronous blocking runner).
+/// Transforms duplicates into reflinks pointing to the master source file safely.
 /// Falls back to deep copies if the underlying filesystem does not support reflinking.
+/// Uses atomic creation to guarantee target file protection if operations fail.
 fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     let mut error_count = 0;
 
     for (source_str, target_str) in pairs {
-        let source = PathBuf::from(source_str);
-        let target = PathBuf::from(target_str);
+        let source = PathBuf::from(&source_str);
+        let target = PathBuf::from(&target_str);
 
         if !source.exists() {
             tracing::warn!("Deduplication source does not exist: {}", source.display());
             continue;
         }
 
-        if target.exists()
-            && let Err(e) = fs::remove_file(&target)
-        {
+        if !target.exists() {
+            tracing::warn!("Deduplication target does not exist: {}", target.display());
+            continue;
+        }
+
+        // 1. Create temporary reflink alongside target path
+        let temp_target = target.with_extension("ph_tmp_reflink");
+
+        if temp_target.exists() {
+            let _ = fs::remove_file(&temp_target);
+        }
+
+        if let Err(e) = reflink_copy::reflink_or_copy(&source, &temp_target) {
             tracing::error!(
-                "Failed to remove target duplicate '{}' before linking: {}",
-                target.display(),
+                "Failed to generate reflink clone from '{}' to temp target '{}': {}. Original file preserved.",
+                source.display(),
+                temp_target.display(),
                 e
             );
             error_count += 1;
             continue;
         }
 
-        // Standard library / reflink handles internally release raw file descriptors safely on Scope exit
-        if let Err(e) = reflink_copy::reflink_or_copy(&source, &target) {
+        // 2. Atomically replace the original target file with the validated reflink
+        if let Err(e) = fs::rename(&temp_target, &target) {
             tracing::error!(
-                "Failed to generate reflink clone from '{}' to '{}': {}",
-                source.display(),
+                "Failed to atomically replace target '{}' with created reflink: {}",
                 target.display(),
                 e
             );
+            let _ = fs::remove_file(&temp_target);
             error_count += 1;
         }
     }

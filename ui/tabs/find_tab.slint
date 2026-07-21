@@ -140,6 +140,13 @@ export component FindTab inherits HorizontalLayout {
                         clicked => { Diagnostics.export_csv(); }
                     }
 
+                    if ScanConfig.has_results: CustomButton {
+                        text: "Export HTML";
+                        height: 24px;
+                        primary-color: #3e6a90;
+                        clicked => { ScanConfig.export_html(); }
+                    }
+
                     if ScanConfig.search_method == SearchMethod.ai: HorizontalLayout {
                         spacing: 6px;
                         Text {
@@ -280,7 +287,7 @@ export component FindTab inherits HorizontalLayout {
                         alignment: center;
                         spacing: 12px;
                         Text {
-                            text: "No duplicate assets loaded. Choose scan parameters in the left pane and begin auditing.";
+                            text: "No duplicate assets loaded. Choose scan parameters in the left pane or drop files/folders here.";
                             color: #808080;
                             horizontal-alignment: center;
                             vertical-alignment: center;

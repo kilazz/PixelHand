@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-/// Highly optimized Disjoint Set Union (Union-Find) implementing Path Compression
-/// and Union by Rank to guarantee near-constant amortized time complexity.
+/// Disjoint Set Union (Union-Find) data structure implementing Path Compression
+/// and Union by Rank to provide near-constant amortized time complexity.
 pub struct UnionFind {
     parent: Vec<usize>,
     rank: Vec<usize>,
@@ -18,7 +18,7 @@ impl UnionFind {
     }
 
     /// Finds the representative root of the set containing element `i` recursively.
-    /// Performs Path Compression along the way to flatten the tree structure.
+    /// Performs Path Compression along the traversal to flatten the tree structure.
     pub fn find(&mut self, i: usize) -> usize {
         if self.parent[i] == i {
             return i;
@@ -51,7 +51,7 @@ impl UnionFind {
         }
     }
 
-    /// Consolidates the flat disjoint sets into a grouped map mapping root indices to member indices.
+    /// Consolidates disjoint sets into a mapped collection of root indices to their member indices.
     pub fn get_groups(mut self) -> HashMap<usize, Vec<usize>> {
         let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
         for i in 0..self.parent.len() {

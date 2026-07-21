@@ -1,4 +1,4 @@
-// src/scanners/ai.rs
+// src/ai/scanner.rs
 
 use anyhow::{Context, Result, anyhow};
 use rayon::prelude::*;
@@ -8,12 +8,19 @@ use std::sync::atomic::Ordering;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use xxhash_rust::xxh64::Xxh64;
 
-use crate::core::database::{DatabaseService, DbRecord};
-use crate::core::inference::{InferenceEngine, PreprocessingConfig};
-use crate::scanners::AnalysisItem;
-use crate::state::models::AiModelType;
-use crate::state::{AiSearchResultSummary, DuplicateFileSummary, DuplicateGroupSummary};
-use crate::utils::helpers::discover_files;
+use crate::ai::database::{DatabaseService, DbRecord};
+use crate::ai::inference::{InferenceEngine, PreprocessingConfig};
+use crate::perceptual::hashing::AnalysisType;
+use crate::qc::rules::QcImageMetadata;
+use crate::state::models::{
+    AiModelType, AiSearchResultSummary, DuplicateFileSummary, DuplicateGroupSummary, ScanParams,
+};
+use crate::utils::clustering::UnionFind;
+use crate::utils::helpers::{AnalysisItem, discover_files, generate_analysis_items};
+
+// ==========================================
+// --- DECOUPLED SEMAPHORE FOR PARALEL IO ---
+// ==========================================
 
 struct DecoupledSemaphore {
     count: Mutex<usize>,
@@ -56,6 +63,10 @@ fn get_decode_semaphore() -> &'static DecoupledSemaphore {
     DECODE_SEMAPHORE.get_or_init(|| DecoupledSemaphore::new(2))
 }
 
+// ==========================================
+// --- PRECISION PRESETS MAPPING ------------
+// ==========================================
+
 fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
     match precision_idx {
         0 => (8, 1),
@@ -66,8 +77,12 @@ fn map_precision_presets(precision_idx: i32) -> (usize, usize) {
     }
 }
 
+// ==========================================
+// --- DIRECTORY INDEXING ENGINE ------------
+// ==========================================
+
 async fn scan_and_index_directory(
-    params: &super::ScanParams,
+    params: &ScanParams,
 ) -> Result<(DatabaseService, Arc<InferenceEngine>, Vec<DbRecord>)> {
     let path = PathBuf::from(&params.paths.dir_a);
     if !path.is_dir() {
@@ -87,7 +102,7 @@ async fn scan_and_index_directory(
         crate::app::append_to_console_log(&warn);
     }
 
-    // Strongly-typed model resolution replacing raw integer index mapping (nested under params.ai)
+    // Resolve caching directory names and parameters based on model type
     let folder_name = if params.ai.ai_model == AiModelType::Custom {
         params.ai.custom_model_path.clone()
     } else {
@@ -145,13 +160,13 @@ async fn scan_and_index_directory(
         &params.execution_provider,
     )?);
 
-    // Provide dynamic console logging about which acceleration engine was successfully compiled
+    // Provide logging feedback on the active backend compilation provider
     crate::app::append_to_console_log(&format!(
-        "[AI] ONNX Session successfully compiled. Active hardware acceleration provider: {}",
+        "[AI] ONNX Session compiled. Active hardware acceleration provider: {}",
         engine.actual_provider
     ));
 
-    let items = super::generate_analysis_items(&paths, params);
+    let items = generate_analysis_items(&paths, params);
 
     let mut final_records = Vec::with_capacity(items.len());
     let mut items_to_encode = Vec::new();
@@ -160,15 +175,14 @@ async fn scan_and_index_directory(
     for item in &items {
         let p_str = item.path.to_string_lossy().to_string();
         let chan_str = match item.analysis_type {
-            crate::core::perceptual::AnalysisType::R => "R",
-            crate::core::perceptual::AnalysisType::G => "G",
-            crate::core::perceptual::AnalysisType::B => "B",
-            crate::core::perceptual::AnalysisType::A => "A",
-            crate::core::perceptual::AnalysisType::Luminance => "Luminance",
+            AnalysisType::R => "R",
+            AnalysisType::G => "G",
+            AnalysisType::B => "B",
+            AnalysisType::A => "A",
+            AnalysisType::Luminance => "Luminance",
             _ => "Composite",
         };
 
-        // We use lightweight fs::metadata here explicitly for caching checks
         let file_meta = fs::metadata(&item.path);
         let size = file_meta.as_ref().map(|m| m.len()).unwrap_or(0);
         let mtime = file_meta
@@ -231,8 +245,7 @@ async fn scan_and_index_directory(
             let on_progress_clone = params.on_progress.clone();
             let processed_items_clone = processed_items.clone();
 
-            // Offload CPU-heavy file decoding, Rayon par_iter structures, and ONNX batch encoding
-            // to blocking threads. This keeps Tokio's async worker threads completely unblocked.
+            // Offload CPU-heavy file decoding and ONNX batch encoding to blocking task pools
             let chunk_records_res = tokio::task::spawn_blocking(move || {
                 let loaded_images: Vec<(AnalysisItem, image::DynamicImage)> = chunk_vec
                     .par_iter()
@@ -255,7 +268,7 @@ async fn scan_and_index_directory(
                                 None
                             };
 
-                        // Select closest mip level dynamically based on AI model architecture
+                        // Select closest target resolution bounds based on model requirements
                         let target_size = match params_ai_model {
                             AiModelType::SiglipBase
                             | AiModelType::SiglipLarge
@@ -270,7 +283,7 @@ async fn scan_and_index_directory(
                         )
                         .ok()?;
 
-                        let processed = crate::core::perceptual::preprocess_image_channels(
+                        let processed = crate::perceptual::hashing::preprocess_image_channels(
                             &img,
                             item.analysis_type,
                             params_prep_ignore_solid,
@@ -306,11 +319,11 @@ async fn scan_and_index_directory(
                 {
                     for (item, vector) in chunk_items.into_iter().zip(vectors) {
                         let chan_str = match item.analysis_type {
-                            crate::core::perceptual::AnalysisType::R => "R",
-                            crate::core::perceptual::AnalysisType::G => "G",
-                            crate::core::perceptual::AnalysisType::B => "B",
-                            crate::core::perceptual::AnalysisType::A => "A",
-                            crate::core::perceptual::AnalysisType::Luminance => "Luminance",
+                            AnalysisType::R => "R",
+                            AnalysisType::G => "G",
+                            AnalysisType::B => "B",
+                            AnalysisType::A => "A",
+                            AnalysisType::Luminance => "Luminance",
                             _ => "Composite",
                         };
 
@@ -371,13 +384,16 @@ async fn scan_and_index_directory(
     Ok((db, engine, final_records))
 }
 
-pub async fn run_ai_duplicate_scan(
-    params: super::ScanParams,
-) -> Result<Vec<DuplicateGroupSummary>> {
+// ==========================================
+// --- DUPLICATE SCANNERS IMPLEMENTATIONS ---
+// ==========================================
+
+/// Scans the folder using semantic vector similarity threshold margins to cluster duplicate groups.
+pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
     let (db, _engine, records) = scan_and_index_directory(&params).await?;
 
     let dist_threshold = 1.0 - (params.similarity / 100.0);
-    let mut uf = crate::utils::clustering::UnionFind::new(records.len());
+    let mut uf = UnionFind::new(records.len());
 
     let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
 
@@ -437,7 +453,7 @@ pub async fn run_ai_duplicate_scan(
             let record = &records[idx];
             let p = PathBuf::from(&record.path);
 
-            let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&p);
+            let qc_meta = QcImageMetadata::extract_or_fallback(&p);
 
             file_summaries.push(DuplicateFileSummary {
                 path: record.path.clone(),
@@ -504,31 +520,33 @@ pub async fn run_ai_duplicate_scan(
     Ok(results)
 }
 
-/// Executes image-to-image or text-to-image semantic search dynamically.
-pub async fn run_ai_search(params: super::ScanParams) -> Result<Vec<AiSearchResultSummary>> {
+// ==========================================
+// --- SEMANTIC SEARCH EXECUTION ------------
+// ==========================================
+
+/// Runs a semantic query search (text queries or image reference queries) using the vector database.
+pub async fn run_ai_search(params: ScanParams) -> Result<Vec<AiSearchResultSummary>> {
     let (db, engine, _records) = scan_and_index_directory(&params).await?;
     let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
 
     let query_path = std::path::Path::new(&params.paths.query_text);
 
-    // Check if the query is a physical file path on disk.
-    // If true, load and run it through the Vision Encoder. Otherwise, fall back to Text Tokenization.
+    // Route query extraction: if the string represents a valid image file, run through Vision Encoder
     let query_vector = if query_path.is_file() {
-        tracing::info!("Query target detected as a file. Loading and running vision encoder...");
+        tracing::info!("Query target detected as a file path. Encoding reference image...");
 
         let img = crate::format_loaders::open_image_with_dds_fallback(query_path, Some(256), None)
-            .map_err(|e| anyhow!("Failed to load reference image for visual query: {}", e))?;
+            .map_err(|e| anyhow!("Failed to load reference image for query: {}", e))?;
 
         let config =
             PreprocessingConfig::for_model(params.ai.ai_model, params.ai.custom_model_arch);
 
-        // Encode the single image and pop the first returned vector embedding
         let mut vectors = engine.encode_images_batch(&[img], &config)?;
         vectors
             .pop()
-            .ok_or_else(|| anyhow!("Failed to generate visual embedding for query target"))?
+            .ok_or_else(|| anyhow!("Failed to generate visual embedding for query reference"))?
     } else {
-        tracing::info!("Query target is a text string. Running text tokenizer pipeline...");
+        tracing::info!("Query target is a text string. Encoding via Text Tokenizer...");
         engine.encode_text(&params.paths.query_text)?
     };
 

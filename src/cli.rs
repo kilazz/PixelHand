@@ -1,10 +1,9 @@
 // src/cli.rs
 
-use crate::scanners::{
-    ScanAiSettings, ScanParams, ScanPaths, ScanPreprocessing, ScanQcRules, ScanVisualReports,
-    exact, qc,
+use crate::state::models::{
+    AiModelType, ScanAiSettings, ScanParams, ScanPaths, ScanPreprocessing, ScanQcRules,
+    ScanVisualReports, SearchMethod,
 };
-use crate::state::models::{AiModelType, SearchMethod};
 use anyhow::{Result, anyhow};
 
 /// Main CLI entry point.
@@ -62,7 +61,7 @@ fn print_help() {
     println!("  --validate-normals    Validate typical normal maps format");
 }
 
-/// Helper constructor to centralize default scan options configuration and prevent boilerplate replication.
+/// Helper constructor to centralize default scan options configuration.
 fn create_default_cli_params(dir: String) -> ScanParams {
     ScanParams {
         paths: ScanPaths {
@@ -137,7 +136,7 @@ async fn run_exact_cli_scan(dir: String) -> Result<()> {
     println!("[CLI] Running Byte-Exact Scan (xxHash64) on: {}\n", dir);
     let params = create_default_cli_params(dir);
 
-    match exact::run_exact_scan(params).await {
+    match crate::exact::scanner::run_exact_scan(params).await {
         Ok(results) => {
             println!(
                 "[SUCCESS] Exact Scan Completed! Found {} duplicate groups:",
@@ -184,7 +183,7 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
     params.qc.qc_bit_depth = check_bit;
     params.qc.qc_normals = validate_normals;
 
-    match qc::run_qc_scan_internal(params).await {
+    match crate::qc::scanner::run_qc_scan_internal(params).await {
         Ok(results) => {
             println!(
                 "[SUCCESS] QC Scan Completed! Found {} issues:",

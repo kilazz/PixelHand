@@ -1,7 +1,12 @@
-// src/utils/viewport.rs
+// src/viewer/viewport.rs
 
 use crate::app::{AppWindow, ViewportState};
-use crate::utils;
+use crate::utils::cache::get_channel_preview_image;
+use crate::utils::image_processing::{
+    apply_aspect_ratio, generate_histogram_image, slice_spritesheet_frame,
+};
+use crate::utils::slint_conversions::{convert_to_slint_image, get_current_active_channel};
+use crate::viewer::tonemapping::{apply_manual_corrections, calculate_difference_map};
 use slint::ComponentHandle;
 
 struct ViewportStateParams {
@@ -18,6 +23,9 @@ struct ViewportStateParams {
     enable_blending: bool,
 }
 
+/// Triggers an asynchronous, non-blocking viewport preview update.
+/// Retrieves cached texture channel channels, slices spritesheet sub-regions on background task threads,
+/// applies manual color corrections and tonemapping configuration metrics, and dispatches outputs back to Slint's UI thread.
 pub fn trigger_viewport_update(
     app_weak: slint::Weak<AppWindow>,
     orig_path: String,
@@ -30,9 +38,9 @@ pub fn trigger_viewport_update(
     let viewport_state = ui.global::<ViewportState>();
     let viewer = viewport_state.get_viewer();
 
-    // Extract thread-safe viewport settings to avoid capturing Slint handles inside async tasks
+    // Extract thread-safe parameters to prevent capturing active Slint component reference handles
     let params = ViewportStateParams {
-        channel: utils::ui::get_current_active_channel(&viewport_state).to_string(),
+        channel: get_current_active_channel(&viewport_state).to_string(),
         compare_mode: viewport_state.get_compare_mode(),
         mip_level: viewport_state.get_active_mip_level() as u32,
         brightness: viewer.manual_brightness,
@@ -52,7 +60,7 @@ pub fn trigger_viewport_update(
         params.active_frame
     };
 
-    // Store state before asynchronous execution
+    // Keep global thread-safe settings context updated before launching tasks
     crate::app::update_viewer_settings(|s| {
         let tonemap = viewport_state.get_tonemap();
         s.tonemap_enabled = tonemap.tonemap_enabled;
@@ -63,45 +71,32 @@ pub fn trigger_viewport_update(
     let app_weak_clone = app_weak.clone();
 
     tokio::spawn(async move {
-        // Fetch current frame previews asynchronously (disk/memory bound)
+        // Fetch requested channel preview buffers asynchronously (disk/memory-bound cache hits)
         let raw_orig =
-            utils::cache::get_channel_preview_image(&orig_path, &params.channel, params.mip_level)
-                .await;
-        let raw_dup =
-            utils::cache::get_channel_preview_image(&dup_path, &params.channel, params.mip_level)
-                .await;
+            get_channel_preview_image(&orig_path, &params.channel, params.mip_level).await;
+        let raw_dup = get_channel_preview_image(&dup_path, &params.channel, params.mip_level).await;
 
-        // Fetch next frame previews for blending
+        // Fetch next frame channel preview buffers if blending is enabled
         let (raw_orig_next, raw_dup_next) = if params.enable_blending && total_frames > 1 {
             (
-                utils::cache::get_channel_preview_image(
-                    &orig_path,
-                    &params.channel,
-                    params.mip_level,
-                )
-                .await,
-                utils::cache::get_channel_preview_image(
-                    &dup_path,
-                    &params.channel,
-                    params.mip_level,
-                )
-                .await,
+                get_channel_preview_image(&orig_path, &params.channel, params.mip_level).await,
+                get_channel_preview_image(&dup_path, &params.channel, params.mip_level).await,
             )
         } else {
             (None, None)
         };
 
-        // Offload ALL CPU-bound image operations to a dedicated blocking worker thread.
+        // Offload CPU-bound pixel math operations to a dedicated blocking worker thread pool
         let result = tokio::task::spawn_blocking(move || {
             let mut o = raw_orig;
             let mut d = raw_dup;
             let mut o_n = raw_orig_next;
             let mut d_n = raw_dup_next;
 
-            // Perform Spritesheet slicing for Frame N (Current)
+            // Perform sub-region frame cropping if spritesheet slicing is configured (Current Frame)
             if params.grid_cols > 1 || params.grid_rows > 1 {
                 if let Some(ref img) = o {
-                    o = Some(utils::ui::slice_spritesheet_frame(
+                    o = Some(slice_spritesheet_frame(
                         img,
                         params.grid_cols,
                         params.grid_rows,
@@ -109,7 +104,7 @@ pub fn trigger_viewport_update(
                     ));
                 }
                 if let Some(ref img) = d {
-                    d = Some(utils::ui::slice_spritesheet_frame(
+                    d = Some(slice_spritesheet_frame(
                         img,
                         params.grid_cols,
                         params.grid_rows,
@@ -117,10 +112,10 @@ pub fn trigger_viewport_update(
                     ));
                 }
 
-                // Perform Spritesheet slicing for Frame N+1 (Next)
+                // Perform sub-region frame cropping (Next Frame)
                 if params.enable_blending {
                     if let Some(ref img) = o_n {
-                        o_n = Some(utils::ui::slice_spritesheet_frame(
+                        o_n = Some(slice_spritesheet_frame(
                             img,
                             params.grid_cols,
                             params.grid_rows,
@@ -128,7 +123,7 @@ pub fn trigger_viewport_update(
                         ));
                     }
                     if let Some(ref img) = d_n {
-                        d_n = Some(utils::ui::slice_spritesheet_frame(
+                        d_n = Some(slice_spritesheet_frame(
                             img,
                             params.grid_cols,
                             params.grid_rows,
@@ -138,72 +133,53 @@ pub fn trigger_viewport_update(
                 }
             }
 
-            // Apply manual Brightness, Contrast, and Gamma color corrections (Current Frame)
+            // Apply Brightness, Contrast, and Gamma mathematical corrections (Current Frame)
             if let Some(ref mut img) = o {
-                crate::core::tonemapper::apply_manual_corrections(
-                    img,
-                    params.brightness,
-                    params.contrast,
-                    params.gamma,
-                );
+                apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
             }
             if let Some(ref mut img) = d {
-                crate::core::tonemapper::apply_manual_corrections(
-                    img,
-                    params.brightness,
-                    params.contrast,
-                    params.gamma,
-                );
+                apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
             }
 
-            // Apply manual Brightness, Contrast, and Gamma color corrections (Next Frame)
+            // Apply Brightness, Contrast, and Gamma mathematical corrections (Next Frame)
             if params.enable_blending {
                 if let Some(ref mut img) = o_n {
-                    crate::core::tonemapper::apply_manual_corrections(
-                        img,
-                        params.brightness,
-                        params.contrast,
-                        params.gamma,
-                    );
+                    apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
                 }
                 if let Some(ref mut img) = d_n {
-                    crate::core::tonemapper::apply_manual_corrections(
-                        img,
-                        params.brightness,
-                        params.contrast,
-                        params.gamma,
-                    );
+                    apply_manual_corrections(img, params.brightness, params.contrast, params.gamma);
                 }
             }
 
-            // Apply aspect ratio scaling multipliers (Ratio Slider - Current Frame)
+            // Apply aspect ratio resizing multipliers (Current Frame)
             if let Some(ref img) = o {
-                o = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+                o = Some(apply_aspect_ratio(img, params.ratio));
             }
             if let Some(ref img) = d {
-                d = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+                d = Some(apply_aspect_ratio(img, params.ratio));
             }
 
-            // Apply aspect ratio scaling multipliers (Ratio Slider - Next Frame)
+            // Apply aspect ratio resizing multipliers (Next Frame)
             if params.enable_blending {
                 if let Some(ref img) = o_n {
-                    o_n = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+                    o_n = Some(apply_aspect_ratio(img, params.ratio));
                 }
                 if let Some(ref img) = d_n {
-                    d_n = Some(utils::ui::apply_aspect_ratio(img, params.ratio));
+                    d_n = Some(apply_aspect_ratio(img, params.ratio));
                 }
             }
 
-            // Pre-extract width and height before moving to event loop
+            // Extract exact dimensions before returning to the main thread
             let (sprite_w, sprite_h) = if let Some(ref img) = o {
                 (img.width() as i32, img.height() as i32)
             } else {
                 (0, 0)
             };
 
+            // Compute difference heatmap or raw subtraction difference matrix
             let raw_diff = if params.compare_mode == 3 {
                 if let (Some(orig), Some(dup)) = (&o, &d) {
-                    crate::core::tonemapper::calculate_difference_map(orig, dup, true).ok()
+                    calculate_difference_map(orig, dup, true).ok()
                 } else {
                     None
                 }
@@ -211,8 +187,9 @@ pub fn trigger_viewport_update(
                 None
             };
 
+            // Build overlapping grayscale histograms
             let hist_img = if let (Some(orig), Some(dup)) = (&o, &d) {
-                Some(utils::ui::generate_histogram_image(orig, dup))
+                Some(generate_histogram_image(orig, dup))
             } else {
                 None
             };
@@ -221,7 +198,7 @@ pub fn trigger_viewport_update(
         })
         .await;
 
-        // Unpack results and dispatch UI updates safely, logging errors on failure
+        // Safely update Slint singletons inside Slint's Event Loop on task completion
         match result {
             Ok((sprite_w, sprite_h, o, d, o_n, d_n, raw_diff, hist_img)) => {
                 let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
@@ -232,29 +209,26 @@ pub fn trigger_viewport_update(
                     viewport_state.set_sprites_count(total_frames as i32);
 
                     if let Some(img) = o {
-                        viewport_state.set_image_original(utils::ui::convert_to_slint_image(&img));
+                        viewport_state.set_image_original(convert_to_slint_image(&img));
                     }
                     if let Some(img) = d {
-                        viewport_state.set_image_duplicate(utils::ui::convert_to_slint_image(&img));
+                        viewport_state.set_image_duplicate(convert_to_slint_image(&img));
                     }
 
                     if params.enable_blending {
                         if let Some(img) = o_n {
-                            viewport_state
-                                .set_image_original_next(utils::ui::convert_to_slint_image(&img));
+                            viewport_state.set_image_original_next(convert_to_slint_image(&img));
                         }
                         if let Some(img) = d_n {
-                            viewport_state
-                                .set_image_duplicate_next(utils::ui::convert_to_slint_image(&img));
+                            viewport_state.set_image_duplicate_next(convert_to_slint_image(&img));
                         }
                     }
 
                     if let Some(diff) = raw_diff {
-                        viewport_state.set_image_heatmap(utils::ui::convert_to_slint_image(&diff));
+                        viewport_state.set_image_heatmap(convert_to_slint_image(&diff));
                     }
                     if let Some(hist) = hist_img {
-                        viewport_state
-                            .set_histogram_image(utils::ui::convert_to_slint_image(&hist));
+                        viewport_state.set_histogram_image(convert_to_slint_image(&hist));
                     }
                 });
             }

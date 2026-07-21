@@ -6,14 +6,12 @@ use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
 
-use crate::handlers::controller::AppController;
-use crate::state::{AppSettings, AppState};
+use crate::handlers::AppController;
+use crate::state::AppState;
+use crate::state::models::AppSettings;
 
 // Generate Slint Rust code from the UI markup
 slint::include_modules!();
-
-// Re-export the extracted viewport pipeline for perfect backward compatibility
-pub use crate::utils::viewport::trigger_viewport_update;
 
 // ==========================================
 // --- CENTRAL APPLICATION CONTEXT ----------
@@ -133,20 +131,20 @@ pub fn append_to_console_log(msg: &str) {
 }
 
 /// Dynamic state mapper producing a pure config instance for loaders on demand.
-pub fn get_active_tonemap_config() -> crate::core::tonemapper::TonemapConfig {
+pub fn get_active_tonemap_config() -> crate::viewer::tonemapping::TonemapConfig {
     let s = get_viewer_settings();
-    crate::core::tonemapper::TonemapConfig {
+    crate::viewer::tonemapping::TonemapConfig {
         enabled: s.tonemap_enabled,
         auto_exposure: s.auto_exposure_enabled,
         operator: match s.tonemap_operator {
-            0 => crate::core::tonemapper::TonemapOperator::None,
-            1 => crate::core::tonemapper::TonemapOperator::FalseColor,
-            2 => crate::core::tonemapper::TonemapOperator::AcesFilmic,
-            3 => crate::core::tonemapper::TonemapOperator::Aces2Fit,
-            4 => crate::core::tonemapper::TonemapOperator::PbrNeutral,
-            5 => crate::core::tonemapper::TonemapOperator::ICtCpBt2446c,
-            6 => crate::core::tonemapper::TonemapOperator::ICtCpLumina,
-            _ => crate::core::tonemapper::TonemapOperator::AcesFilmic,
+            0 => crate::viewer::tonemapping::TonemapOperator::None,
+            1 => crate::viewer::tonemapping::TonemapOperator::FalseColor,
+            2 => crate::viewer::tonemapping::TonemapOperator::AcesFilmic,
+            3 => crate::viewer::tonemapping::TonemapOperator::Aces2Fit,
+            4 => crate::viewer::tonemapping::TonemapOperator::PbrNeutral,
+            5 => crate::viewer::tonemapping::TonemapOperator::ICtCpBt2446c,
+            6 => crate::viewer::tonemapping::TonemapOperator::ICtCpLumina,
+            _ => crate::viewer::tonemapping::TonemapOperator::AcesFilmic,
         },
     }
 }
@@ -171,7 +169,7 @@ pub fn run_gui() -> Result<()> {
         }
     }
 
-    // Mute DirectML hardware execution logs
+    // Configure logging and tracing
     tracing_subscriber::fmt()
         .with_writer(UiLogWriter)
         .with_env_filter("info,ort=warn")
@@ -187,8 +185,8 @@ pub fn run_gui() -> Result<()> {
     let loaded_settings = crate::utils::settings::load_settings().unwrap_or_default();
     apply_settings_to_ui(&app, &loaded_settings);
 
-    let checkerboard_dark = crate::utils::ui::generate_checkerboard(false);
-    let checkerboard_light = crate::utils::ui::generate_checkerboard(true);
+    let checkerboard_dark = crate::utils::image_processing::generate_checkerboard(false);
+    let checkerboard_light = crate::utils::image_processing::generate_checkerboard(true);
 
     // Assign patterns to the modular ViewportState singleton
     let viewport_state = app.global::<ViewportState>();
@@ -202,9 +200,9 @@ pub fn run_gui() -> Result<()> {
         s.tonemap_operator = loaded_settings.tonemap.tonemap_operator as usize;
     });
 
-    crate::scanners::ENABLE_PREVIEWS
+    crate::utils::cache::ENABLE_PREVIEWS
         .store(loaded_settings.preview.enable_previews, Ordering::Relaxed);
-    crate::scanners::PREVIEW_QUALITY
+    crate::utils::cache::PREVIEW_QUALITY
         .store(loaded_settings.preview.preview_quality, Ordering::Relaxed);
 
     // Flush initial startup logs queued before UI loop initialization
@@ -269,8 +267,7 @@ pub fn run_gui() -> Result<()> {
         }
     });
 
-    // 1. High-precision native Slint Timer for the Flicker Compare Mode
-    // Executing entirely on the UI thread to remove cross-thread event loop queue overhead
+    // High-precision native Slint Timer for the Flicker Compare Mode
     let flicker_timer = slint::Timer::default();
     let app_weak_flicker = app.as_weak();
     let mut flicker_elapsed_ms = 0u64;
@@ -299,8 +296,7 @@ pub fn run_gui() -> Result<()> {
         },
     );
 
-    // 2. High-precision native Slint Timer for the Flipbook Animation
-    // Executing frame progressions at ~60 FPS synchronously on the UI thread
+    // High-precision native Slint Timer for the Flipbook Animation
     let flipbook_timer = slint::Timer::default();
     let app_weak_flipbook = app.as_weak();
     let mut continuous_time_ms = 0.0f64;
@@ -381,6 +377,6 @@ fn apply_settings_to_ui(app: &AppWindow, settings: &AppSettings) {
     scan_config.set_execution_provider(settings.execution_provider);
     scan_config.set_search_precision(settings.search_precision);
 
-    crate::scanners::ENABLE_PREVIEWS.store(settings.preview.enable_previews, Ordering::Relaxed);
-    crate::scanners::PREVIEW_QUALITY.store(settings.preview.preview_quality, Ordering::Relaxed);
+    crate::utils::cache::ENABLE_PREVIEWS.store(settings.preview.enable_previews, Ordering::Relaxed);
+    crate::utils::cache::PREVIEW_QUALITY.store(settings.preview.preview_quality, Ordering::Relaxed);
 }

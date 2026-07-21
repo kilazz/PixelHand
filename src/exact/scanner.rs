@@ -1,4 +1,4 @@
-// src/scanners/exact.rs
+// src/exact/scanner.rs
 
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
@@ -7,8 +7,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
-use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
-use crate::utils::helpers::calculate_xxhash;
+use crate::qc::rules::QcImageMetadata;
+use crate::state::models::{DuplicateFileSummary, DuplicateGroupSummary, ScanParams};
+use crate::utils::helpers::{calculate_xxhash, run_scan_pipeline};
 
 #[derive(Debug, Clone)]
 struct FileMetadata {
@@ -19,10 +20,10 @@ struct FileMetadata {
     hash: String,
 }
 
-/// Executes a byte-exact duplicate scan across files using high-speed xxHash64.
-pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
-    // Delegate all preparatory routine (path validation, file discovery, exclusion) to the pipeline
-    super::run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
+/// Executes a byte-exact duplicate scan across discovered files using high-speed xxHash64.
+pub async fn run_exact_scan(params: ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
+    // Delegate file discovery, warnings capturing, and progress reporting to the pipeline helper
+    run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
         let total = paths.len();
         let processed = std::sync::atomic::AtomicUsize::new(0);
 
@@ -40,7 +41,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
                     return None;
                 }
 
-                // Extract lightweight image size here to avoid full QC parsing just to find if it's a duplicate
+                // Extract lightweight image size here to bypass heavier QC parsing on non-duplicates
                 let (width, height) = imagesize::size(p)
                     .map(|dim| (dim.width, dim.height))
                     .unwrap_or((0, 0));
@@ -87,7 +88,7 @@ pub async fn run_exact_scan(params: super::ScanParams) -> Result<Vec<DuplicateGr
                 .into_iter()
                 .map(|f| {
                     // Centralized fallback handles errors gracefully inside extract_or_fallback
-                    let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&f.path);
+                    let qc_meta = QcImageMetadata::extract_or_fallback(&f.path);
 
                     DuplicateFileSummary {
                         path: f.path.to_string_lossy().to_string(),

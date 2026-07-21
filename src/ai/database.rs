@@ -1,4 +1,4 @@
-// src/core/database.rs
+// src/ai/database.rs
 
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -268,7 +268,7 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Performs a high-speed vector similarity search using Cosine metrics with optional IVF-PQ indexing options (nprobes, refine_factor).
+    /// Performs a high-speed vector similarity search using Cosine metrics.
     pub async fn search_similarity(
         &self,
         query_vector: &[f32],

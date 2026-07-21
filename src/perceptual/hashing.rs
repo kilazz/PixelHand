@@ -1,8 +1,12 @@
-// src/core/perceptual.rs
+// src/perceptual/hashing.rs
 
 use image::{DynamicImage, RgbaImage};
 use image_hasher::{HashAlg, HasherConfig};
 use std::path::Path;
+
+// ==========================================
+// --- ANALYSIS TYPE ENUM -------------------
+// ==========================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum AnalysisType {
@@ -14,8 +18,12 @@ pub enum AnalysisType {
     A,
 }
 
+// ==========================================
+// --- IMAGE ANALYSIS MATHEMATICS ----------
+// ==========================================
+
 /// Detects if an image has a fully transparent alpha channel but contains
-/// valid RGB visual data (common in game engines/packed textures).
+/// valid RGB visual data (common in game engines or packed textures).
 /// Processes sequentially to leverage CPU SIMD auto-vectorization on small-sized blocks.
 pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
     let pixels = rgba.as_raw();
@@ -31,8 +39,7 @@ pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
         .any(|pixel| pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0)
 }
 
-/// Shared color-channel splitting and luminance processing logic
-/// for both Perceptual and AI scanning pipelines.
+/// Shared color-channel splitting and luminance processing logic.
 pub fn preprocess_image_channels(
     img: &DynamicImage,
     analysis_type: AnalysisType,
@@ -78,7 +85,7 @@ pub fn preprocess_image_channels(
             } else {
                 let mut bg = RgbaImage::new(rgba_img.width(), rgba_img.height());
 
-                // Simplified assignment leveraging auto-deref coercion to prevent Clippy warnings
+                // Leverage auto-deref coercion to write cleanly to raw mutable slice
                 let bg_slice: &mut [u8] = &mut bg;
                 bg_slice
                     .chunks_exact_mut(4)
@@ -105,15 +112,14 @@ pub fn calculate_perceptual_hash(
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
 ) -> Option<Vec<u8>> {
-    // Request a downscaled 128px mipmap during parsing to conserve CPU cycles and RAM.
-    // Passed `None` for tonemap_config as perceptual hashing operates on raw/default SDR mapping.
+    // Request a downscaled 128px mipmap during parsing to conserve CPU cycles and RAM
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
 
     let processed_image =
         preprocess_image_channels(&resized_img, analysis_type, ignore_solid_channels)?;
 
-    // Compute gradient hash (dHash) exclusively; phash remains unused
+    // Compute gradient hash (dHash) exclusively; phash is not used
     let dhash_result = HasherConfig::new()
         .hash_alg(HashAlg::Gradient)
         .hash_size(8, 8)

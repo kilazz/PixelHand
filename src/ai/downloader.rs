@@ -1,6 +1,6 @@
-// src/core/downloader.rs
+// src/ai/downloader.rs
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use futures::StreamExt;
 use reqwest::Client;
 use slint::ComponentHandle;
@@ -13,9 +13,10 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::state::models::AiModelType;
 
-// Global lock to prevent conflicts between background download and manual scan threads
+// Global lock to prevent conflicts between concurrent download requests and manual scan threads
 static DOWNLOAD_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 
+/// Downloads a file from a specified URL to the local destination path with progress reporting and cooperative cancellation.
 pub async fn download_file_with_progress<F>(
     progress_callback: F,
     url: &str,
@@ -27,22 +28,25 @@ where
 {
     tracing::info!("Building secure HTTP client with safety timeouts...");
 
-    // Configure client with safety timeouts to avoid infinite hangs on blocked networks
+    // Configure reqwest client with timeouts to prevent infinite hangs on slow networks
     let client = Client::builder()
         .connect_timeout(std::time::Duration::from_secs(15))
-        .timeout(std::time::Duration::from_secs(300)) // 5 minutes overall timeout
+        .timeout(std::time::Duration::from_secs(300)) // 5 minutes overall timeout limit
         .build()
         .context("Failed to build secure HTTP client")?;
 
-    tracing::info!("Connecting to Hugging Face CDN (sending GET request)...");
+    tracing::info!(
+        "Connecting to Hugging Face CDN: sending GET request to {}",
+        url
+    );
 
     let response = client.get(url).send().await.context(
-        "HTTP request failed. Hugging Face may be blocked by your ISP or a VPN is required.",
+        "HTTP request failed. Connection could be blocked by network settings or requires a VPN.",
     )?;
 
     if !response.status().is_success() {
-        return Err(anyhow::anyhow!(
-            "Server returned HTTP error status: {}",
+        return Err(anyhow!(
+            "Server returned an HTTP error status code: {}",
             response.status()
         ));
     }
@@ -55,21 +59,21 @@ where
 
     let mut file = File::create(dest_path)
         .await
-        .context("Failed to create destination model file on disk")?;
+        .context("Failed to create destination file on disk")?;
 
     let mut stream = response.bytes_stream();
     let mut bytes_downloaded = 0u64;
 
     while let Some(chunk_result) = stream.next().await {
-        // Safe cooperative cancellation check inside the stream loop
+        // Cooperative cancellation check during stream processing loop
         if cancel_token.load(Ordering::Relaxed) {
-            return Err(anyhow::anyhow!("Download cancelled by user"));
+            return Err(anyhow!("Download cancelled by user"));
         }
 
         let chunk = chunk_result?;
         file.write_all(&chunk)
             .await
-            .context("Failed to write model chunk to disk asynchronously")?;
+            .context("Failed to write downloaded chunks to disk")?;
 
         bytes_downloaded += chunk.len() as u64;
         let percentage = if total_bytes > 0 {
@@ -82,11 +86,13 @@ where
 
     file.flush()
         .await
-        .context("Failed to flush compiled file buffers to disk")?;
+        .context("Failed to flush file buffers to disk")?;
 
     Ok(())
 }
 
+/// Verifies if model weight files are cached locally on disk.
+/// If files are missing or corrupted, downloads them directly from Hugging Face CDN.
 pub async fn verify_and_download_models(
     app_weak: slint::Weak<crate::app::AppWindow>,
     model: AiModelType,
@@ -96,12 +102,12 @@ pub async fn verify_and_download_models(
         return Ok(());
     }
 
-    tracing::info!("Verifying AI models for architecture: {:?}", model);
+    tracing::info!("Verifying AI model weights for architecture: {:?}", model);
 
-    // Acquire lock to avoid concurrent downloads if triggered multiple times
+    // Acquire lock to prevent overlapping downloads if triggered multiple times
     let lock = DOWNLOAD_LOCK.get_or_init(|| AsyncMutex::new(()));
 
-    tracing::info!("Checking download queue state...");
+    tracing::info!("Acquiring download queue lock...");
     let _guard = lock.lock().await;
     tracing::info!("Download lock successfully acquired.");
 
@@ -170,7 +176,7 @@ pub async fn verify_and_download_models(
             ),
         ],
         AiModelType::Llm2ClipBase => vec![
-            // microsoft/LLM2CLIP-Openai-B-16 lacks tokenizer files. We redirect to standard CLIP-B/32 since vocabularies are identical.
+            // microsoft/LLM2CLIP-Openai-B-16 lacks tokenizer files. Standard CLIP-B/32 is compatible.
             (
                 "tokenizer.json",
                 "https://huggingface.co/Xenova/clip-vit-base-patch32/resolve/main/tokenizer.json",
@@ -200,12 +206,12 @@ pub async fn verify_and_download_models(
     let model_dir = app_dir.join("models").join(folder_name);
     fs::create_dir_all(&model_dir)
         .await
-        .context("Failed to build directory path for target models")?;
+        .context("Failed to create cache directory for models")?;
 
     for (name, url) in files {
         let dest = model_dir.join(name);
 
-        // Checks if the file exists and is not corrupted / empty (< 1KB)
+        // Verification step: checks file existence and ensures it is not a corrupted empty download (< 1KB)
         let is_valid = match tokio::fs::metadata(&dest).await {
             Ok(meta) => meta.len() > 1024,
             Err(_) => false,
@@ -218,16 +224,16 @@ pub async fn verify_and_download_models(
             );
         } else {
             tracing::info!(
-                "Model file '{}' is missing or corrupted. Preparing download...",
+                "Model file '{}' is missing or invalid. Preparing background download...",
                 name
             );
-            // Download to temporary .tmp files first to prevent corruption on interruption
+            // Download to temporary .tmp files first to prevent corrupt file mappings on interrupted downloads
             let tmp_dest = model_dir.join(format!("{}.tmp", name));
 
             let app_copy = app_weak.clone();
             let file_name = name.to_string();
 
-            // Force scanning banner to show progress via the Diagnostics singleton
+            // Set scanning state on the UI Diagnostics singleton to show progress bar
             let _ = app_copy.upgrade_in_event_loop(|ui| {
                 let diag = ui.global::<crate::app::Diagnostics>();
                 diag.set_is_scanning(true);
@@ -250,10 +256,10 @@ pub async fn verify_and_download_models(
             )
             .await;
 
-            // If download was cancelled or failed, remove the temporary file to keep disk clean
+            // In case of error or user cancellation, remove the temporary file to keep disk workspace clean
             if let Err(e) = download_res {
                 tracing::error!(
-                    "Download of '{}' failed or cancelled: {}. Cleaning up...",
+                    "Download of '{}' failed or was cancelled: {}. Cleaning temporary files...",
                     name,
                     e
                 );
@@ -266,24 +272,24 @@ pub async fn verify_and_download_models(
                 .await
                 .context("Failed to finalize downloaded file")?;
             tracing::info!(
-                "Model file '{}' successfully downloaded and verified.",
+                "Model file '{}' successfully downloaded and validated.",
                 name
             );
         }
     }
 
-    // Special optimization for single-file ONNX models like LLM2CLIP to save 1.2 GB of download
+    // Optimization for single-file models like LLM2CLIP to save 1.2 GB of duplicate download
     if model == AiModelType::Llm2ClipBase {
         let visual_dest = model_dir.join("visual.onnx");
         let text_dest = model_dir.join("text.onnx");
         if text_dest.exists() && !visual_dest.exists() {
             tracing::info!(
-                "Duplicating single-file LLM2CLIP model on disk to save 1.2 GB of download..."
+                "Duplicating single-file LLM2CLIP model on disk to prevent additional downloads..."
             );
             tokio::fs::copy(&text_dest, &visual_dest)
                 .await
                 .context("Failed to duplicate single-file ONNX model")?;
-            tracing::info!("LLM2CLIP visual model successfully duplicated.");
+            tracing::info!("LLM2CLIP visual model successfully duplicated on disk.");
         }
     }
 

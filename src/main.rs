@@ -1,13 +1,17 @@
 // src/main.rs
 
+mod ai;
 mod app;
 mod cli;
-mod core;
+mod exact;
 mod format_loaders;
 mod handlers;
-mod scanners;
+mod perceptual;
+mod qc;
+mod reporting;
 mod state;
 mod utils;
+mod viewer;
 
 use anyhow::Result;
 use std::env;
@@ -46,7 +50,7 @@ fn setup_panic_hook() {
         // Print report to standard error console
         eprintln!("{}", report);
 
-        // Attempt to write the report to a physical log file in our portable data dir
+        // Attempt to write the report to a physical log file in the portable data directory
         if let Ok(exe_path) = std::env::current_exe() {
             let exe_dir = exe_path
                 .parent()

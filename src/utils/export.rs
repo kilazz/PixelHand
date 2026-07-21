@@ -3,11 +3,13 @@
 use crate::state::AppState;
 use std::sync::Arc;
 
-/// Formats the active asset scan results and persists them to a CSV table via native save file dialogs.
+/// Formats active asset scan results and persists them to a CSV table via native save file dialogs.
 pub fn export_results_to_csv(state: Arc<parking_lot::Mutex<AppState>>) {
     let lock = state.lock();
 
-    if lock.results.is_empty() {
+    let is_empty =
+        lock.groups.is_empty() && lock.qc_issues.is_empty() && lock.inventory_files.is_empty();
+    if is_empty {
         crate::app::append_to_console_log("No data available to export.");
         return;
     }
@@ -18,31 +20,65 @@ pub fn export_results_to_csv(state: Arc<parking_lot::Mutex<AppState>>) {
         .set_file_name("Asset_Inventory.csv")
         .save_file()
     {
-        // Pre-allocate string capacity based on estimated row footprint to prevent memory re-allocations
-        let mut csv_data = String::with_capacity(lock.results.len() * 150);
+        let mut csv_data = String::with_capacity(1024 * 10);
         csv_data.push_str("File Name,Format,Dimensions,MipMaps,Cubemap,Size,Full Path\n");
 
-        for row in &lock.results {
-            if row.is_header {
-                continue;
+        use std::fmt::Write;
+
+        // Export Duplicate Groups
+        for group in &lock.groups {
+            for file in &group.files {
+                let name = std::path::Path::new(&file.path)
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+                let _ = writeln!(
+                    &mut csv_data,
+                    "\"{}\",\"{}\",\"{}x{}\",\"{}\",\"{}\",\"{}\",\"{}\"",
+                    name.replace('"', "\"\""),
+                    file.compression_format,
+                    file.width,
+                    file.height,
+                    file.mipmap_count,
+                    if file.is_cubemap { "YES" } else { "NO" },
+                    crate::utils::helpers::format_size(file.size),
+                    file.path.replace('"', "\"\"")
+                );
             }
+        }
 
-            // Escape quotes inside fields to comply with RFC 4180 CSV specifications
-            let escaped_name = row.name.replace('"', "\"\"");
-            let escaped_path = row.path.replace('"', "\"\"");
-
-            // Directly format fields into the pre-allocated buffer avoiding intermediate heap allocations
-            use std::fmt::Write;
+        // Export QC Issues
+        for issue in &lock.qc_issues {
+            let name = std::path::Path::new(&issue.path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
             let _ = writeln!(
                 &mut csv_data,
-                "\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\",\"{}\"",
-                escaped_name,
-                row.format_str,
-                row.dimensions_str,
-                row.mipmaps_str,
-                row.cubemap_str,
-                row.size_str,
-                escaped_path
+                "\"{}\",\"QC Issue: {}\",\"-\",\"-\",\"-\",\"-\",\"{}\"",
+                name.replace('"', "\"\""),
+                issue.issue,
+                issue.path.replace('"', "\"\"")
+            );
+        }
+
+        // Export Inventory Files
+        for file in &lock.inventory_files {
+            let name = std::path::Path::new(&file.path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
+            let _ = writeln!(
+                &mut csv_data,
+                "\"{}\",\"{}\",\"{}x{}\",\"{}\",\"{}\",\"{}\",\"{}\"",
+                name.replace('"', "\"\""),
+                file.compression_format,
+                file.width,
+                file.height,
+                file.mipmap_count,
+                if file.is_cubemap { "YES" } else { "NO" },
+                crate::utils::helpers::format_size(file.size),
+                file.path.replace('"', "\"\"")
             );
         }
 
@@ -63,7 +99,7 @@ pub fn export_results_to_csv(state: Arc<parking_lot::Mutex<AppState>>) {
     }
 }
 
-/// Persists the active UI diagnostic trace logs to a file on disk.
+/// Persists active UI diagnostic trace logs to a file on disk.
 pub fn export_diagnostics_log(log_text: &str) {
     if let Some(path) = rfd::FileDialog::new()
         .set_title("Export Console Log")

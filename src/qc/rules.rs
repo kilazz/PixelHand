@@ -1,18 +1,26 @@
-// src/core/qc.rs
+// src/qc/rules.rs
 
 use std::fs;
 use std::path::Path;
 use thiserror::Error;
 
+// ==========================================
+// --- TECHNICAL ERROR TYPES ----------------
+// ==========================================
+
 #[derive(Error, Debug)]
 pub enum QcError {
-    #[error("Failed to read DDS file structure: {0}")]
-    DdsReadFailed(String),
+    #[error("Failed to read image structure: {0}")]
+    MetadataExtractionFailed(String),
     #[error("File metadata access failed: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Image dimensions could not be read: {0}")]
     ImageSizeError(#[from] imagesize::ImageError),
 }
+
+// ==========================================
+// --- DATA MODELS & CONSTANTS --------------
+// ==========================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NormalMapFormat {
@@ -36,6 +44,7 @@ pub struct QcImageMetadata {
 }
 
 impl QcImageMetadata {
+    /// Safe metadata constructor that gracefully falls back to basic dimensions if full parsing fails.
     pub fn extract_or_fallback(path: &Path) -> Self {
         let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let (width, height) = match imagesize::size(path) {
@@ -65,6 +74,12 @@ impl QcImageMetadata {
     }
 }
 
+// ==========================================
+// --- RULES EVALUATION LOGIC ---------------
+// ==========================================
+
+/// Estimates the expected VRAM footprint of a texture on GPU memory.
+/// Considers standard block compressed ratios, row alignments, cubemaps, and mipmap chains.
 pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cubemap: bool) -> u64 {
     let format_upper = format.to_uppercase();
     let block_compressed =
@@ -138,27 +153,27 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
     }
 }
 
-/// NEW: Polymorphic Entry point for technical metadata extraction
+/// Evaluates metadata using the polymorphic loaders registry.
 pub fn extract_qc_metadata(path: &Path) -> Result<QcImageMetadata, QcError> {
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
 
-    // Query our newly introduced Polymorphic Loader Registry
     let registry = crate::format_loaders::get_registry();
     if let Some(loader) = registry.find_loader(&ext) {
         loader
             .extract_metadata(path)
-            .map_err(|e| QcError::DdsReadFailed(e.to_string()))
+            .map_err(|e| QcError::MetadataExtractionFailed(e.to_string()))
     } else {
-        Err(QcError::DdsReadFailed(format!(
-            "No registry loader mapped for extension: {}",
+        Err(QcError::MetadataExtractionFailed(format!(
+            "No format loader mapped for extension: {}",
             ext
         )))
     }
 }
 
+/// Evaluates absolute, standalone texture specifications against game-engine standards.
 pub fn check_absolute(
     meta: &QcImageMetadata,
     check_npot: bool,
@@ -185,6 +200,7 @@ pub fn check_absolute(
     issues
 }
 
+/// Evaluates relative difference specifications between an original asset (A) and a target asset (B).
 pub fn check_relative(
     source: &QcImageMetadata,
     target: &QcImageMetadata,
@@ -221,6 +237,7 @@ pub fn check_relative(
     issues
 }
 
+/// Downscales a texture to verify if it consists entirely of a single solid color.
 pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let processed_img = if img.width() > 128 || img.height() > 128 {
@@ -249,6 +266,7 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
     ))
 }
 
+/// Examines color channel variation to detect flat, empty masks.
 pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let has_alpha = img.color().has_alpha();
@@ -297,6 +315,7 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
     None
 }
 
+/// Evaluates relative gradients on the Green channel to predict OpenGL vs DirectX normal layout orientation.
 pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(256), None).ok()?;
     let rgb = img.to_rgb8();
@@ -338,14 +357,21 @@ pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
         let total = top_lights + bottom_lights;
         let ratio = top_lights as f32 / total as f32;
         if ratio > 0.65 {
-            return Some(("Normal Map Y-Axis Orientation".to_string(), "OpenGL layout detected (+Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string()));
+            return Some((
+                "Normal Map Y-Axis Orientation".to_string(),
+                "OpenGL layout detected (+Y Green channel). Ensure this matches your project's specifications.".to_string()
+            ));
         } else if ratio < 0.35 {
-            return Some(("Normal Map Y-Axis Orientation".to_string(), "DirectX layout detected (-Y Green channel). Ensure this matches your project's DirectX/OpenGL specifications.".to_string()));
+            return Some((
+                "Normal Map Y-Axis Orientation".to_string(),
+                "DirectX layout detected (-Y Green channel). Ensure this matches your project's specifications.".to_string()
+            ));
         }
     }
     None
 }
 
+/// Analyzes tangent-space normal vectors, checking unit circle bounds and vector lengths to verify integrity.
 pub fn check_normal_map_integrity(
     path: &Path,
     threshold: f32,
@@ -389,7 +415,7 @@ pub fn check_normal_map_integrity(
                     return Some((
                         "Bad Normal Map (XY Clip)".to_string(),
                         format!(
-                            "{:.0}% of pixels exceed unit circle bounds",
+                            "{:.0}% of pixels exceed tangent unit circle bounds",
                             bad_ratio * 100.0
                         ),
                     ));

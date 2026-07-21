@@ -1,4 +1,4 @@
-// src/format_loaders/dds_loader.rs
+// src/format_loaders/dds.rs
 
 use anyhow::{Context, Result, anyhow};
 use image::DynamicImage;
@@ -7,9 +7,9 @@ use std::borrow::Cow;
 use std::io::Cursor;
 use std::path::Path;
 
-use crate::core::qc::QcImageMetadata;
-use crate::core::tonemapper::TonemapConfig;
 use crate::format_loaders::ImageFormatLoader;
+use crate::qc::rules::QcImageMetadata;
+use crate::viewer::tonemapping::TonemapConfig;
 
 const FOURCC_DXT1: u32 = u32::from_le_bytes(*b"DXT1");
 const FOURCC_DXT2: u32 = u32::from_le_bytes(*b"DXT2");
@@ -49,6 +49,7 @@ pub enum MipSelectionStrategy {
 pub struct DdsPayloadProcessor;
 
 impl DdsPayloadProcessor {
+    /// Deswizzles blocked linear textures (e.g. from specific engine modifications or older console builds)
     pub fn unswizzle_block_linear(
         src: &[u8],
         dst: &mut [u8],
@@ -113,6 +114,7 @@ impl DdsPayloadProcessor {
         Ok(())
     }
 
+    /// Performs endian byte swapping on legacy Xbox 360 platform assets
     pub fn perform_xbox_endian_swap(data: &mut [u8], format_fourcc: u32) {
         if matches!(
             format_fourcc,
@@ -481,11 +483,12 @@ pub fn decode_dds_bytes_specific_mip(dds_bytes: &[u8], mip_level: u32) -> Result
     decode_dds_internal(dds_bytes, MipSelectionStrategy::Specific(mip_level))
 }
 
-// ---------------------------------------------------------
-// POLYMORPHIC LOADER INTEGRATION
-// ---------------------------------------------------------
+// =============================================================================
+// --- IMAGE FORMAT LOADER IMPLEMENTATION --------------------------------------
+// =============================================================================
 
 pub struct DdsLoader;
+
 impl ImageFormatLoader for DdsLoader {
     fn extensions(&self) -> &[&str] {
         &["dds"]
@@ -577,7 +580,7 @@ impl ImageFormatLoader for DdsLoader {
         }
 
         let estimated_vram =
-            crate::core::qc::estimate_vram(w, h, &compression_format, mipmap_count, is_cubemap);
+            crate::qc::rules::estimate_vram(w, h, &compression_format, mipmap_count, is_cubemap);
 
         Ok(QcImageMetadata {
             width: w,

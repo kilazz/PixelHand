@@ -1,4 +1,4 @@
-// src/core/inference.rs
+// src/ai/inference.rs
 
 use anyhow::{Context, Result};
 use image::DynamicImage;
@@ -20,7 +20,7 @@ pub struct PreprocessingConfig {
 }
 
 impl PreprocessingConfig {
-    /// Resolves the correct image scaling and normalization parameters based on the chosen AI architecture.
+    /// Resolves the correct image scaling and normalization parameters based on the chosen AI model.
     pub fn for_model(model: AiModelType, custom_arch: i32) -> Self {
         match model {
             AiModelType::Custom => match custom_arch {
@@ -124,7 +124,7 @@ impl InferenceEngine {
         let text_path = model_dir.join("text.onnx");
         let tokenizer_path = model_dir.join("tokenizer.json");
 
-        // Self-healing: If compilation fails, automatically delete the corrupted file via inspect_err to trigger a clean re-download next time
+        // Self-healing: If compilation fails, automatically delete the corrupted file to trigger a clean re-download next time
         let (visual_session, actual_provider) =
             create_session(&visual_path, threads, execution_provider).inspect_err(|e| {
                 tracing::warn!(

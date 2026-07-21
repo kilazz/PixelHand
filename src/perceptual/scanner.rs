@@ -1,25 +1,26 @@
-// src/scanners/perceptual.rs
+// src/perceptual/scanner.rs
 
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::collections::HashSet;
 use std::sync::atomic::Ordering;
 
-use crate::core::perceptual::{calculate_hamming_distance, calculate_perceptual_hash};
-use crate::scanners::AnalysisItem;
-use crate::state::{DuplicateFileSummary, DuplicateGroupSummary};
+use crate::perceptual::hashing::{calculate_hamming_distance, calculate_perceptual_hash};
+use crate::qc::rules::QcImageMetadata;
+use crate::state::models::{DuplicateFileSummary, DuplicateGroupSummary, ScanParams};
 use crate::utils::clustering::UnionFind;
+use crate::utils::helpers::{AnalysisItem, generate_analysis_items, run_scan_pipeline};
 
 /// Executes a perceptual duplicate image scan using difference hash (dHash) metrics.
 pub async fn run_perceptual_scan_internal(
-    params: super::ScanParams,
+    params: ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
-    // Delegate file discovery, warnings collection, and validation to the pipeline
-    super::run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
-        let items = super::generate_analysis_items(&paths, &params);
+    // Delegate file discovery, exclusion logic, and safety verification to the helper pipeline
+    run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
+        let items: Vec<AnalysisItem> = generate_analysis_items(&paths, &params);
 
         crate::app::append_to_console_log(&format!(
-            "Perceptual Scan: Generated {} analysis items from {} files.",
+            "Perceptual Scan: Generated {} analysis items from {} discovered files.",
             items.len(),
             paths.len()
         ));
@@ -27,8 +28,8 @@ pub async fn run_perceptual_scan_internal(
         let total = items.len();
         let processed = std::sync::atomic::AtomicUsize::new(0);
 
-        // Compute perceptual dHash structures across all worker threads in parallel
-        // hashes stores raw Vec<u8> instead of String Base64
+        // Compute perceptual dHash structures across all worker threads in parallel.
+        // Hashes are kept as raw Vec<u8> to prevent base64 conversion overhead.
         let hashes: Vec<(AnalysisItem, Vec<u8>)> = items
             .par_iter()
             .filter_map(|item| {
@@ -53,7 +54,7 @@ pub async fn run_perceptual_scan_internal(
             return Err(anyhow!("Scan cancelled by user."));
         }
 
-        // Convert similarity threshold into Hamming Distance bounds (64-bit space)
+        // Convert user similarity percentage into Hamming Distance bounds (64-bit fingerprint space)
         let max_dist = (((100.0 - params.similarity) / 100.0) * 64.0).round() as u32;
 
         // Perform disjoint set union (Union-Find) clustering to group similar hashes
@@ -63,7 +64,6 @@ pub async fn run_perceptual_scan_internal(
                 return Err(anyhow!("Scan cancelled by user."));
             }
             for j in (i + 1)..hashes.len() {
-                // calculate_hamming_distance works directly with &[u8] and returns u32 without wrapping in Option
                 let dist = calculate_hamming_distance(&hashes[i].1, &hashes[j].1);
                 if dist <= max_dist {
                     uf.union(i, j);
@@ -96,8 +96,8 @@ pub async fn run_perceptual_scan_internal(
                 }
                 seen_paths.insert(path_str.clone());
 
-                // DRY implementation: Safely extract metadata using the robust fallback factory
-                let qc_meta = crate::core::qc::QcImageMetadata::extract_or_fallback(&item.path);
+                // Extract technical specs using the polymorphic metadata extractor
+                let qc_meta = QcImageMetadata::extract_or_fallback(&item.path);
 
                 file_summaries.push(DuplicateFileSummary {
                     path: path_str,
@@ -118,7 +118,7 @@ pub async fn run_perceptual_scan_internal(
             if file_summaries.len() > 1 {
                 group_counter += 1;
 
-                // Sort file summaries so that the highest resolution/largest size represents the "best" master copy
+                // Sort file summaries: largest resolution / file size serves as the master representative copy
                 file_summaries.sort_by(|a, b| {
                     let area_a = a.width * a.height;
                     let area_b = b.width * b.height;
@@ -136,7 +136,7 @@ pub async fn run_perceptual_scan_internal(
                     .map(|&idx| &hashes[idx].1)
                     .unwrap_or(&hashes[member_indices[0]].1);
 
-                // Compute similarity against the chosen master copy hash
+                // Compute similarity against the chosen master representative copy
                 for file in &mut file_summaries {
                     let cur_hash = member_indices
                         .iter()

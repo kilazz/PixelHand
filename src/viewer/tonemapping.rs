@@ -1,4 +1,4 @@
-// src/core/tonemapper.rs
+// src/viewer/tonemapping.rs
 
 use exr::prelude::*;
 use image::RgbaImage;
@@ -26,7 +26,7 @@ pub enum TonemapOperator {
     Aces2Fit,
     PbrNeutral,
     ICtCpBt2446c,
-    ICtCpLumina, // Test
+    ICtCpLumina,
 }
 
 /// Pure data structure representing the active tonemapping settings.
@@ -37,22 +37,22 @@ pub struct TonemapConfig {
     pub operator: TonemapOperator,
 }
 
-// -----------------------------------------------------------------------------
-// CONSTANTS: Perceptual Quantizer (PQ) ST 2084 / ITU-R BT.2100
-// -----------------------------------------------------------------------------
-// These constants are mathematically defined to map linear light (nits)
-// to a non-linear perceptual curve that mimics human vision.
+// =============================================================================
+// --- CONSTANTS: Perceptual Quantizer (PQ) ST 2084 / ITU-R BT.2100 ------------
+// =============================================================================
+
 const PQ_N: f32 = 2610.0 / 4096.0 / 4.0;
 const PQ_M: f32 = 2523.0 / 4096.0 * 128.0;
 const PQ_C1: f32 = 3424.0 / 4096.0;
 const PQ_C2: f32 = 2413.0 / 4096.0 * 32.0;
 const PQ_C3: f32 = 2392.0 / 4096.0 * 32.0;
+
 /// The absolute maximum luminance (in nits) that the PQ curve can represent.
 const PQ_MAX_NITS: f32 = 10000.0;
 
-// -----------------------------------------------------------------------------
-// MATH UTILITIES
-// -----------------------------------------------------------------------------
+// =============================================================================
+// --- MATH UTILITIES ----------------------------------------------------------
+// =============================================================================
 
 /// Performs smooth Hermite interpolation between 0 and 1.
 #[inline]
@@ -92,16 +92,16 @@ pub fn calculate_auto_exposure(hdr_pixels: &[f32]) -> f32 {
     let key_value = 0.18;
 
     if geometric_mean > 1e-5 {
-        // Clamp the final factor to prevent extreme blowing out of dark textures or over-crushing bright ones
+        // Clamp the final factor to prevent extreme blowing out of dark textures
         (key_value / geometric_mean).clamp(0.01, 100.0)
     } else {
         1.0
     }
 }
 
-// -----------------------------------------------------------------------------
-// COLOR SPACE & TRANSFER FUNCTIONS
-// -----------------------------------------------------------------------------
+// =============================================================================
+// --- COLOR SPACE & TRANSFER FUNCTIONS ----------------------------------------
+// =============================================================================
 
 /// Converts absolute linear luminance (nits) to PQ non-linear signal value (0.0 to 1.0).
 #[inline]
@@ -151,7 +151,7 @@ fn linear_to_srgb(x: f32) -> f32 {
 }
 
 /// Matrix multiplication to transform colors from Rec.709 (sRGB gamut) to Rec.2020 (Wide Gamut).
-/// Required prior to entering Dolby/ITU standardized HDR color spaces.
+/// Required prior to entering standardized HDR color spaces.
 #[inline]
 fn rec709_to_rec2020(col: [f32; 3]) -> [f32; 3] {
     [
@@ -174,7 +174,6 @@ fn rec2020_to_rec709(col: [f32; 3]) -> [f32; 3] {
 /// Converts linear Rec.2020 RGB values to the ICtCp perceptual color space.
 /// ICtCp separates Intensity (I) from Chroma (Ct, Cp) specifically for HDR manipulation.
 fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
-    // LMS transformation matrix (Rec. 2020 to LMS color space)
     let l = col[0] * 0.412109 + col[1] * 0.523926 + col[2] * 0.063965;
     let m = col[0] * 0.166748 + col[1] * 0.720459 + col[2] * 0.112793;
     let s = col[0] * 0.024170 + col[1] * 0.075439 + col[2] * 0.900391;
@@ -182,7 +181,6 @@ fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
     // Apply non-linear PQ transfer function to LMS cone responses
     let pq_lms = linear_to_st2084([l.max(0.0), m.max(0.0), s.max(0.0)]);
 
-    // LMS to ICtCp matrix conversion
     let i = pq_lms[0] * 0.5000 + pq_lms[1] * 0.5000 + pq_lms[2] * 0.0000;
     let ct = pq_lms[0] * 1.6137 - pq_lms[1] * 3.3234 + pq_lms[2] * 1.7097;
     let cp = pq_lms[0] * 4.3780 - pq_lms[1] * 4.2455 - pq_lms[2] * 0.1325;
@@ -192,7 +190,6 @@ fn rgb_to_ictcp(col: [f32; 3]) -> [f32; 3] {
 
 /// Converts ICtCp color space values back to linear Rec.2020 RGB.
 fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
-    // ICtCp to LMS matrix conversion
     let l = col[0] * 1.0 + col[1] * 0.008605 + col[2] * 0.111036;
     let m = col[0] * 1.0 - col[1] * 0.008605 - col[2] * 0.111036;
     let s = col[0] * 1.0 + col[1] * 0.560049 - col[2] * 0.320637;
@@ -200,7 +197,6 @@ fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
     // Linearize LMS using the PQ transfer function inverse
     let lms = st2084_to_linear([l, m, s]);
 
-    // LMS to Rec.2020 RGB conversion matrix
     let r = lms[0] * 3.43661 - lms[1] * 2.50645 + lms[2] * 0.069845;
     let g = -lms[0] * 0.79133 + lms[1] * 1.9836 - lms[2] * 0.192271;
     let b = -lms[0] * 0.02595 - lms[1] * 0.098914 + lms[2] * 1.12486;
@@ -208,17 +204,15 @@ fn ictcp_to_rgb(col: [f32; 3]) -> [f32; 3] {
     [r, g, b]
 }
 
-// -----------------------------------------------------------------------------
-// TONEMAPPERS & VISUALIZERS
-// -----------------------------------------------------------------------------
+// =============================================================================
+// --- TONEMAPPERS & VISUALIZERS -----------------------------------------------
+// =============================================================================
 
 /// False Color / Exposure Heatmap visualizer.
 /// Maps linear luminance into a thermal-style color gradient to easily spot clipping.
-/// Blue = Shadows, Grey/Green = Midtones, Red/White = Highlights/Clipping.
 #[inline]
 fn tonemap_false_color(color: [f32; 3]) -> [f32; 3] {
     let luma = get_luma(color);
-    // Logarithmic mapping for better visual distribution of light stops
     let log_luma = ((luma.max(1e-5).log2() + 10.0) * 0.071428).clamp(0.0, 1.0);
 
     let r = smoothstep(0.5, 0.8, log_luma) + if log_luma >= 0.9 { 1.0 } else { 0.0 };
@@ -229,7 +223,6 @@ fn tonemap_false_color(color: [f32; 3]) -> [f32; 3] {
 }
 
 /// The core forward tone scale curve for ACES 2.0.
-/// Calculates the S-curve compression for luminance.
 #[inline]
 fn aces2_tone_scale_fwd(y: f32) -> f32 {
     let m_2 = 1.0470;
@@ -246,7 +239,6 @@ fn aces2_tone_scale_fwd(y: f32) -> f32 {
 /// Operates in the ICtCp perceptual space to isolate luminance scaling from color.
 #[inline]
 fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
-    // Scale input linear Rec.709 from 0..1 to 0..100 nits domain to match PQ absolute scale
     let color_scaled = [color[0] * 100.0, color[1] * 100.0, color[2] * 100.0];
     let color_2020 = rec709_to_rec2020(color_scaled);
     let mut ictcp = rgb_to_ictcp(color_2020);
@@ -256,8 +248,6 @@ fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
     let i_mapped = aces2_tone_scale_fwd(i_linear);
 
     // Dynamic Chroma Compression: Desaturates extreme highlights towards white.
-    // Linearly interpolates chroma scale from 1.1 down to 0.0 based on mapped intensity.
-    // Optimized: x^1.5 is mathematically x * sqrt(x). Sqrt is hardware-accelerated.
     let i_m = i_mapped.max(0.0);
     let t = i_m * i_m.sqrt();
     let chroma_scale = (1.1 - 1.1 * t).clamp(0.0, 1.0);
@@ -267,17 +257,14 @@ fn tonemap_aces2_fit(color: [f32; 3]) -> [f32; 3] {
     ictcp[1] *= chroma_scale;
     ictcp[2] *= chroma_scale;
 
-    // Return to output gamut
     let rgb_2020 = ictcp_to_rgb(ictcp);
     let rgb_709 = rec2020_to_rec709(rgb_2020);
 
-    // Scale output from 0..100 nits back to standard linear 0..1 range
     [rgb_709[0] / 100.0, rgb_709[1] / 100.0, rgb_709[2] / 100.0]
 }
 
 /// Khronos PBR Neutral Tonemapper.
 /// Formulated strictly to preserve base texture/albedo color values for 3D artists.
-/// Prevents hue shifts at high intensities without adding cinematic contrast.
 #[inline]
 fn pbr_neutral_tonemapping(color_in: [f32; 3]) -> [f32; 3] {
     let mut color = [
@@ -352,7 +339,6 @@ fn eetf_bt2390(i: f32, max_in_pq: f32, max_out_pq: f32) -> f32 {
 
 /// Perceptual tonemapping based on ITU-R BT.2446 Method C.
 /// Uses dynamic EETF luminance compression while applying Hunt Effect compensation for chroma.
-/// Best suited for broadcasting standards ensuring linear shadow preservation.
 fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
     let nits = [
         (color[0] * exposure * 100.0).max(0.0),
@@ -360,26 +346,19 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
         (color[2] * exposure * 100.0).max(0.0),
     ];
 
-    // BT.2446c is mathematically formulated around Rec.2020.
-    // We must transform Rec.709 linear inputs into Rec.2020 prior to processing.
     let nits_2020 = rec709_to_rec2020(nits);
-
     let mut ictcp = rgb_to_ictcp(nits_2020);
     let i_in = ictcp[0];
 
     let max_in_pq = nit_to_pq(scene_peak_nits);
-    let max_out_pq = nit_to_pq(100.0); // Map to standard SDR display peak (100 nits)
+    let max_out_pq = nit_to_pq(100.0);
 
-    // Apply EETF compression solely to the intensity channel
     let i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
     ictcp[0] = i_out;
 
     let compression_ratio = if i_in > 1e-5 { i_out / i_in } else { 1.0 };
-
-    // Saturating compensation mimicking Hunt Effect adjustments
     let saturation_boost = 1.15;
 
-    // Smooth path-to-white translation for highlights above the 90% target scale
     let normalized_i = (i_out / max_out_pq).clamp(0.0, 1.0);
     let path_to_white = 1.0 - smoothstep(0.90, 1.0, normalized_i);
 
@@ -389,8 +368,6 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
     ictcp[2] *= final_chroma_scale;
 
     let rgb_sdr_nits_2020 = ictcp_to_rgb(ictcp);
-
-    // Transform back to Rec.709 linear
     let rgb_sdr_nits_709 = rec2020_to_rec709(rgb_sdr_nits_2020);
 
     [
@@ -400,20 +377,19 @@ fn tonemap_perceptual_bt2446c(color: [f32; 3], exposure: f32, scene_peak_nits: f
     ]
 }
 
-/// Custom ICtCp Lumina
+/// Custom ICtCp Lumina tone curves.
 fn tonemap_ictcp_lumina(color_in: [f32; 3], exposure: f32, scene_peak_nits: f32) -> [f32; 3] {
     let mut r = (color_in[0] * exposure).max(0.0);
     let mut g = (color_in[1] * exposure).max(0.0);
     let mut b = (color_in[2] * exposure).max(0.0);
 
-    // Shadow Contrast (PBR Neutral shadow offset)
+    // Shadow Contrast adjustments
     let x = r.min(g).min(b);
     let offset = if x < 0.08 { x - 6.25 * x * x } else { 0.04 };
     r = (r - offset).max(0.0);
     g = (g - offset).max(0.0);
     b = (b - offset).max(0.0);
 
-    // Convert to ICtCp space
     let nits = [r * 100.0, g * 100.0, b * 100.0];
     let nits_2020 = rec709_to_rec2020(nits);
     let mut ictcp = rgb_to_ictcp(nits_2020);
@@ -425,37 +401,30 @@ fn tonemap_ictcp_lumina(color_in: [f32; 3], exposure: f32, scene_peak_nits: f32)
     // Base luminance compression via BT.2390 EETF
     let i_out = eetf_bt2390(i_in, max_in_pq, max_out_pq);
 
-    // Normalize luminance to 0..1 range to apply the S-curve
     let normalized_i = (i_out / max_out_pq).clamp(0.0, 1.0);
 
-    // Moderate contrast (0.5). Deepens mid-shadows and lifts bright regions,
-    // preserving the extreme boundaries (0.0 -> 0.0, 1.0 -> 1.0) without clipping.
+    // Moderate contrast curves to deepen shadows and lift midtones cleanly
     let contrast_strength = 0.5_f32;
     let punched_i = normalized_i
         + contrast_strength * (normalized_i - 0.5) * normalized_i * (1.0 - normalized_i);
 
-    // Map intensity back to the PQ domain
     let i_out_punched = punched_i * max_out_pq;
     ictcp[0] = i_out_punched;
 
-    // Compression ratio in the PQ domain
     let compression_ratio = if i_in > 1e-5 {
         i_out_punched / i_in
     } else {
         1.0
     };
 
-    // Desaturation based on intensity delta in PQ space
     let diff = (i_in - i_out_punched).max(0.0);
     let desaturation_factor = 0.15;
     let desat_amount = 1.0 - 1.0 / (desaturation_factor * diff + 1.0);
 
-    // Scale chroma based on compression and highlight desaturation
     let final_chroma_scale = compression_ratio * (1.0 - desat_amount);
     ictcp[1] *= final_chroma_scale;
     ictcp[2] *= final_chroma_scale;
 
-    // Convert back to linear RGB
     let rgb_2020 = ictcp_to_rgb(ictcp);
     let rgb_709 = rec2020_to_rec709(rgb_2020);
 
@@ -473,12 +442,11 @@ fn aces_tonemap_raw(x: f32) -> f32 {
     ((x * (a * x + b)) / (x * (c * x + d) + e)).clamp(0.0, 1.0)
 }
 
-// -----------------------------------------------------------------------------
-// EXR & IMAGE BUFFER PROCESSING
-// -----------------------------------------------------------------------------
+// =============================================================================
+// --- EXR & IMAGE BUFFER PROCESSING -------------------------------------------
+// =============================================================================
 
 /// Decodes the first RGBA floating-point layer of an EXR file into a flat `f32` vector.
-/// Uses Arc<AtomicUsize> to safely coordinate dimensions across 'static closures.
 pub fn load_exr_rgba(path: &Path) -> std::result::Result<(Vec<f32>, u32, u32), TonemapError> {
     let image_width = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let image_width_clone1 = image_width.clone();
@@ -503,14 +471,13 @@ pub fn load_exr_rgba(path: &Path) -> std::result::Result<(Vec<f32>, u32, u32), T
 
     let size = image.layer_data.size;
     Ok((
-        image.layer_data.channel_data.pixels, // Fixed to extract correct underlying Vec<f32> from SpecificChannels
+        image.layer_data.channel_data.pixels,
         size.width() as u32,
         size.height() as u32,
     ))
 }
 
 /// Maps high-dynamic-range (HDR) float pixels into low-dynamic-range (LDR) u8 buffers.
-/// Applies the globally selected Tonemap operator, exposure compensation, and parallel multi-threading.
 pub fn tonemap_hdr_to_ldr_rgba(
     hdr_pixels: &[f32],
     width: u32,
@@ -532,15 +499,11 @@ pub fn tonemap_hdr_to_ldr_rgba(
         config.operator
     };
 
-    // Photographic Auto Exposure calculation using geometric mean luminance
     let mut active_exposure = exposure;
     if config.auto_exposure {
-        // Multiplies default exposure with the automatic factor acting as Exposure Compensation offset
         active_exposure *= calculate_auto_exposure(hdr_pixels);
     }
 
-    // Calculate dynamic scene peak luminance via a parallel pre-pass.
-    // Required specifically for the BT2446c EETF curve scaling.
     let mut scene_peak_nits = 1000.0;
     if active_operator == TonemapOperator::ICtCpBt2446c
         || active_operator == TonemapOperator::ICtCpLumina
@@ -548,23 +511,19 @@ pub fn tonemap_hdr_to_ldr_rgba(
         let max_lum = hdr_pixels
             .par_chunks_exact(4)
             .map(|hdr| {
-                // Approximate relative luminance
                 let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
                 let val = y * active_exposure;
-                // Guard against NaN/Infinity poisoning
                 if val.is_finite() { val } else { 0.0 }
             })
-            // Safe manual maximum to avoid f32::max propagating NaNs silently
             .reduce(|| 0.0_f32, |a, b| if a > b { a } else { b });
 
         if max_lum > 0.0 {
-            scene_peak_nits = (max_lum * 100.0).max(100.0); // Clamp minimum to 100 nits
+            scene_peak_nits = (max_lum * 100.0).max(100.0);
         }
     }
 
     let mut ldr_pixels = vec![0u8; total_pixels * 4];
 
-    // Main pixel mapping pipeline (executed in parallel chunks)
     ldr_pixels
         .par_chunks_exact_mut(4)
         .zip(hdr_pixels.par_chunks_exact(4))
@@ -573,7 +532,6 @@ pub fn tonemap_hdr_to_ldr_rgba(
             let g_in = hdr[1] * active_exposure;
             let b_in = hdr[2] * active_exposure;
 
-            // Apply selected Tonemap Operator
             let (mut r, mut g, mut b) = match active_operator {
                 TonemapOperator::None => (r_in, g_in, b_in),
                 TonemapOperator::FalseColor => {
@@ -611,7 +569,6 @@ pub fn tonemap_hdr_to_ldr_rgba(
                 b = linear_to_srgb(b);
             }
 
-            // Strictly clamp colors to valid 0..1 range prior to integer casting
             r = r.clamp(0.0, 1.0);
             g = g.clamp(0.0, 1.0);
             b = b.clamp(0.0, 1.0);
@@ -625,29 +582,23 @@ pub fn tonemap_hdr_to_ldr_rgba(
     RgbaImage::from_raw(width, height, ldr_pixels).ok_or(TonemapError::ImageBuildFailed)
 }
 
-/// Applies manual Brightness, Contrast, and Gamma color corrections to an RgbaImage in parallel.
-/// Scaling and shifting operations are safely restricted to RGB channels.
+/// Applies manual Brightness, Contrast, and Gamma adjustments to an RgbaImage in parallel.
 pub fn apply_manual_corrections(img: &mut RgbaImage, brightness: f32, contrast: f32, gamma: f32) {
     if (brightness - 1.0).abs() < 1e-3
         && (contrast - 1.0).abs() < 1e-3
         && (gamma - 1.0).abs() < 1e-3
     {
-        return; // Early return to bypass computations when properties are at defaults
+        return; // Early return if properties are at default values
     }
 
     let raw = img.as_mut();
     raw.par_chunks_exact_mut(4).for_each(|pixel| {
-        // Process only the RGB channels, skipping Alpha (index 3)
         for ch in pixel.iter_mut().take(3) {
             let mut val = *ch as f32 / 255.0;
 
-            // Brightness: Direct scalar multiplication
             val *= brightness;
-
-            // Contrast: Centered and scaled around the standard mid-gray (0.5) boundary
             val = (val - 0.5) * contrast + 0.5;
 
-            // Gamma: Power function curve
             if val > 0.0 && gamma != 1.0 {
                 val = val.powf(gamma);
             }
@@ -658,7 +609,6 @@ pub fn apply_manual_corrections(img: &mut RgbaImage, brightness: f32, contrast: 
 }
 
 /// Computes pixel differences between two Rgba buffers in parallel.
-/// Used for visual regression testing and sub-pixel artifact spotting.
 pub fn calculate_difference_map(
     img1: &RgbaImage,
     img2: &RgbaImage,
@@ -667,7 +617,6 @@ pub fn calculate_difference_map(
     let (w1, h1) = img1.dimensions();
     let (w2, h2) = img2.dimensions();
 
-    // Auto-align resolution if dimensions mismatch
     let resized_img2;
     let ref_img2 = if w1 != w2 || h1 != h2 {
         resized_img2 = image::imageops::resize(img2, w1, h1, image::imageops::FilterType::Triangle);
@@ -678,8 +627,6 @@ pub fn calculate_difference_map(
 
     let mut diff_img = RgbaImage::new(w1, h1);
 
-    // Map pixel computations across all available CPU threads in parallel using highly optimized raw slices.
-    // Removes the `get_pixel` boundary checks and index calculations entirely.
     diff_img
         .as_mut()
         .par_chunks_exact_mut(4)
@@ -694,13 +641,11 @@ pub fn calculate_difference_map(
 
                 let intensity = ((diff_r + diff_g + diff_b + diff_a) / 4) as u8;
 
-                // Map absolute differences into a blue-to-red diagnostic heatmap
                 pixel_out[0] = intensity;
                 pixel_out[1] = 0;
                 pixel_out[2] = 255 - intensity;
                 pixel_out[3] = 255;
             } else {
-                // Direct RGB delta subtraction
                 pixel_out[0] = p1[0].abs_diff(p2[0]);
                 pixel_out[1] = p1[1].abs_diff(p2[1]);
                 pixel_out[2] = p1[2].abs_diff(p2[2]);

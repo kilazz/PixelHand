@@ -4,8 +4,21 @@ use moka::sync::Cache;
 use rayon::prelude::*;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
 use ustr::Ustr;
+use xxhash_rust::xxh64::Xxh64;
+
+// ==========================================
+// --- GLOBAL CACHE CONFIGURATION -----------
+// ==========================================
+
+pub static ENABLE_PREVIEWS: AtomicBool = AtomicBool::new(true);
+pub static PREVIEW_QUALITY: AtomicI32 = AtomicI32::new(1); // 0: Fast, 1: Balanced, 2: High
+
+// ==========================================
+// --- DATA STRUCTURES ----------------------
+// ==========================================
 
 #[derive(Clone)]
 pub struct DecodedCacheItem {
@@ -13,7 +26,7 @@ pub struct DecodedCacheItem {
     pub image: Arc<image::RgbaImage>, // Wrapped in Arc to prevent copying heavy raw pixel allocations
 }
 
-/// Container holding composite and lazy-allocated channel-isolated preview buffers
+/// Container holding composite and lazily-allocated channel-isolated preview buffers.
 #[derive(Clone)]
 pub struct CachedThumbnail {
     pub composite: image::RgbaImage,
@@ -34,7 +47,7 @@ impl CachedThumbnail {
         }
     }
 
-    /// Retrieves or dynamically computes a color-isolated preview on a separate thread, caching the result
+    /// Retrieves or dynamically computes a color-isolated preview on a worker thread pool, caching the result.
     pub fn get_channel(&self, channel: &str) -> image::RgbaImage {
         let lock = match channel {
             "R" => &self.r_channel,
@@ -81,7 +94,7 @@ impl CachedThumbnail {
 }
 
 // ==========================================
-// --- CONSOLIDATED MEMORY CACHE MANAGER ----
+// --- CACHE MANAGER SINGLETON --------------
 // ==========================================
 
 pub struct CacheManager {
@@ -89,7 +102,7 @@ pub struct CacheManager {
     pub thumbnails: Cache<Ustr, CachedThumbnail>,
 }
 
-/// Retrieve the central thread-safe Memory Cache Manager singleton
+/// Retrieves the central thread-safe memory CacheManager singleton.
 pub fn get_cache_manager() -> &'static CacheManager {
     static INSTANCE: OnceLock<CacheManager> = OnceLock::new();
     INSTANCE.get_or_init(|| CacheManager {
@@ -114,7 +127,11 @@ pub fn get_cache_manager() -> &'static CacheManager {
     })
 }
 
-/// Normalizes path representations across Windows and Unix platforms to guarantee absolute cache hit consistency
+// ==========================================
+// --- UTILITY METHODS ----------------------
+// ==========================================
+
+/// Normalizes path representations across Windows and Unix platforms to guarantee absolute cache hit consistency.
 pub fn normalize_path_key(path_str: &str) -> Ustr {
     let normalized: String = path_str
         .chars()
@@ -129,7 +146,7 @@ pub fn normalize_path_key(path_str: &str) -> Ustr {
     ustr::ustr(&normalized.to_lowercase())
 }
 
-/// Stores an image buffer in the centralized thumbnails memory cache
+/// Stores an image buffer in the centralized thumbnails memory cache.
 pub fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
     let manager = get_cache_manager();
     let normalized_key = normalize_path_key(path);
@@ -138,7 +155,7 @@ pub fn store_in_thumbnail_memory_cache(path: &str, img: image::RgbaImage) {
         .insert(normalized_key, CachedThumbnail::new(img));
 }
 
-/// Decodes and returns the requested color channels of the image utilizing the unified cache manager
+/// Decodes and returns the requested color channels of the image utilizing the unified cache manager.
 pub async fn get_channel_preview_image(
     path: &str,
     channel: &str,
@@ -162,7 +179,7 @@ pub async fn get_channel_preview_image(
         manager.decoded_images.invalidate(&cache_key);
     }
 
-    // Atomically load and cache the image, preventing Cache Stampede
+    // Atomically load and cache the image, preventing cache stampedes
     let cached_item_res = manager.decoded_images.try_get_with(
         cache_key.clone(),
         || -> Result<DecodedCacheItem, String> {
@@ -185,7 +202,7 @@ pub async fn get_channel_preview_image(
     let rgba = &*cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {
-        if crate::core::perceptual::is_vfx_transparent_texture(rgba) {
+        if crate::perceptual::hashing::is_vfx_transparent_texture(rgba) {
             image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8())
         } else {
             image::DynamicImage::ImageRgba8(rgba.clone())
@@ -216,7 +233,98 @@ pub async fn get_channel_preview_image(
     Some(out_img.into_rgba8())
 }
 
-/// Recursively calculates the total disk size of a directory in bytes
+/// Loads thumbnail textures from disk cache, generating compressed fallback files during misses.
+pub fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
+    if !ENABLE_PREVIEWS.load(Ordering::Relaxed) {
+        return None;
+    }
+
+    let path = PathBuf::from(path_str);
+    if !path.is_file() {
+        return None;
+    }
+
+    let cache_dir = crate::utils::settings::get_portable_app_data_dir()
+        .ok()
+        .map(|p| p.join(".cache").join("thumbnails"));
+
+    static CACHE_DIR_INITIALIZED: OnceLock<()> = OnceLock::new();
+
+    let cache_path = if let Some(ref dir) = cache_dir {
+        CACHE_DIR_INITIALIZED.get_or_init(|| {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                tracing::error!("Failed to initialize thumbnail cache directory: {}", e);
+            }
+        });
+
+        if let Ok(metadata) = std::fs::metadata(&path) {
+            let size = metadata.len();
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+
+            let mut hasher = Xxh64::new(0);
+            hasher.update(path.to_string_lossy().as_bytes());
+            hasher.update(&size.to_le_bytes());
+            hasher.update(&mtime.to_le_bytes());
+
+            Some(dir.join(format!("{:016x}.png", hasher.digest())))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Try reading the tiny pre-rendered PNG from the disk cache safely
+    if let Some(ref cp) = cache_path
+        && cp.is_file()
+        && let Ok(img) = image::open(cp)
+    {
+        let rgba = img.to_rgba8();
+        store_in_thumbnail_memory_cache(path_str, rgba.clone());
+        return Some(rgba);
+    }
+
+    let quality = PREVIEW_QUALITY.load(Ordering::Relaxed);
+    let target_size = match quality {
+        0 => 64,
+        1 => 128,
+        _ => 256,
+    };
+    let filter = match quality {
+        0 => image::imageops::FilterType::Nearest,
+        1 => image::imageops::FilterType::Triangle,
+        _ => image::imageops::FilterType::Lanczos3,
+    };
+
+    // Fallback: Parse the actual texture and downscale
+    if let Ok(mut img) =
+        crate::format_loaders::open_image_with_dds_fallback(&path, Some(target_size), None)
+    {
+        if img.width() > target_size || img.height() > target_size {
+            img = img.resize(target_size, target_size, filter);
+        }
+        let rgba = img.to_rgba8();
+
+        store_in_thumbnail_memory_cache(path_str, rgba.clone());
+
+        if let Some(ref cp) = cache_path {
+            let _ = rgba.save(cp);
+        }
+        return Some(rgba);
+    }
+    None
+}
+
+// ==========================================
+// --- DISK WORKSPACE GARBAGE COLLECTOR -----
+// ==========================================
+
+/// Recursively calculates the total disk size of a directory in bytes.
 fn get_dir_size(path: &Path) -> u64 {
     fs::read_dir(path)
         .into_iter()

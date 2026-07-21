@@ -1,4 +1,4 @@
-// src/core/visuals.rs
+// src/reporting/contact_sheets.rs
 
 use ab_glyph::{FontRef, PxScale};
 use anyhow::{Context, Result};
@@ -8,7 +8,7 @@ use imageproc::drawing::{draw_filled_rect_mut, draw_text_mut};
 use imageproc::rect::Rect;
 use std::path::{Path, PathBuf};
 
-use crate::state::DuplicateGroupSummary;
+use crate::state::models::DuplicateGroupSummary;
 
 // Base layout constants to be scaled proportionally by the scale factor
 const BASE_THUMB_SIZE: f32 = 300.0;
@@ -21,7 +21,7 @@ const IMGS_PER_FILE: usize = 50;
 
 const FONT_DATA: &[u8] = include_bytes!("../../assets/font.otf");
 
-/// Encapsulates geometric and sizing logic for visual contact sheets layout
+/// Encapsulates geometric and sizing logic for visual contact sheets layout.
 struct SheetLayout {
     thumb_size: u32,
     padding: u32,
@@ -43,7 +43,7 @@ impl SheetLayout {
         }
     }
 
-    /// Computes the exact dimensions of the target canvas
+    /// Computes the exact dimensions of the target canvas.
     fn calculate_canvas_dimensions(&self, cols: u32, rows: u32) -> (u32, u32) {
         let width = cols * (self.thumb_size + self.padding) + self.padding;
         let height = rows * (self.thumb_size + self.text_area + self.padding)
@@ -53,7 +53,7 @@ impl SheetLayout {
     }
 }
 
-/// Generates visual comparison reports (Contact Sheets) as PNGs on disk safely without unwraps
+/// Generates visual comparison reports (Contact Sheets) as PNGs on disk safely.
 pub async fn generate_visual_reports(
     groups: Vec<DuplicateGroupSummary>,
     max_columns: usize,
@@ -113,7 +113,7 @@ pub async fn generate_visual_reports(
                     let y = layout.padding
                         + row * (layout.thumb_size + layout.text_area + layout.padding);
 
-                    // Decode high-resolution textures with fast_image_resize fallback handling
+                    // Decode graphics formats using the polymorphic registry loaders
                     let thumb = match crate::format_loaders::open_image_with_dds_fallback(
                         Path::new(&file.path),
                         Some(layout.thumb_size),
@@ -122,7 +122,7 @@ pub async fn generate_visual_reports(
                         Ok(img) => {
                             let mut rgba_img = img.to_rgba8();
 
-                            // Calculate aspect-ratio preserving dimensions to prevent stretching
+                            // Calculate aspect-ratio preserving dimensions to prevent scaling skew
                             let src_w = rgba_img.width();
                             let src_h = rgba_img.height();
                             let aspect = src_w as f32 / src_h as f32;
@@ -139,7 +139,7 @@ pub async fn generate_visual_reports(
                                 (w.max(1), h)
                             };
 
-                            // Safely attempt raw image mapping and scaling without unwraps
+                            // Safely perform raw image mapping and interpolation resizing
                             let processed_img = fr::images::Image::from_slice_u8(
                                 src_w,
                                 src_h,
@@ -148,7 +148,6 @@ pub async fn generate_visual_reports(
                             )
                             .map_err(|e| anyhow::anyhow!("Failed to map image slice: {:?}", e))
                             .and_then(|src_image| {
-                                // Construct destination image with proportional aspect ratio dimensions
                                 let mut dst_image =
                                     fr::images::Image::new(dst_w, dst_h, fr::PixelType::U8x4);
 
@@ -224,7 +223,7 @@ pub async fn generate_visual_reports(
                     let offset_y = y + (layout.thumb_size.saturating_sub(thumb.height())) / 2;
                     image::imageops::overlay(&mut canvas, &thumb, offset_x.into(), offset_y.into());
 
-                    // Compute text coordinate offsets based on layout bounds
+                    // Compute text drawing offsets relative to grid coordinates
                     let text_y = y + layout.thumb_size + (8.0 * scale_factor) as u32;
                     let display_name = Path::new(&file.path)
                         .file_name()
@@ -324,7 +323,7 @@ pub async fn generate_visual_reports(
                 let out_path = out_dir.join(&filename);
                 if let Err(e) = canvas.save(&out_path) {
                     tracing::error!(
-                        "Failed to save visualization report page to '{}': {}",
+                        "Failed to save visual report page to '{}': {}",
                         out_path.display(),
                         e
                     );

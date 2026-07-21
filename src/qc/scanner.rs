@@ -1,21 +1,21 @@
-// src/scanners/qc.rs
+// src/qc/scanner.rs
 
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use crate::core::qc::{
+use crate::qc::rules::{
     QcImageMetadata, check_absolute, check_empty_channels, check_normal_map_integrity,
     check_normal_map_orientation, check_relative, check_solid_texture,
 };
-use crate::state::QcIssueSummary;
-use crate::utils::helpers::discover_files;
+use crate::state::models::{DuplicateFileSummary, QcIssueSummary, ScanParams};
+use crate::utils::helpers::{discover_files, run_scan_pipeline};
 
-/// Executes an absolute local directory Quality Control audit.
-pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIssueSummary>> {
-    // Delegate file discovery, exclusion folders parsing, and progress bootstrapping to the pipeline
-    super::run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
+/// Executes a technical Quality Control audit over a targeted directory path.
+pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSummary>> {
+    // Delegate file discovery and safety validations to the helper pipeline
+    run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
         let total = paths.len();
         let processed = std::sync::atomic::AtomicUsize::new(0);
 
@@ -28,10 +28,10 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
 
                 let mut file_issues = Vec::new();
 
-                // DRY implementation: Safely extract metadata using the robust fallback factory
+                // Safely extract specifications from the graphics header
                 let qc_meta = QcImageMetadata::extract_or_fallback(p);
 
-                // Run absolute single-file rules (NPOT, block alignments, mipmaps, bit depth)
+                // Run absolute standalone rules (NPOT, block alignment, mipmaps, bit depth)
                 let abs_issues = check_absolute(
                     &qc_meta,
                     params.qc.qc_npot,
@@ -47,7 +47,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     });
                 }
 
-                // Perform optional solid flat color checking and empty channel packing checks
+                // Perform solid color texture checks and empty channel packing checks
                 if params.qc.qc_solid_colors {
                     if let Some((issue, details)) = check_solid_texture(p) {
                         file_issues.push(QcIssueSummary {
@@ -65,7 +65,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
                     }
                 }
 
-                // Perform optional normal maps vector integrity and DirectX vs OpenGL Y-axis audits
+                // Perform normal map vector integrity and OpenGL/DirectX orientation checks
                 if params.qc.qc_normals {
                     let path_str = p.to_string_lossy().to_lowercase();
                     let should_check = if params.qc.qc_normals_tags.is_empty() {
@@ -82,9 +82,9 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
 
                     let normal_format = if qc_meta.compression_format.to_uppercase().contains("BC5")
                     {
-                        crate::core::qc::NormalMapFormat::Bc5RxGy
+                        crate::qc::rules::NormalMapFormat::Bc5RxGy
                     } else {
-                        crate::core::qc::NormalMapFormat::TangentSpaceRgb
+                        crate::qc::rules::NormalMapFormat::TangentSpaceRgb
                     };
 
                     if should_check {
@@ -122,9 +122,7 @@ pub async fn run_qc_scan_internal(params: super::ScanParams) -> Result<Vec<QcIss
     })
 }
 
-/// Compares contents and specifications of Folder A against Folder B.
-/// Note: Since this is a comparative scan between two distinct paths, it operates
-/// outside of the single-directory ScanParams.dir_a wrapper and maintains custom walking.
+/// Compares properties and format specifications of Folder A against Folder B.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_folder_compare(
     directory_a: String,
@@ -175,7 +173,6 @@ pub async fn run_folder_compare(
     for p_b in &files_b {
         let key = get_key(p_b);
         if let Some(p_a) = map_a.get(&key) {
-            // DRY implementation: Safely extract metadata using the robust fallback factory
             let meta_a = QcImageMetadata::extract_or_fallback(p_a);
             let meta_b = QcImageMetadata::extract_or_fallback(p_b);
 
@@ -188,7 +185,7 @@ pub async fn run_folder_compare(
                 check_compression,
             );
 
-            // Bypass if resolutions match and no metadata issues exist when hide_same_resolution is true
+            // Hide resolution matches if no other issues are present
             if hide_same_resolution
                 && meta_a.width == meta_b.width
                 && meta_a.height == meta_b.height
@@ -212,72 +209,37 @@ pub async fn run_folder_compare(
     Ok(issues)
 }
 
-/// Executes a flat-list technical Asset Inventory scan across all targeted directories.
-pub async fn run_asset_audit(
-    params: super::ScanParams,
-) -> Result<Vec<crate::state::ResultsRowData>> {
-    // Delegate preparatory routines to the scan pipeline
-    super::run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
+/// Compiles a flat asset inventory list of metadata specifications across targeted directories.
+pub async fn run_asset_audit(params: ScanParams) -> Result<Vec<DuplicateFileSummary>> {
+    run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
         let total = paths.len();
         let processed = std::sync::atomic::AtomicUsize::new(0);
 
-        let is_pow2 = |n: u32| n != 0 && (n & (n - 1)) == 0;
-
-        let rows: Vec<crate::state::ResultsRowData> = paths
+        let rows: Vec<DuplicateFileSummary> = paths
             .par_iter()
             .filter_map(|p| {
                 if cancel_token.load(Ordering::Relaxed) {
                     return None;
                 }
 
-                // DRY implementation: Safely extract metadata using the robust fallback factory
                 let qc_meta = QcImageMetadata::extract_or_fallback(p);
-
-                let thumbnail_data = super::load_thumbnail_for_path(&p.to_string_lossy());
 
                 let current = processed.fetch_add(1, Ordering::Relaxed) + 1;
                 progress_cb(current as f32 / total as f32, current, total);
 
-                Some(crate::state::ResultsRowData {
-                    is_header: false,
-                    is_qc: false,
-                    is_ai: false,
-                    group_index: -1,
-                    hash_or_issue: String::new(),
+                Some(DuplicateFileSummary {
                     path: p.to_string_lossy().to_string(),
-                    name: p
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                    score_or_detail: String::new(),
-
-                    format_str: qc_meta.compression_format.clone(),
-                    dimensions_str: format!("{} x {}", qc_meta.width, qc_meta.height),
-                    mipmaps_str: qc_meta.mipmap_count.to_string(),
-                    cubemap_str: if qc_meta.is_cubemap {
-                        "YES".to_string()
-                    } else {
-                        "NO".to_string()
-                    },
-                    size_str: crate::utils::helpers::format_size(qc_meta.file_size),
-
-                    meta_str: String::new(),
-                    is_best: false,
-                    is_checked: false,
-                    thumbnail_data,
+                    size: qc_meta.file_size,
+                    width: qc_meta.width as usize,
+                    height: qc_meta.height as usize,
+                    format_str: qc_meta.format_str,
+                    compression_format: qc_meta.compression_format,
+                    color_space: qc_meta.color_space,
+                    has_alpha: qc_meta.has_alpha,
+                    bit_depth: qc_meta.bit_depth,
+                    mipmap_count: qc_meta.mipmap_count,
+                    is_cubemap: qc_meta.is_cubemap,
                     similarity: 0.0,
-
-                    size_bytes: qc_meta.file_size,
-                    pixels_count: (qc_meta.width * qc_meta.height) as u64,
-
-                    is_npot: !is_pow2(qc_meta.width) || !is_pow2(qc_meta.height),
-                    is_uncompressed: qc_meta
-                        .compression_format
-                        .to_lowercase()
-                        .contains("uncompressed"),
-                    is_missing_mips: qc_meta.mipmap_count <= 1,
-                    is_cubemap_bool: qc_meta.is_cubemap,
                 })
             })
             .collect();
