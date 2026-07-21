@@ -1,13 +1,17 @@
 // src/format_loaders/mod.rs
 
+pub mod astc;
 pub mod dds;
 pub mod exr;
 pub mod heic;
 pub mod jxl;
 pub mod ktx2;
 pub mod psd;
+pub mod pvr;
+pub mod qoi;
 pub mod raw;
 pub mod standard;
+pub mod svg;
 
 use anyhow::{Result, anyhow};
 use image::DynamicImage;
@@ -68,6 +72,10 @@ impl LoaderRegistry {
                 Box::new(heic::HeicLoader),
                 Box::new(ktx2::Ktx2Loader),
                 Box::new(raw::RawCameraLoader),
+                Box::new(astc::AstcLoader),
+                Box::new(pvr::PvrLoader),
+                Box::new(qoi::QoiLoader),
+                Box::new(svg::SvgLoader),
                 Box::new(standard::StandardLoader),
             ],
         }

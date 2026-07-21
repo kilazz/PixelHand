@@ -13,7 +13,7 @@ pub struct StandardLoader;
 impl ImageFormatLoader for StandardLoader {
     fn extensions(&self) -> &[&str] {
         &[
-            "png", "jpg", "jpeg", "tga", "bmp", "hdr", "tif", "tiff", "webp", "gif", "avif",
+            "png", "jpg", "jpeg", "tga", "bmp", "hdr", "tif", "tiff", "webp", "gif", "avif", "ico",
         ]
     }
 

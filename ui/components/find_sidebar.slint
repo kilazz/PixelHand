@@ -28,6 +28,7 @@ export component FindSidebar inherits Rectangle {
 
         ScrollView {
             vertical-stretch: 1;
+
             VerticalLayout {
                 alignment: start;
                 spacing: 12px;
@@ -855,21 +856,23 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
             }
+        }
 
-            Rectangle {
-                height: 40px;
-                background: #1e1f22;
-                border-radius: 4px;
-                VerticalLayout {
-                    padding: 4px;
-                    CustomButton {
-                        text: Diagnostics.is_scanning ? "STOP SCAN" : "RUN SCANNER";
-                        primary-color: Diagnostics.is_scanning ? #f23f43 : #23a55a;
-                        height: 32px;
-                        clicked => {
-                            if (Diagnostics.is_scanning) { Diagnostics.cancel_scan(); }
-                            else { Diagnostics.run_scan(); }
-                        }
+        Rectangle {
+            height: 40px;
+            vertical-stretch: 0;
+            background: #1e1f22;
+            border-radius: 4px;
+
+            VerticalLayout {
+                padding: 4px;
+                CustomButton {
+                    text: Diagnostics.is_scanning ? "STOP SCAN" : "RUN SCANNER";
+                    primary-color: Diagnostics.is_scanning ? #f23f43 : #23a55a;
+                    height: 32px;
+                    clicked => {
+                        if (Diagnostics.is_scanning) { Diagnostics.cancel_scan(); }
+                        else { Diagnostics.run_scan(); }
                     }
                 }
             }
