@@ -4,7 +4,9 @@ pub mod dds;
 pub mod exr;
 pub mod heic;
 pub mod jxl;
+pub mod ktx2;
 pub mod psd;
+pub mod raw;
 pub mod standard;
 
 use anyhow::{Result, anyhow};
@@ -21,7 +23,7 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 /// Unified polymorphic interface for all graphics asset loaders.
 pub trait ImageFormatLoader: Send + Sync {
-    /// Supported lowercase file extensions (e.g. "exr", "dds")
+    /// Supported lowercase file extensions (e.g. "exr", "dds", "ktx2")
     fn extensions(&self) -> &[&str];
 
     /// High-fidelity decoding into dynamic image memory buffers.
@@ -64,6 +66,8 @@ impl LoaderRegistry {
                 Box::new(psd::PsdLoader),
                 Box::new(jxl::JxlLoader),
                 Box::new(heic::HeicLoader),
+                Box::new(ktx2::Ktx2Loader),
+                Box::new(raw::RawCameraLoader),
                 Box::new(standard::StandardLoader),
             ],
         }

@@ -78,6 +78,7 @@ fn create_default_cli_params(dir: String) -> ScanParams {
             qc_bit_depth: false,
             qc_solid_colors: false,
             qc_normals: false,
+            qc_normal_target: 0,
             qc_normals_tags: String::new(),
             qc_match_by_stem: true,
             qc_hide_same_resolution: false,

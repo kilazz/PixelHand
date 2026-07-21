@@ -630,9 +630,19 @@ export component FindSidebar inherits Rectangle {
                             toggled => { ScanConfig.save_settings(); }
                         }
 
+                        if ScanConfig.qc.qc_normals: FormRow {
+                            title: "Target Style:";
+                            ComboBox {
+                                model: ["Require DirectX (-Y)", "Require OpenGL (+Y)", "Info / Any"];
+                                current-index <=> ScanConfig.qc.qc_normal_target;
+                                height: 32px;
+                                selected(val) => { ScanConfig.save_settings(); }
+                            }
+                        }
+
                         if ScanConfig.qc.qc_normals: LineEdit {
                             text <=> ScanConfig.qc.qc_normals_tags;
-                            placeholder-text: "Tags: _norm, _ddn";
+                            placeholder-text: "Tags: _norm, _ddn, _nrm, _orm";
                             height: 32px;
                             edited => { ScanConfig.save_settings(); }
                         }
@@ -845,21 +855,21 @@ export component FindSidebar inherits Rectangle {
                     }
                 }
             }
-        }
 
-        Rectangle {
-            height: 40px;
-            background: #1e1f22;
-            border-radius: 4px;
-            VerticalLayout {
-                padding: 4px;
-                CustomButton {
-                    text: Diagnostics.is_scanning ? "STOP SCAN" : "RUN SCANNER";
-                    primary-color: Diagnostics.is_scanning ? #f23f43 : #23a55a;
-                    height: 32px;
-                    clicked => {
-                        if (Diagnostics.is_scanning) { Diagnostics.cancel_scan(); }
-                        else { Diagnostics.run_scan(); }
+            Rectangle {
+                height: 40px;
+                background: #1e1f22;
+                border-radius: 4px;
+                VerticalLayout {
+                    padding: 4px;
+                    CustomButton {
+                        text: Diagnostics.is_scanning ? "STOP SCAN" : "RUN SCANNER";
+                        primary-color: Diagnostics.is_scanning ? #f23f43 : #23a55a;
+                        height: 32px;
+                        clicked => {
+                            if (Diagnostics.is_scanning) { Diagnostics.cancel_scan(); }
+                            else { Diagnostics.run_scan(); }
+                        }
                     }
                 }
             }

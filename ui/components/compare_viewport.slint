@@ -7,22 +7,23 @@ export component InteractiveCompareViewport inherits Rectangle {
     background: #111214;
     clip: true;
 
-    TouchArea {
+    // Interactive TouchArea handling panning, zooming, and magnifier loupe tracking
+    main_ta := TouchArea {
         property <length> pressed-pan-x;
         property <length> pressed-pan-y;
 
-        // Custom mouse cursor states for dragging feedback
+        // Custom mouse cursor feedback for dragging states
         mouse-cursor: self.pressed ? MouseCursor.grabbing : MouseCursor.grab;
 
         pointer-event(evt) => {
+            // Right-click resets pan offset and zoom level to default
             if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
-                // Right click resets the view to default
                 ViewportState.zoom_factor = 1.0;
                 ViewportState.pan_x = 0px;
                 ViewportState.pan_y = 0px;
             }
+            // Left-click locks pan drag origin
             if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
-                // Lock the initial pan positions when the left mouse button is pressed
                 self.pressed-pan-x = ViewportState.pan_x;
                 self.pressed-pan-y = ViewportState.pan_y;
             }
@@ -30,7 +31,6 @@ export component InteractiveCompareViewport inherits Rectangle {
 
         moved => {
             if (self.enabled && self.pressed) {
-                // Calculate absolute delta from the drag origin to prevent jitter
                 ViewportState.pan_x = self.pressed-pan-x + (self.mouse-x - self.pressed-x);
                 ViewportState.pan_y = self.pressed-pan-y + (self.mouse-y - self.pressed-y);
             }
@@ -55,10 +55,14 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
     }
 
-    if ViewportState.compare_mode == 0: Rectangle { // Side-by-Side
+    // =========================================================================
+    // MODE 0: SIDE-BY-SIDE (With Synchronized 4x Magnifier Loupe Overlay)
+    // =========================================================================
+    if ViewportState.compare_mode == 0: Rectangle {
         width: 100%;
         height: 100%;
 
+        // Left Viewport (Original / Master Source)
         Rectangle {
             x: 0px;
             y: 0px;
@@ -100,7 +104,6 @@ export component InteractiveCompareViewport inherits Rectangle {
                     y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
 
-                // Smooth frame blending overlay (Original Image)
                 if ViewportState.viewer.enable_frame_blending: Image {
                     source: ViewportState.image_original_next;
                     opacity: ViewportState.blend_factor;
@@ -110,9 +113,32 @@ export component InteractiveCompareViewport inherits Rectangle {
                     x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
                     y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
+
+                // Left Viewport Synchronized 4x Loupe Lens Overlay
+                if main_ta.has-hover && main_ta.mouse-x < parent.width: Rectangle {
+                    x: main_ta.mouse-x - 60px;
+                    y: main_ta.mouse-y - 60px;
+                    width: 120px;
+                    height: 120px;
+                    border-radius: 60px;
+                    border-color: #f0b132;
+                    border-width: 2.5px;
+                    background: #111214;
+                    clip: true;
+
+                    Image {
+                        source: ViewportState.image_original;
+                        image-fit: contain;
+                        width: parent.width * 4 * ViewportState.zoom_factor;
+                        height: parent.height * 4 * ViewportState.zoom_factor;
+                        x: -main_ta.mouse-x * 3 + 180px;
+                        y: -main_ta.mouse-y * 3 + 180px;
+                    }
+                }
             }
         }
 
+        // Right Viewport (Duplicate / Target Candidate)
         Rectangle {
             x: parent.width / 2 + 6px;
             y: 0px;
@@ -154,7 +180,6 @@ export component InteractiveCompareViewport inherits Rectangle {
                     y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
 
-                // Smooth frame blending overlay (Duplicate Image)
                 if ViewportState.viewer.enable_frame_blending: Image {
                     source: ViewportState.image_duplicate_next;
                     opacity: ViewportState.blend_factor;
@@ -164,11 +189,36 @@ export component InteractiveCompareViewport inherits Rectangle {
                     x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
                     y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
                 }
+
+                // Right Viewport Synchronized 4x Loupe Lens Overlay (Parallel Cursor Mirroring)
+                if main_ta.has-hover && main_ta.mouse-x < parent.width: Rectangle {
+                    x: (main_ta.mouse-x - parent.width / 2) - 60px;
+                    y: main_ta.mouse-y - 60px;
+                    width: 120px;
+                    height: 120px;
+                    border-radius: 60px;
+                    border-color: #f0b132;
+                    border-width: 2.5px;
+                    background: #111214;
+                    clip: true;
+
+                    Image {
+                        source: ViewportState.image_duplicate;
+                        image-fit: contain;
+                        width: parent.width * 4 * ViewportState.zoom_factor;
+                        height: parent.height * 4 * ViewportState.zoom_factor;
+                        x: -(main_ta.mouse-x - parent.width / 2) * 3 + 180px;
+                        y: -main_ta.mouse-y * 3 + 180px;
+                    }
+                }
             }
         }
     }
 
-    if ViewportState.compare_mode == 1: WipeViewport { // Wipe Mode
+    // =========================================================================
+    // MODE 1: INTERACTIVE WIPE SLIDER VIEWPORT
+    // =========================================================================
+    if ViewportState.compare_mode == 1: WipeViewport {
         original: ViewportState.image_original;
         duplicate: ViewportState.image_duplicate;
         checkerboard: ViewportState.checkerboard_pattern;
@@ -181,7 +231,10 @@ export component InteractiveCompareViewport inherits Rectangle {
         y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
     }
 
-    if ViewportState.compare_mode == 2: Rectangle { // Overlay Blend
+    // =========================================================================
+    // MODE 2: OVERLAY OPACITY BLEND VIEWPORT
+    // =========================================================================
+    if ViewportState.compare_mode == 2: Rectangle {
         width: 100%;
         height: 100%;
         clip: true;
@@ -223,7 +276,10 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
     }
 
-    if ViewportState.compare_mode == 3: Rectangle { // Difference Heatmap
+    // =========================================================================
+    // MODE 3: DIFFERENCE HEATMAP DIAGNOSTIC VIEWPORT
+    // =========================================================================
+    if ViewportState.compare_mode == 3: Rectangle {
         width: 100%;
         height: 100%;
         clip: true;
@@ -255,7 +311,10 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
     }
 
-    if ViewportState.compare_mode == 4: Rectangle { // Flicker Mode
+    // =========================================================================
+    // MODE 4: FLICKER COMPARISON VIEWPORT
+    // =========================================================================
+    if ViewportState.compare_mode == 4: Rectangle {
         width: 100%;
         height: 100%;
         clip: true;

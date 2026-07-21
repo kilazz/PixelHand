@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use crate::qc::rules::{
-    QcImageMetadata, check_absolute, check_empty_channels, check_normal_map_integrity,
-    check_normal_map_orientation, check_relative, check_solid_texture,
+    QcImageMetadata, TargetNormalStyle, check_absolute, check_color_space_misconfiguration,
+    check_empty_channels, check_normal_map_integrity, check_normal_map_orientation, check_relative,
+    check_seamless_tiling, check_solid_texture, check_texel_density_oversize,
 };
 use crate::state::models::{DuplicateFileSummary, QcIssueSummary, ScanParams};
 use crate::utils::helpers::{discover_files, run_scan_pipeline};
@@ -65,6 +66,42 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                     }
                 }
 
+                // Resolve user-defined tags from UI configuration for color space validation
+                let custom_tags = if !params.qc.qc_normals_tags.is_empty() {
+                    &params.qc.qc_normals_tags
+                } else {
+                    &params.prep.prep_tags
+                };
+
+                // Check color space misconfigurations (e.g. sRGB erroneously assigned to data maps)
+                if let Some((issue, details)) =
+                    check_color_space_misconfiguration(p, &qc_meta, custom_tags)
+                {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
+                }
+
+                // Check for oversized textures (>4K)
+                if let Some((issue, details)) = check_texel_density_oversize(&qc_meta) {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
+                }
+
+                // Check for non-seamless tiling artifacts
+                if let Some((issue, details)) = check_seamless_tiling(p) {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
+                }
+
                 // Perform normal map vector integrity and OpenGL/DirectX orientation checks
                 if params.qc.qc_normals {
                     let path_str = p.to_string_lossy().to_lowercase();
@@ -97,7 +134,17 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                                 details,
                             });
                         }
-                        if let Some((issue, details)) = check_normal_map_orientation(p) {
+
+                        // Map user target selection from UI (0: DirectX, 1: OpenGL, 2: Any)
+                        let target_style = match params.qc.qc_normal_target {
+                            1 => TargetNormalStyle::OpenGL,
+                            2 => TargetNormalStyle::Any,
+                            _ => TargetNormalStyle::DirectX,
+                        };
+
+                        if let Some((issue, details)) =
+                            check_normal_map_orientation(p, target_style)
+                        {
                             file_issues.push(QcIssueSummary {
                                 path: p.to_string_lossy().to_string(),
                                 issue,

@@ -19,13 +19,20 @@ pub enum QcError {
 }
 
 // ==========================================
-// --- DATA MODELS & CONSTANTS --------------
+// --- DATA MODELS & ENUMS ------------------
 // ==========================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum NormalMapFormat {
     TangentSpaceRgb,
     Bc5RxGy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TargetNormalStyle {
+    DirectX, // -Y Green (Unreal Engine, 3ds Max, Source)
+    OpenGL,  // +Y Green (Unity, Blender, Maya)
+    Any,     // Informational
 }
 
 #[derive(Debug, Clone)]
@@ -237,7 +244,120 @@ pub fn check_relative(
     issues
 }
 
-/// Downscales a texture to verify if it consists entirely of a single solid color.
+/// Evaluates opposing texture border pixel deltas to detect seams in tiling textures.
+pub fn check_seamless_tiling(path: &Path) -> Option<(String, String)> {
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    if w < 16 || h < 16 {
+        return None;
+    }
+
+    let mut vertical_delta_sum = 0u64;
+    let mut horizontal_delta_sum = 0u64;
+
+    // Top vs Bottom edge
+    for x in 0..w {
+        let p_top = rgba.get_pixel(x, 0);
+        let p_bottom = rgba.get_pixel(x, h - 1);
+        let d = (p_top[0].abs_diff(p_bottom[0]) as u64
+            + p_top[1].abs_diff(p_bottom[1]) as u64
+            + p_top[2].abs_diff(p_bottom[2]) as u64)
+            / 3;
+        vertical_delta_sum += d;
+    }
+
+    // Left vs Right edge
+    for y in 0..h {
+        let p_left = rgba.get_pixel(0, y);
+        let p_right = rgba.get_pixel(w - 1, y);
+        let d = (p_left[0].abs_diff(p_right[0]) as u64
+            + p_left[1].abs_diff(p_right[1]) as u64
+            + p_left[2].abs_diff(p_right[2]) as u64)
+            / 3;
+        horizontal_delta_sum += d;
+    }
+
+    let mean_v_delta = vertical_delta_sum as f32 / w as f32;
+    let mean_h_delta = horizontal_delta_sum as f32 / h as f32;
+
+    let threshold = 35.0f32; // Seam sensitivity boundary
+    if mean_v_delta > threshold || mean_h_delta > threshold {
+        return Some((
+            "Non-Seamless Tiling (Edge Seam)".to_string(),
+            format!(
+                "Opposing edges mismatch (Horizontal Seam Delta: {:.1}, Vertical Seam Delta: {:.1})",
+                mean_h_delta, mean_v_delta
+            ),
+        ));
+    }
+
+    None
+}
+
+/// Verifies that data maps (normals, roughness, metallic, masks) are not assigned sRGB color space.
+/// Uses user-configured custom tags from UI input if present.
+pub fn check_color_space_misconfiguration(
+    path: &Path,
+    meta: &QcImageMetadata,
+    custom_tags_str: &str,
+) -> Option<(String, String)> {
+    let path_str = path.to_string_lossy().to_lowercase();
+
+    let user_tags: Vec<String> = custom_tags_str
+        .split(',')
+        .map(|t| t.trim().to_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let matches_data_tag = if !user_tags.is_empty() {
+        user_tags.iter().any(|tag| path_str.contains(tag))
+    } else {
+        let default_data_tags = [
+            "_norm",
+            "_normal",
+            "_ddn",
+            "_nrm",
+            "_rough",
+            "_roughness",
+            "_rgh",
+            "_metal",
+            "_metallic",
+            "_met",
+            "_mask",
+            "_msk",
+            "_ao",
+            "_orm",
+            "_mra",
+            "_disp",
+        ];
+        default_data_tags.iter().any(|tag| path_str.contains(tag))
+    };
+
+    if matches_data_tag && meta.color_space.to_lowercase() == "srgb" {
+        return Some((
+            "Color Space Misconfiguration".to_string(),
+            "Data map texture matches specified data tags but is encoded as sRGB. Data textures must use Linear color space.".to_string(),
+        ));
+    }
+
+    None
+}
+
+/// Evaluates if texture dimensions exceed standard performance budget limits (>4K).
+pub fn check_texel_density_oversize(meta: &QcImageMetadata) -> Option<(String, String)> {
+    if meta.width > 4096 || meta.height > 4096 {
+        return Some((
+            "Oversized Texture Resolution (>4K)".to_string(),
+            format!(
+                "Texture resolution {}x{} exceeds standard 4K performance budget.",
+                meta.width, meta.height
+            ),
+        ));
+    }
+    None
+}
+
 pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let processed_img = if img.width() > 128 || img.height() > 128 {
@@ -266,7 +386,6 @@ pub fn check_solid_texture(path: &Path) -> Option<(String, String)> {
     ))
 }
 
-/// Examines color channel variation to detect flat, empty masks.
 pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
     let has_alpha = img.color().has_alpha();
@@ -276,7 +395,7 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
         img
     };
     let rgba_img = processed_img.to_rgba8();
-    if rgba_img.pixels().len() == 0 {
+    if rgba_img.is_empty() {
         return None;
     }
 
@@ -315,8 +434,11 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
     None
 }
 
-/// Evaluates relative gradients on the Green channel to predict OpenGL vs DirectX normal layout orientation.
-pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
+/// Analyzes Green channel gradients to verify if normal map layout matches the target pipeline (DirectX vs OpenGL)
+pub fn check_normal_map_orientation(
+    path: &Path,
+    target_style: TargetNormalStyle,
+) -> Option<(String, String)> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(256), None).ok()?;
     let rgb = img.to_rgb8();
 
@@ -356,22 +478,45 @@ pub fn check_normal_map_orientation(path: &Path) -> Option<(String, String)> {
     if top_lights > 0 && bottom_lights > 0 {
         let total = top_lights + bottom_lights;
         let ratio = top_lights as f32 / total as f32;
-        if ratio > 0.65 {
-            return Some((
-                "Normal Map Y-Axis Orientation".to_string(),
-                "OpenGL layout detected (+Y Green channel). Ensure this matches your project's specifications.".to_string()
-            ));
-        } else if ratio < 0.35 {
-            return Some((
-                "Normal Map Y-Axis Orientation".to_string(),
-                "DirectX layout detected (-Y Green channel). Ensure this matches your project's specifications.".to_string()
-            ));
+
+        let is_opengl = ratio > 0.60;
+        let is_directx = ratio < 0.40;
+
+        match target_style {
+            TargetNormalStyle::DirectX => {
+                if is_opengl {
+                    return Some((
+                        "Wrong Normal Map Style (OpenGL)".to_string(),
+                        "Texture uses OpenGL (+Y Green) layout. Expected DirectX (-Y Green) for your project pipeline.".to_string(),
+                    ));
+                }
+            }
+            TargetNormalStyle::OpenGL => {
+                if is_directx {
+                    return Some((
+                        "Wrong Normal Map Style (DirectX)".to_string(),
+                        "Texture uses DirectX (-Y Green) layout. Expected OpenGL (+Y Green) for your project pipeline.".to_string(),
+                    ));
+                }
+            }
+            TargetNormalStyle::Any => {
+                if is_opengl {
+                    return Some((
+                        "Normal Map Orientation".to_string(),
+                        "OpenGL layout detected (+Y Green channel).".to_string(),
+                    ));
+                } else if is_directx {
+                    return Some((
+                        "Normal Map Orientation".to_string(),
+                        "DirectX layout detected (-Y Green channel).".to_string(),
+                    ));
+                }
+            }
         }
     }
     None
 }
 
-/// Analyzes tangent-space normal vectors, checking unit circle bounds and vector lengths to verify integrity.
 pub fn check_normal_map_integrity(
     path: &Path,
     threshold: f32,
