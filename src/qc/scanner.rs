@@ -15,7 +15,6 @@ use crate::utils::helpers::{discover_files, run_scan_pipeline};
 
 /// Executes a technical Quality Control audit over a targeted directory path.
 pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSummary>> {
-    // Delegate file discovery and safety validations to the helper pipeline
     run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
         let total = paths.len();
         let processed = std::sync::atomic::AtomicUsize::new(0);
@@ -28,11 +27,9 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                 }
 
                 let mut file_issues = Vec::new();
-
-                // Safely extract specifications from the graphics header
                 let qc_meta = QcImageMetadata::extract_or_fallback(p);
 
-                // Run absolute standalone rules (NPOT, block alignment, mipmaps, bit depth)
+                // Standalone rules (NPOT, block alignment, mipmaps, bit depth)
                 let abs_issues = check_absolute(
                     &qc_meta,
                     params.qc.qc_npot,
@@ -48,7 +45,7 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                     });
                 }
 
-                // Perform solid color texture checks and empty channel packing checks
+                // Solid color & empty channels check
                 if params.qc.qc_solid_colors {
                     if let Some((issue, details)) = check_solid_texture(p) {
                         file_issues.push(QcIssueSummary {
@@ -66,16 +63,29 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                     }
                 }
 
-                // Resolve user-defined tags from UI configuration for color space validation
-                let custom_tags = if !params.qc.qc_normals_tags.is_empty() {
-                    &params.qc.qc_normals_tags
-                } else {
-                    &params.prep.prep_tags
-                };
+                // Color Space Misconfiguration check
+                if params.qc.qc_check_colorspace {
+                    let custom_tags = if !params.qc.qc_normals_tags.is_empty() {
+                        &params.qc.qc_normals_tags
+                    } else {
+                        &params.prep.prep_tags
+                    };
 
-                // Check color space misconfigurations (e.g. sRGB erroneously assigned to data maps)
-                if let Some((issue, details)) =
-                    check_color_space_misconfiguration(p, &qc_meta, custom_tags)
+                    if let Some((issue, details)) =
+                        check_color_space_misconfiguration(p, &qc_meta, custom_tags)
+                    {
+                        file_issues.push(QcIssueSummary {
+                            path: p.to_string_lossy().to_string(),
+                            issue,
+                            details,
+                        });
+                    }
+                }
+
+                // Oversized texture check with user-defined limit
+                if params.qc.qc_check_oversize
+                    && let Some((issue, details)) =
+                        check_texel_density_oversize(&qc_meta, params.qc.qc_max_resolution)
                 {
                     file_issues.push(QcIssueSummary {
                         path: p.to_string_lossy().to_string(),
@@ -84,8 +94,10 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                     });
                 }
 
-                // Check for oversized textures (>4K)
-                if let Some((issue, details)) = check_texel_density_oversize(&qc_meta) {
+                // Seamless tiling check
+                if params.qc.qc_seamless_tiling
+                    && let Some((issue, details)) = check_seamless_tiling(p)
+                {
                     file_issues.push(QcIssueSummary {
                         path: p.to_string_lossy().to_string(),
                         issue,
@@ -93,16 +105,7 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                     });
                 }
 
-                // Check for non-seamless tiling artifacts
-                if let Some((issue, details)) = check_seamless_tiling(p) {
-                    file_issues.push(QcIssueSummary {
-                        path: p.to_string_lossy().to_string(),
-                        issue,
-                        details,
-                    });
-                }
-
-                // Perform normal map vector integrity and OpenGL/DirectX orientation checks
+                // Normal map vector integrity & DirectX/OpenGL orientation check
                 if params.qc.qc_normals {
                     let path_str = p.to_string_lossy().to_lowercase();
                     let should_check = if params.qc.qc_normals_tags.is_empty() {
@@ -135,7 +138,6 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                             });
                         }
 
-                        // Map user target selection from UI (0: DirectX, 1: OpenGL, 2: Any)
                         let target_style = match params.qc.qc_normal_target {
                             1 => TargetNormalStyle::OpenGL,
                             2 => TargetNormalStyle::Any,
@@ -232,7 +234,6 @@ pub async fn run_folder_compare(
                 check_compression,
             );
 
-            // Hide resolution matches if no other issues are present
             if hide_same_resolution
                 && meta_a.width == meta_b.width
                 && meta_a.height == meta_b.height

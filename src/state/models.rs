@@ -99,6 +99,9 @@ pub struct ScanQcRules {
     pub qc_normals: bool,
     pub qc_normal_target: i32,
     pub qc_normals_tags: String,
+    pub qc_seamless_tiling: bool,
+    pub qc_check_oversize: bool,
+    pub qc_max_resolution: u32,
     pub qc_match_by_stem: bool,
     pub qc_hide_same_resolution: bool,
     pub qc_check_bloat: bool,
@@ -217,6 +220,20 @@ impl ScanParams {
             extensions.push(".avif".to_string());
         }
 
+        // Additional format support
+        extensions.push(".ktx2".to_string());
+        extensions.push(".basis".to_string());
+        extensions.push(".cr2".to_string());
+        extensions.push(".nef".to_string());
+        extensions.push(".arw".to_string());
+        extensions.push(".dng".to_string());
+        extensions.push(".cr3".to_string());
+        extensions.push(".svg".to_string());
+        extensions.push(".astc".to_string());
+        extensions.push(".qoi".to_string());
+        extensions.push(".ico".to_string());
+        extensions.push(".pvr".to_string());
+
         let execution_provider = match scan_config.get_execution_provider() {
             ExecutionProvider::DirectMl => "DirectML".to_string(),
             ExecutionProvider::Cuda => "CUDA".to_string(),
@@ -242,6 +259,9 @@ impl ScanParams {
                 qc_normals: qc.qc_normals,
                 qc_normal_target: qc.qc_normal_target,
                 qc_normals_tags: qc.qc_normals_tags.to_string(),
+                qc_seamless_tiling: qc.qc_seamless_tiling,
+                qc_check_oversize: qc.qc_check_oversize,
+                qc_max_resolution: qc.qc_max_resolution as u32,
                 qc_match_by_stem: qc.qc_match_by_stem,
                 qc_hide_same_resolution: qc.qc_hide_same_resolution,
                 qc_check_bloat: qc.qc_check_bloat,
@@ -368,6 +388,9 @@ impl Default for AppSettings {
                 qc_normals: true,
                 qc_normal_target: 0,
                 qc_normals_tags: "".into(),
+                qc_seamless_tiling: false,
+                qc_check_oversize: true,
+                qc_max_resolution: 4096,
                 qc_match_by_stem: true,
                 qc_hide_same_resolution: false,
                 qc_check_bloat: true,

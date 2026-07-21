@@ -79,7 +79,7 @@ export struct GridRow {
             }
 
 // ==========================================
-// --- GROUPED CONFIGURATION STRUCTURES ------
+// --- GROUPED CONFIGURATION STRUCTURES -----
 // ==========================================
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
@@ -149,6 +149,9 @@ export struct QcSettings {
                 qc_normals: bool,
                 qc_normal_target: int,
                 qc_normals_tags: string,
+                qc_seamless_tiling: bool,
+                qc_check_oversize: bool,
+                qc_max_resolution: int,
                 qc_match_by_stem: bool,
                 qc_hide_same_resolution: bool,
                 qc_check_bloat: bool,

@@ -618,6 +618,29 @@ export component FindSidebar inherits Rectangle {
                             toggled => { ScanConfig.save_settings(); }
                         }
 
+                        CheckBox {
+                            text: "Check Seamless Tiling";
+                            checked <=> ScanConfig.qc.qc_seamless_tiling;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Oversized Textures";
+                            checked <=> ScanConfig.qc.qc_check_oversize;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        if ScanConfig.qc.qc_check_oversize: FormRow {
+                            title: "Max Res (px):";
+                            SpinBox {
+                                value <=> ScanConfig.qc.qc_max_resolution;
+                                minimum: 64;
+                                maximum: 32768;
+                                height: 32px;
+                                edited(val) => { ScanConfig.save_settings(); }
+                            }
+                        }
+
                         Text {
                             text: "Normal Maps Validation";
                             font-size: 11px;

@@ -344,14 +344,17 @@ pub fn check_color_space_misconfiguration(
     None
 }
 
-/// Evaluates if texture dimensions exceed standard performance budget limits (>4K).
-pub fn check_texel_density_oversize(meta: &QcImageMetadata) -> Option<(String, String)> {
-    if meta.width > 4096 || meta.height > 4096 {
+/// Evaluates if texture dimensions exceed user-configured maximum resolution limit.
+pub fn check_texel_density_oversize(
+    meta: &QcImageMetadata,
+    max_resolution: u32,
+) -> Option<(String, String)> {
+    if max_resolution > 0 && (meta.width > max_resolution || meta.height > max_resolution) {
         return Some((
-            "Oversized Texture Resolution (>4K)".to_string(),
+            format!("Oversized Texture (>{}px)", max_resolution),
             format!(
-                "Texture resolution {}x{} exceeds standard 4K performance budget.",
-                meta.width, meta.height
+                "Texture resolution {}x{} exceeds configured project limit of {}px.",
+                meta.width, meta.height, max_resolution
             ),
         ));
     }
