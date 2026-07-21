@@ -616,7 +616,7 @@ export component CompareTab inherits HorizontalLayout {
                 text: "B";
                 active-color: #3e6a90;
                 active <=> ViewportState.active_b;
-                clicked => { ViewportState.active_b = !ViewportState.active_b; if ViewportState.active_b { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_b = false; } ViewportState.channel_toggled(); }
+                clicked => { ViewportState.active_b = !ViewportState.active_b; if ViewportState.active_b { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
             }
 
             ChannelButton {
