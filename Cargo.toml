@@ -78,4 +78,3 @@ lto = "thin"
 codegen-units = 16
 panic = "abort"
 strip = true
-debug = true
