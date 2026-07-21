@@ -3,7 +3,7 @@
 use anyhow::{Result, anyhow};
 use rayon::prelude::*;
 use std::collections::HashSet;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::perceptual::hashing::{calculate_hamming_distance, calculate_perceptual_hash};
 use crate::qc::rules::QcImageMetadata;
@@ -15,7 +15,6 @@ use crate::utils::helpers::{AnalysisItem, generate_analysis_items, run_scan_pipe
 pub async fn run_perceptual_scan_internal(
     params: ScanParams,
 ) -> Result<Vec<DuplicateGroupSummary>> {
-    // Delegate file discovery, exclusion logic, and safety verification to the helper pipeline
     run_scan_pipeline(&params, |paths, cancel_token, progress_cb| {
         let items: Vec<AnalysisItem> = generate_analysis_items(&paths, &params);
 
@@ -26,11 +25,10 @@ pub async fn run_perceptual_scan_internal(
         ));
 
         let total = items.len();
-        let processed = std::sync::atomic::AtomicUsize::new(0);
+        let processed = AtomicUsize::new(0);
 
-        // Compute perceptual dHash structures across all worker threads in parallel.
-        // Hashes are kept as raw Vec<u8> to prevent base64 conversion overhead.
-        let hashes: Vec<(AnalysisItem, Vec<u8>)> = items
+        // Compute perceptual dHash fingerprints stored directly as register u64 integers (Zero Heap Allocation)
+        let hashes: Vec<(AnalysisItem, u64)> = items
             .par_iter()
             .filter_map(|item| {
                 if cancel_token.load(Ordering::Relaxed) {
@@ -54,21 +52,50 @@ pub async fn run_perceptual_scan_internal(
             return Err(anyhow!("Scan cancelled by user."));
         }
 
-        // Convert user similarity percentage into Hamming Distance bounds (64-bit fingerprint space)
         let max_dist = (((100.0 - params.similarity) / 100.0) * 64.0).round() as u32;
+        let total_hashes = hashes.len();
 
-        // Perform disjoint set union (Union-Find) clustering to group similar hashes
-        let mut uf = UnionFind::new(hashes.len());
-        for i in 0..hashes.len() {
-            if cancel_token.load(Ordering::Relaxed) {
-                return Err(anyhow!("Scan cancelled by user."));
-            }
-            for j in (i + 1)..hashes.len() {
-                let dist = calculate_hamming_distance(&hashes[i].1, &hashes[j].1);
-                if dist <= max_dist {
-                    uf.union(i, j);
+        // Lock-free Dynamic Work-Stealing Pairwise Comparison (Fannkuch Pattern)
+        let chunk_size = 128usize;
+        let next_chunk = AtomicUsize::new(0);
+
+        let matching_pairs: Vec<(usize, usize)> = (0..rayon::current_num_threads())
+            .into_par_iter()
+            .flat_map(|_| {
+                let mut local_pairs = Vec::new();
+                loop {
+                    if cancel_token.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let start_i = next_chunk.fetch_add(chunk_size, Ordering::Relaxed);
+                    if start_i >= total_hashes {
+                        break;
+                    }
+                    let end_i = (start_i + chunk_size).min(total_hashes);
+
+                    for i in start_i..end_i {
+                        let h1 = hashes[i].1;
+                        for (offset, (_, h2)) in hashes[i + 1..].iter().enumerate() {
+                            let j = i + 1 + offset;
+                            // Executed in 1 clock cycle via hardware POPCNT
+                            if calculate_hamming_distance(h1, *h2) <= max_dist {
+                                local_pairs.push((i, j));
+                            }
+                        }
+                    }
                 }
-            }
+                local_pairs
+            })
+            .collect();
+
+        if cancel_token.load(Ordering::Relaxed) {
+            return Err(anyhow!("Scan cancelled by user."));
+        }
+
+        // Perform disjoint set union (Union-Find) clustering sequentially on matched pairs
+        let mut uf = UnionFind::new(hashes.len());
+        for (i, j) in matching_pairs {
+            uf.union(i, j);
         }
 
         let groups = uf.get_groups();
@@ -96,7 +123,6 @@ pub async fn run_perceptual_scan_internal(
                 }
                 seen_paths.insert(path_str.clone());
 
-                // Extract technical specs using the polymorphic metadata extractor
                 let qc_meta = QcImageMetadata::extract_or_fallback(&item.path);
 
                 file_summaries.push(DuplicateFileSummary {
@@ -118,7 +144,6 @@ pub async fn run_perceptual_scan_internal(
             if file_summaries.len() > 1 {
                 group_counter += 1;
 
-                // Sort file summaries: largest resolution / file size serves as the master representative copy
                 file_summaries.sort_by(|a, b| {
                     let area_a = a.width * a.height;
                     let area_b = b.width * b.height;
@@ -133,16 +158,15 @@ pub async fn run_perceptual_scan_internal(
                 let best_hash = member_indices
                     .iter()
                     .find(|&&idx| hashes[idx].0.path.to_string_lossy() == *best_path)
-                    .map(|&idx| &hashes[idx].1)
-                    .unwrap_or(&hashes[member_indices[0]].1);
+                    .map(|&idx| hashes[idx].1)
+                    .unwrap_or(hashes[member_indices[0]].1);
 
-                // Compute similarity against the chosen master representative copy
                 for file in &mut file_summaries {
                     let cur_hash = member_indices
                         .iter()
                         .find(|&&idx| hashes[idx].0.path.to_string_lossy() == file.path)
-                        .map(|&idx| &hashes[idx].1)
-                        .unwrap_or(&hashes[member_indices[0]].1);
+                        .map(|&idx| hashes[idx].1)
+                        .unwrap_or(hashes[member_indices[0]].1);
 
                     let dist = calculate_hamming_distance(best_hash, cur_hash);
                     file.similarity = (1.0 - (dist as f32 / 64.0)) * 100.0;

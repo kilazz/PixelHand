@@ -75,7 +75,6 @@ async fn main() -> Result<()> {
     setup_panic_hook();
 
     // Safely initialize the global ONNX Runtime environment process-wide.
-    // This replaces unsafe environment variable modification (which is unsafe in multi-threaded contexts).
     let _ = ort::init().with_name("PixelHand").commit();
 
     let args: Vec<String> = env::args().collect();

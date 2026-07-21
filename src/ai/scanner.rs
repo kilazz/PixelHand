@@ -19,7 +19,7 @@ use crate::utils::clustering::UnionFind;
 use crate::utils::helpers::{AnalysisItem, discover_files, generate_analysis_items};
 
 // ==========================================
-// --- DECOUPLED SEMAPHORE FOR PARALEL IO ---
+// --- DECOUPLED SEMAPHORE FOR PARALLEL IO --
 // ==========================================
 
 struct DecoupledSemaphore {
@@ -291,11 +291,9 @@ async fn scan_and_index_directory(
 
                         let mut final_img = processed;
                         if final_img.width() > 512 || final_img.height() > 512 {
-                            final_img = final_img.resize_exact(
-                                512,
-                                512,
-                                image::imageops::FilterType::Triangle,
-                            );
+                            // Preserve aspect ratio when scaling down to 512px box
+                            final_img =
+                                final_img.resize(512, 512, image::imageops::FilterType::Triangle);
                         }
 
                         let current = processed_items_clone.fetch_add(1, Ordering::Relaxed) + 1;

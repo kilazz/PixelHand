@@ -147,6 +147,47 @@ export component FindTab inherits HorizontalLayout {
                         clicked => { ScanConfig.export_html(); }
                     }
 
+                    // PAGINATION CONTROLS
+                    if ScanConfig.has_results && ScanConfig.total_pages > 1: HorizontalLayout {
+                        spacing: 4px;
+                        alignment: center;
+                        cross-axis-alignment: center;
+
+                        CustomButton {
+                            text: "<";
+                            width: 24px;
+                            height: 24px;
+                            compact: true;
+                            enabled: ScanConfig.active_page > 0;
+                            primary-color: #474747;
+                            clicked => {
+                                ScanConfig.active_page = Math.max(0, ScanConfig.active_page - 1);
+                                ScanConfig.results_filter_changed();
+                            }
+                        }
+
+                        Text {
+                            text: (ScanConfig.active_page + 1) + " / " + ScanConfig.total_pages;
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #cfcfcf;
+                            vertical-alignment: center;
+                        }
+
+                        CustomButton {
+                            text: ">";
+                            width: 24px;
+                            height: 24px;
+                            compact: true;
+                            enabled: ScanConfig.active_page < ScanConfig.total_pages - 1;
+                            primary-color: #474747;
+                            clicked => {
+                                ScanConfig.active_page = Math.min(ScanConfig.total_pages - 1, ScanConfig.active_page + 1);
+                                ScanConfig.results_filter_changed();
+                            }
+                        }
+                    }
+
                     if ScanConfig.search_method == SearchMethod.ai: HorizontalLayout {
                         spacing: 6px;
                         Text {

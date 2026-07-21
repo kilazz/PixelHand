@@ -34,27 +34,37 @@ export component FileFormatsPopup inherits PopupWindow {
                 // Col 1: Standard SDR
                 VerticalLayout {
                     spacing: 4px;
-                    Text { text: "Standard"; font-size: 10px; font-weight: 700; color: #808080; }
+                    Text {
+                        text: "Standard";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #808080;
+                    }
+
                     CheckBox {
                         text: ".png";
                         checked <=> ScanConfig.extensions.ext_png;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".jpg / .jpeg";
                         checked <=> ScanConfig.extensions.ext_jpg;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".tga";
                         checked <=> ScanConfig.extensions.ext_tga;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".bmp";
                         checked <=> ScanConfig.extensions.ext_bmp;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".webp";
                         checked <=> ScanConfig.extensions.ext_webp;
@@ -65,27 +75,37 @@ export component FileFormatsPopup inherits PopupWindow {
                 // Col 2: Production & HDR
                 VerticalLayout {
                     spacing: 4px;
-                    Text { text: "Production/HDR"; font-size: 10px; font-weight: 700; color: #808080; }
+                    Text {
+                        text: "Production/HDR";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #808080;
+                    }
+
                     CheckBox {
                         text: ".exr";
                         checked <=> ScanConfig.extensions.ext_exr;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".hdr";
                         checked <=> ScanConfig.extensions.ext_hdr;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".tif / .tiff";
                         checked <=> ScanConfig.extensions.ext_tif;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".psd";
                         checked <=> ScanConfig.extensions.ext_psd;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".jxl";
                         checked <=> ScanConfig.extensions.ext_jxl;
@@ -96,27 +116,37 @@ export component FileFormatsPopup inherits PopupWindow {
                 // Col 3: GPU & Compressed
                 VerticalLayout {
                     spacing: 4px;
-                    Text { text: "GPU Compressed"; font-size: 10px; font-weight: 700; color: #808080; }
+                    Text {
+                        text: "GPU Compressed";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #808080;
+                    }
+
                     CheckBox {
                         text: ".dds";
                         checked <=> ScanConfig.extensions.ext_dds;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".ktx2 / .basis";
                         checked <=> ScanConfig.extensions.ext_ktx2;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".astc";
                         checked <=> ScanConfig.extensions.ext_astc;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".pvr";
                         checked <=> ScanConfig.extensions.ext_pvr;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".qoi";
                         checked <=> ScanConfig.extensions.ext_qoi;
@@ -127,27 +157,37 @@ export component FileFormatsPopup inherits PopupWindow {
                 // Col 4: Vector, Icons & RAW
                 VerticalLayout {
                     spacing: 4px;
-                    Text { text: "Vector, Icons & RAW"; font-size: 10px; font-weight: 700; color: #808080; }
+                    Text {
+                        text: "Vector, Icons & RAW";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: #808080;
+                    }
+
                     CheckBox {
                         text: ".svg";
                         checked <=> ScanConfig.extensions.ext_svg;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".ico";
                         checked <=> ScanConfig.extensions.ext_ico;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".heic / .heif";
                         checked <=> ScanConfig.extensions.ext_heic;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".avif";
                         checked <=> ScanConfig.extensions.ext_avif;
                         toggled => { ScanConfig.save_settings(); }
                     }
+
                     CheckBox {
                         text: ".raw (.cr2, .nef, .arw)";
                         checked <=> ScanConfig.extensions.ext_raw;

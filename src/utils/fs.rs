@@ -95,6 +95,11 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
         let source = PathBuf::from(&source_str);
         let target = PathBuf::from(&target_str);
 
+        // Guard against linking a master file to itself
+        if source == target {
+            continue;
+        }
+
         if !source.exists() {
             tracing::warn!("Deduplication source does not exist: {}", source.display());
             continue;
@@ -105,8 +110,9 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // 1. Create temporary hard link alongside target path
-        let temp_target = target.with_extension("ph_tmp_hardlink");
+        // 1. Create temporary hard link alongside target path with safely appended suffix
+        let target_filename = target.file_name().unwrap_or_default().to_string_lossy();
+        let temp_target = target.with_file_name(format!("{}.ph_tmp_hardlink", target_filename));
 
         if temp_target.exists() {
             let _ = fs::remove_file(&temp_target);
@@ -155,6 +161,11 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
         let source = PathBuf::from(&source_str);
         let target = PathBuf::from(&target_str);
 
+        // Guard against linking a master file to itself
+        if source == target {
+            continue;
+        }
+
         if !source.exists() {
             tracing::warn!("Deduplication source does not exist: {}", source.display());
             continue;
@@ -165,8 +176,9 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // 1. Create temporary reflink alongside target path
-        let temp_target = target.with_extension("ph_tmp_reflink");
+        // 1. Create temporary reflink alongside target path with safely appended suffix
+        let target_filename = target.file_name().unwrap_or_default().to_string_lossy();
+        let temp_target = target.with_file_name(format!("{}.ph_tmp_reflink", target_filename));
 
         if temp_target.exists() {
             let _ = fs::remove_file(&temp_target);
