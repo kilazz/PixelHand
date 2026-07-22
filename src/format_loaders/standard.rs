@@ -1,7 +1,8 @@
 // src/format_loaders/standard.rs
 
 use anyhow::{Context, Result};
-use image::DynamicImage;
+use image::metadata::Orientation;
+use image::{ColorType, DynamicImage, ImageDecoder, ImageReader};
 use std::path::Path;
 
 use crate::format_loaders::ImageFormatLoader;
@@ -20,21 +21,38 @@ impl ImageFormatLoader for StandardLoader {
     fn decode(
         &self,
         path: &Path,
-        _target_size: Option<u32>,
+        target_size: Option<u32>,
         tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
         let ext = path
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        let img = image::open(path).context("Failed to decode standard image format")?;
 
-        if ext == "hdr"
-            || matches!(
-                img.color(),
-                image::ColorType::Rgb32F | image::ColorType::Rgba32F
-            )
-        {
+        // 1. Open reader and automatically guess real image format by Magic Bytes signature
+        let mut reader = ImageReader::open(path)
+            .context("Failed to open image file")?
+            .with_guessed_format()
+            .context("Failed to determine image magic bytes signature")?;
+
+        // Disable default 512MB RAM allocation limit for large production textures
+        reader.no_limits();
+
+        let mut decoder = reader
+            .into_decoder()
+            .context("Failed to construct image format decoder")?;
+
+        // 2. Extract EXIF orientation metadata natively supported in image 0.25.10
+        let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+
+        let mut img = DynamicImage::from_decoder(decoder)
+            .context("Failed to decode standard image format payload")?;
+
+        // 3. Apply EXIF orientation transforms (auto-rotate/flip)
+        img.apply_orientation(orientation);
+
+        // 4. Handle HDR / 32-bit Float image formats via the tonemapping pipeline
+        if ext == "hdr" || matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F) {
             let float_img = img.to_rgba32f();
             let width = float_img.width();
             let height = float_img.height();
@@ -54,10 +72,17 @@ impl ImageFormatLoader for StandardLoader {
                 config,
                 1.0,
             )?;
-            Ok(DynamicImage::ImageRgba8(ldr_img))
-        } else {
-            Ok(DynamicImage::ImageRgba8(img.to_rgba8()))
+            img = DynamicImage::ImageRgba8(ldr_img);
         }
+
+        // 5. Downscale thumbnail if target_size is requested
+        if let Some(target) = target_size
+            && (img.width() > target || img.height() > target)
+        {
+            img = img.resize(target, target, image::imageops::FilterType::Triangle);
+        }
+
+        Ok(img)
     }
 
     fn extract_metadata(&self, path: &Path) -> Result<QcImageMetadata> {
@@ -79,10 +104,14 @@ impl ImageFormatLoader for StandardLoader {
             bit_depth = 32;
             color_space = "Linear".to_string();
             compression_format = "Radiance HDR".to_string();
-        } else if let Ok(img) = image::open(path) {
-            let color = img.color();
+        } else if let Ok(reader) = ImageReader::open(path).and_then(|r| r.with_guessed_format())
+            && let Ok(decoder) = reader.into_decoder()
+        {
+            let color = decoder.color_type();
             has_alpha = color.has_alpha();
-            bit_depth = color.bits_per_pixel() as u32 / if has_alpha { 4 } else { 3 };
+            let bpp = color.bits_per_pixel();
+            let channels = color.channel_count() as u16;
+            bit_depth = bpp.checked_div(channels).map_or(8, |d| d as u32);
         }
 
         Ok(QcImageMetadata {
@@ -96,7 +125,6 @@ impl ImageFormatLoader for StandardLoader {
             bit_depth,
             mipmap_count: 1,
             is_cubemap: false,
-            // Calculate predicted GPU memory footprint using the general QC domain rules
             estimated_vram: crate::qc::rules::estimate_vram(w, h, &ext, 1, false),
         })
     }

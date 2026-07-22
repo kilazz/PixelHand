@@ -6,6 +6,7 @@ use std::path::Path;
 
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
+use crate::utils::image_processing::bgra_u32_to_rgba_bytes;
 use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct CrnLoader;
@@ -13,7 +14,7 @@ pub struct CrnLoader;
 pub fn decode_crn_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let mut tex_info = texture2ddecoder::CrnTextureInfo::default();
     if !tex_info.crnd_get_texture_info(bytes, bytes.len() as u32) {
-        return Err(anyhow!("Invalid Crunch file header"));
+        return Err(anyhow!("Invalid Crunch file header or signature"));
     }
 
     let w = tex_info.width as usize;
@@ -21,7 +22,7 @@ pub fn decode_crn_bytes(bytes: &[u8]) -> Result<DynamicImage> {
 
     if w == 0 || h == 0 || w > 16384 || h > 16384 {
         return Err(anyhow!(
-            "Invalid or oversized Crunch dimensions: {}x{}",
+            "Invalid or oversized Crunch dimensions: {}x{} (max 16384x16384)",
             w,
             h
         ));
@@ -29,14 +30,17 @@ pub fn decode_crn_bytes(bytes: &[u8]) -> Result<DynamicImage> {
 
     let mut rgba_u32 = vec![0u32; w * h];
 
-    // Распаковка Unity Crunch текстур
-    texture2ddecoder::decode_unity_crunch(bytes, w, h, &mut rgba_u32)
-        .map_err(|e| anyhow!("Unity Crunch decoding failed: {:?}", e))?;
-
-    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
-    for chunk in raw_bytes.chunks_exact_mut(4) {
-        chunk.swap(0, 2); // BGRA -> RGBA
+    // Try Unity Crunch first; if it fails, fallback to Standard Binomial Crunch
+    if texture2ddecoder::decode_unity_crunch(bytes, w, h, &mut rgba_u32).is_err() {
+        texture2ddecoder::decode_crunch(bytes, w, h, &mut rgba_u32).map_err(|e| {
+            anyhow!(
+                "Both Unity Crunch and Standard Crunch decoding failed: {:?}",
+                e
+            )
+        })?;
     }
+
+    let raw_bytes = bgra_u32_to_rgba_bytes(rgba_u32);
 
     let img = image::RgbaImage::from_raw(w as u32, h as u32, raw_bytes)
         .ok_or_else(|| anyhow!("Failed to build RGBA buffer from Crunch texture"))?;
@@ -55,7 +59,7 @@ impl ImageFormatLoader for CrnLoader {
         _target_size: Option<u32>,
         _tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
-        let bytes = std::fs::read(path).context("Failed to read CRN file")?;
+        let bytes = std::fs::read(path).context("Failed to read CRN file from disk")?;
         decode_crn_bytes(&bytes)
     }
 
@@ -79,7 +83,7 @@ impl ImageFormatLoader for CrnLoader {
             height: h,
             file_size: size,
             format_str: "crn".to_string(),
-            compression_format: "Unity Crunch Compressed".to_string(),
+            compression_format: "Crunch Compressed".to_string(),
             color_space: "sRGB".to_string(),
             has_alpha: true,
             bit_depth: 8,

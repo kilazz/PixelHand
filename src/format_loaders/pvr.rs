@@ -6,6 +6,7 @@ use std::path::Path;
 
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
+use crate::utils::image_processing::bgra_u32_to_rgba_bytes;
 use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct PvrLoader;
@@ -57,16 +58,10 @@ pub fn decode_pvr_bytes(bytes: &[u8]) -> Result<DynamicImage> {
 
     let mut rgba_u32 = vec![0u32; width * height];
 
-    // True CPU PVRTC Decompression
     texture2ddecoder::decode_pvrtc(payload, width, height, &mut rgba_u32, is_2bpp)
         .map_err(|e| anyhow!("PVRTC decompression failed: {:?}", e))?;
 
-    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
-
-    // Convert BGRA from texture2ddecoder into RGBA for Rust image crate
-    for chunk in raw_bytes.chunks_exact_mut(4) {
-        chunk.swap(0, 2);
-    }
+    let raw_bytes = bgra_u32_to_rgba_bytes(rgba_u32);
 
     let img = image::RgbaImage::from_raw(width as u32, height as u32, raw_bytes)
         .ok_or_else(|| anyhow!("Failed to compile PVR RGBA buffer"))?;

@@ -567,9 +567,9 @@ pub async fn run_ai_search(params: ScanParams) -> Result<Vec<AiSearchResultSumma
     let results = search_results
         .into_iter()
         .map(|r| {
-            // LanceDB natively returns squared L2 distance (D^2).
-            // Formula: D^2 = 2 - 2 * CosineSimilarity => CosineSimilarity = 1.0 - (D^2 / 2.0)
-            let similarity = (1.0 - (r.distance / 2.0)).clamp(0.0, 1.0) * 100.0;
+            // LanceDB with DistanceType::Cosine returns Cosine Distance D = 1.0 - CosineSimilarity
+            // Cosine Similarity = 1.0 - D
+            let similarity = (1.0 - r.distance).clamp(0.0, 1.0) * 100.0;
             AiSearchResultSummary {
                 path: r.path,
                 similarity,

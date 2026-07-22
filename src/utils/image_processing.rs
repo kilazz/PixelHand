@@ -1,6 +1,28 @@
 // src/utils/image_processing.rs
 
+use rayon::prelude::*;
 use slint::SharedPixelBuffer;
+
+/// Efficiently converts a raw pixel byte buffer from BGRA to RGBA in-place.
+/// Leverages Rayon parallel processing for buffers larger than 64 KB to eliminate decoding bottlenecks.
+pub fn bgra_to_rgba_in_place(buf: &mut [u8]) {
+    if buf.len() >= 64 * 1024 {
+        buf.par_chunks_exact_mut(4).for_each(|chunk| {
+            chunk.swap(0, 2);
+        });
+    } else {
+        for chunk in buf.chunks_exact_mut(4) {
+            chunk.swap(0, 2);
+        }
+    }
+}
+
+/// Converts a u32 slice (in LE BGRA format from texture2ddecoder) into an RGBA u8 byte vector.
+pub fn bgra_u32_to_rgba_bytes(rgba_u32: Vec<u32>) -> Vec<u8> {
+    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
+    bgra_to_rgba_in_place(&mut raw_bytes);
+    raw_bytes
+}
 
 /// Generates a tileable dark or light checkerboard pattern directly in memory for transparent viewports.
 pub fn generate_checkerboard(is_light: bool) -> slint::Image {

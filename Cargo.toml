@@ -64,6 +64,10 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 anyhow = "1.0.104"
 thiserror = "2.0.19"
 
+###
+zstd = "0.13.3"
+flate2 = "1.1.9"
+
 [patch.crates-io]
 # Override for suffix automaton crate compatibility
 esaxx-rs = { git = "https://github.com/Roboticist01/esaxx-rs.git", branch = "main" }

@@ -10,10 +10,10 @@ use lancedb::arrow::arrow_array::{
 use lancedb::arrow::arrow_schema::{DataType, Field, Schema};
 
 use futures::TryStreamExt;
-use lancedb::connection::Connection;
+use lancedb::Connection;
+use lancedb::DistanceType;
 use lancedb::index::Index;
-use lancedb::query::ExecutableQuery;
-use lancedb::query::QueryBase;
+use lancedb::query::{ExecutableQuery, QueryBase};
 use lancedb::table::Table;
 
 /// Helper function to construct the unified Apache Arrow schema for LanceDB image metadata caching.
@@ -182,7 +182,6 @@ impl DatabaseService {
                 continue;
             }
 
-            // Resolve column indices dynamically to guarantee stability against future schema refactoring
             let schema = batch.schema();
             let path_idx = schema.index_of("path").context("Missing path column")?;
             let channel_idx = schema
@@ -248,7 +247,7 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Generates an IVF-PQ vector index to accelerate nearest-neighbor lookups.
+    /// Generates an IVF-PQ vector index using Cosine metric to accelerate nearest-neighbor lookups.
     pub async fn create_vector_index(&self) -> Result<()> {
         let table = self
             .table
@@ -256,7 +255,6 @@ impl DatabaseService {
             .context("Database table is not initialized")?;
         let row_count = table.count_rows(None).await?;
 
-        // Avoid building indices on tiny datasets since exhaustive scan is faster under 5000 records
         if row_count < 5000 {
             return Ok(());
         }
@@ -268,7 +266,7 @@ impl DatabaseService {
         Ok(())
     }
 
-    /// Performs a high-speed vector similarity search using Cosine metrics.
+    /// Performs a high-speed vector similarity search natively using Cosine Distance (`DistanceType::Cosine`).
     pub async fn search_similarity(
         &self,
         query_vector: &[f32],
@@ -281,7 +279,10 @@ impl DatabaseService {
             .as_ref()
             .context("Database table is not initialized")?;
 
-        let mut query = table.query().nearest_to(query_vector)?;
+        let mut query = table
+            .query()
+            .nearest_to(query_vector)?
+            .distance_type(DistanceType::Cosine);
 
         if let Some(np) = nprobes {
             query = query.nprobes(np);

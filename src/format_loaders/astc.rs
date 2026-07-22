@@ -6,6 +6,7 @@ use std::path::Path;
 
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
+use crate::utils::image_processing::bgra_u32_to_rgba_bytes;
 use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct AstcLoader;
@@ -34,7 +35,6 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let h = (u32::from(bytes[10]) | (u32::from(bytes[11]) << 8) | (u32::from(bytes[12]) << 16))
         as usize;
 
-    // OOM Bounds Check
     if w == 0 || h == 0 || w > 16384 || h > 16384 {
         return Err(anyhow!(
             "Invalid or oversized ASTC dimensions: {}x{} (max 16384x16384)",
@@ -46,16 +46,10 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let payload = &bytes[16..];
     let mut rgba_u32 = vec![0u32; w * h];
 
-    // True CPU ASTC Decompression
     texture2ddecoder::decode_astc(payload, w, h, block_x, block_y, &mut rgba_u32)
         .map_err(|e| anyhow!("ASTC decoding failed: {:?}", e))?;
 
-    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
-
-    // Convert BGRA from texture2ddecoder into RGBA for Rust image crate
-    for chunk in raw_bytes.chunks_exact_mut(4) {
-        chunk.swap(0, 2);
-    }
+    let raw_bytes = bgra_u32_to_rgba_bytes(rgba_u32);
 
     let img = image::RgbaImage::from_raw(w as u32, h as u32, raw_bytes)
         .ok_or_else(|| anyhow!("Failed to compile ASTC RGBA buffer"))?;
