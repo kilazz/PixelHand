@@ -18,11 +18,12 @@ export component InteractiveCompareViewport inherits Rectangle {
         pointer-event(evt) => {
             // Right-click resets pan offset and zoom level to default
             if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                ViewportState.viewer.fit_to_window = true;
                 ViewportState.zoom_factor = 1.0;
                 ViewportState.pan_x = 0px;
                 ViewportState.pan_y = 0px;
             }
-            // Left-click locks pan drag origin
+            // Left-click locks pan drag origin and disables Fit mode for free panning
             if (evt.button == PointerEventButton.left && evt.kind == PointerEventKind.down) {
                 self.pressed-pan-x = ViewportState.pan_x;
                 self.pressed-pan-y = ViewportState.pan_y;
@@ -31,6 +32,12 @@ export component InteractiveCompareViewport inherits Rectangle {
 
         moved => {
             if (self.enabled && self.pressed) {
+                // If panning while in Fit mode, exit Fit mode and keep current visual size
+                if (ViewportState.viewer.fit_to_window) {
+                    let current_scale = (root.width / 2) / Math.max(1px, ViewportState.sprite_width * 1px);
+                    ViewportState.zoom_factor = current_scale;
+                    ViewportState.viewer.fit_to_window = false;
+                }
                 ViewportState.pan_x = self.pressed-pan-x + (self.mouse-x - self.pressed-x);
                 ViewportState.pan_y = self.pressed-pan-y + (self.mouse-y - self.pressed-y);
             }
@@ -56,6 +63,12 @@ export component InteractiveCompareViewport inherits Rectangle {
         }
 
         scroll-event(evt) => {
+            // Seamless Zoom Sync: Convert current Fit scale into manual zoom_factor on wheel scroll
+            if (ViewportState.viewer.fit_to_window) {
+                let current_scale = (root.width / 2) / Math.max(1px, ViewportState.sprite_width * 1px);
+                ViewportState.zoom_factor = current_scale;
+                ViewportState.viewer.fit_to_window = false;
+            }
             let zoom_delta = (evt.delta-y / 1px) / 120.0 * 0.15;
             ViewportState.zoom_factor = (ViewportState.zoom_factor + zoom_delta).clamp(0.1, 10.0);
             if (ViewportState.zoom_factor == 1.0) {
@@ -75,7 +88,7 @@ export component InteractiveCompareViewport inherits Rectangle {
     }
 
     // =========================================================================
-    // MODE 0: SIDE-BY-SIDE (With Precise Synchronized 2.5x Loupe Magnifier)
+    // MODE 0: SIDE-BY-SIDE (With Dynamic Magnifier Loupe)
     // =========================================================================
     if ViewportState.compare_mode == 0: Rectangle {
         width: 100%;
@@ -112,8 +125,8 @@ export component InteractiveCompareViewport inherits Rectangle {
             orig_img := Image {
                 source: ViewportState.image_original;
                 image-fit: contain;
-                width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-                height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
                 x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
                 y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
             }
@@ -128,7 +141,7 @@ export component InteractiveCompareViewport inherits Rectangle {
                 y: orig_img.y;
             }
 
-            // Left Viewport Loupe (Active only when enable_loupe is true and cursor is on the left side)
+            // Left Viewport Loupe with dynamic loupe_factor
             if ViewportState.enable_loupe && main_ta.has-hover && main_ta.mouse-x < root.width / 2: Rectangle {
                 property <length> local-x: main_ta.mouse-x;
                 property <length> local-y: main_ta.mouse-y;
@@ -146,10 +159,10 @@ export component InteractiveCompareViewport inherits Rectangle {
                 Image {
                     source: ViewportState.image_original;
                     image-fit: contain;
-                    width: orig_img.width * 2.5;
-                    height: orig_img.height * 2.5;
-                    x: 75px - (local-x - orig_img.x) * 2.5;
-                    y: 75px - (local-y - orig_img.y) * 2.5;
+                    width: orig_img.width * ViewportState.loupe_factor;
+                    height: orig_img.height * ViewportState.loupe_factor;
+                    x: 75px - (local-x - orig_img.x) * ViewportState.loupe_factor;
+                    y: 75px - (local-y - orig_img.y) * ViewportState.loupe_factor;
                 }
             }
         }
@@ -185,8 +198,8 @@ export component InteractiveCompareViewport inherits Rectangle {
             dup_img := Image {
                 source: ViewportState.image_duplicate;
                 image-fit: contain;
-                width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-                height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
                 x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
                 y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
             }
@@ -201,7 +214,7 @@ export component InteractiveCompareViewport inherits Rectangle {
                 y: dup_img.y;
             }
 
-            // Right Viewport Loupe (Active only when enable_loupe is true and cursor is on the right side)
+            // Right Viewport Loupe with dynamic loupe_factor
             if ViewportState.enable_loupe && main_ta.has-hover && main_ta.mouse-x >= root.width / 2: Rectangle {
                 property <length> local-x: main_ta.mouse-x - (root.width / 2 + 4px);
                 property <length> local-y: main_ta.mouse-y;
@@ -219,10 +232,10 @@ export component InteractiveCompareViewport inherits Rectangle {
                 Image {
                     source: ViewportState.image_duplicate;
                     image-fit: contain;
-                    width: dup_img.width * 2.5;
-                    height: dup_img.height * 2.5;
-                    x: 75px - (local-x - dup_img.x) * 2.5;
-                    y: 75px - (local-y - dup_img.y) * 2.5;
+                    width: dup_img.width * ViewportState.loupe_factor;
+                    height: dup_img.height * ViewportState.loupe_factor;
+                    x: 75px - (local-x - dup_img.x) * ViewportState.loupe_factor;
+                    y: 75px - (local-y - dup_img.y) * ViewportState.loupe_factor;
                 }
             }
         }
@@ -238,8 +251,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         background-mode: ViewportState.viewer.background_mode;
         checkerboard-light: ViewportState.checkerboard_pattern_light;
         wipe-val <=> ViewportState.wipe_slider_val;
-        width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-        height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+        width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+        height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
         x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
         y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
     }
@@ -272,8 +285,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         Image {
             source: ViewportState.image_original;
             image-fit: contain;
-            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
             x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
             y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
@@ -282,8 +295,8 @@ export component InteractiveCompareViewport inherits Rectangle {
             source: ViewportState.image_duplicate;
             image-fit: contain;
             opacity: ViewportState.wipe_slider_val;
-            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
             x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
             y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
@@ -317,8 +330,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         Image {
             source: ViewportState.image_heatmap;
             image-fit: contain;
-            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
             x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
             y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
@@ -352,8 +365,8 @@ export component InteractiveCompareViewport inherits Rectangle {
         Image {
             source: ViewportState.flicker_show_duplicate ? ViewportState.image_duplicate : ViewportState.image_original;
             image-fit: contain;
-            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
             x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
             y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }
@@ -362,8 +375,8 @@ export component InteractiveCompareViewport inherits Rectangle {
             source: ViewportState.flicker_show_duplicate ? ViewportState.image_duplicate_next : ViewportState.image_original_next;
             opacity: ViewportState.blend_factor;
             image-fit: contain;
-            width: ViewportState.viewer.fit_to_window ? (parent.width * ViewportState.zoom_factor) : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
-            height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+            width: ViewportState.viewer.fit_to_window ? parent.width : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+            height: ViewportState.viewer.fit_to_window ? parent.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
             x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
             y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
         }

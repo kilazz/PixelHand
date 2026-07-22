@@ -32,6 +32,10 @@ export component CompareTab inherits HorizontalLayout {
     // Total animation frames dynamically resolved based on mode (0: Spritesheet, 1: Group Sequence)
     property <int> total_anim_frames: ViewportState.anim_source == 1 ? ScanConfig.selected_group_files.length : (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows);
 
+    // Dynamic scale calculation for Zoom % display in Fit vs Manual modes
+    property <int> display_zoom_pct: ViewportState.viewer.fit_to_window ? (
+        ViewportState.sprite_width > 0 ? Math.round(((root.width - ScanConfig.ui.compare_sidebar_width - 20px) / 2) / (ViewportState.sprite_width * 1px) * 100) : 100) : Math.round(ViewportState.zoom_factor * 100);
+
     VerticalLayout {
         horizontal-stretch: 1;
         padding-right: 12px;
@@ -173,24 +177,42 @@ export component CompareTab inherits HorizontalLayout {
                     }
                 }
 
-                // Interactive Loupe (Magnifier 2.5x) Toggle Button
-                CustomButton {
-                    text: "🔍 Loupe";
-                    height: 24px;
-                    primary-color: ViewportState.enable_loupe ? #f0b132 : #474747;
-                    clicked => {
-                        ViewportState.enable_loupe = !ViewportState.enable_loupe;
+                // Interactive Loupe (Magnifier) Toggle & Factor Selector
+                HorizontalLayout {
+                    spacing: 2px;
+                    CustomButton {
+                        text: "🔍 Loupe";
+                        height: 24px;
+                        primary-color: ViewportState.enable_loupe ? #f0b132 : #474747;
+                        clicked => {
+                            ViewportState.enable_loupe = !ViewportState.enable_loupe;
+                        }
+                    }
+
+                    if ViewportState.enable_loupe: ComboBox {
+                        model: ["2x", "2.5x", "4x", "8x", "16x"];
+                        current-index: 1; // Default 2.5x
+                        width: 65px;
+                        height: 24px;
+                        selected(val) => {
+                            if (self.current-index == 0) { ViewportState.loupe_factor = 2.0; }
+                            else if (self.current-index == 1) { ViewportState.loupe_factor = 2.5; }
+                            else if (self.current-index == 2) { ViewportState.loupe_factor = 4.0; }
+                            else if (self.current-index == 3) { ViewportState.loupe_factor = 8.0; }
+                            else if (self.current-index == 4) { ViewportState.loupe_factor = 16.0; }
+                        }
                     }
                 }
 
-                // Zoom Input SpinBox
+                // Zoom Input SpinBox (Fully Synchronized Percentage Value)
                 SpinBox {
-                    value: Math.round(ViewportState.zoom_factor * 100);
+                    value: root.display_zoom_pct;
                     minimum: 10;
                     maximum: 1000;
                     height: 24px;
-                    width: 90px;
+                    width: 100px;
                     edited(val) => {
+                        ViewportState.viewer.fit_to_window = false; // Sync: manual editing turns off Fit mode
                         ViewportState.zoom_factor = val / 100.0;
                     }
                 }
@@ -216,12 +238,12 @@ export component CompareTab inherits HorizontalLayout {
                     }
                 }
 
-                // Original Size button (1:1 Pixel-Perfect)
+                // Original Size button (1:1 Pixel-Perfect 100%)
                 CustomButton {
                     text: "1:1";
                     height: 24px;
                     width: 45px;
-                    primary-color: !ViewportState.viewer.fit_to_window ? #3e6a90 : #474747;
+                    primary-color: (!ViewportState.viewer.fit_to_window && Math.round(ViewportState.zoom_factor * 100) == 100) ? #3e6a90 : #474747;
                     clicked => {
                         ViewportState.viewer.fit_to_window = false;
                         ViewportState.zoom_factor = 1.0;
@@ -230,7 +252,7 @@ export component CompareTab inherits HorizontalLayout {
                     }
                 }
 
-                // Reset Zoom (Default Reset)
+                // Reset Zoom (Default Reset to Fit)
                 CustomButton {
                     text: "Reset Zoom";
                     height: 24px;
@@ -245,7 +267,7 @@ export component CompareTab inherits HorizontalLayout {
             }
         }
 
-        // TOOLBAR 2: Spritesheet slicing subdivision & Group Animation controls (FIXED LAYOUT)
+        // TOOLBAR 2: Spritesheet slicing subdivision & Group Animation controls
         HorizontalLayout {
             spacing: 8px;
             height: 28px;
@@ -283,7 +305,7 @@ export component CompareTab inherits HorizontalLayout {
                     minimum: 1;
                     maximum: 64;
                     height: 24px;
-                    width: 75px;
+                    width: 90px;
                     horizontal-stretch: 0;
                     edited(val) => { ViewportState.viewer.grid_cols = val; ViewportState.active_frame_changed(); }
                 }
@@ -300,7 +322,7 @@ export component CompareTab inherits HorizontalLayout {
                     minimum: 1;
                     maximum: 64;
                     height: 24px;
-                    width: 75px;
+                    width: 90px;
                     horizontal-stretch: 0;
                     edited(val) => { ViewportState.viewer.grid_rows = val; ViewportState.active_frame_changed(); }
                 }

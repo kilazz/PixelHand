@@ -212,8 +212,9 @@ export global ViewportState {
     // Animation Mode Source: 0 = Spritesheet Grid, 1 = Group Files Sequence
     in-out property <int> anim_source: 0;
 
-    // Interactive Loupe (Magnifier) Toggle
+    // Interactive Loupe (Magnifier) Toggle & Factor
     in-out property <bool> enable_loupe: false;
+    in-out property <float> loupe_factor: 2.5;
 
     // Interactive Pixel Inspector HUD
     in-out property <bool> enable_inspector: false;
