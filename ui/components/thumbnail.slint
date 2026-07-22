@@ -1,0 +1,123 @@
+// ui/components/thumbnail.slint
+
+export component InteractiveThumbnail inherits TouchArea {
+    in property <image> source;
+    in property <string> path;
+    in property <bool> show_corners: true;
+    in property <image> checkerboard;
+    callback corner_hovered(string, string);
+
+    in-out property <string> active_quadrant: "RGB";
+
+    pointer-event(event) => {
+        if (event.kind == PointerEventKind.move) {
+            let quad = self.mouse-x < self.width / 2 ? (
+                self.mouse-y < self.height / 2 ? "R" : "B") : (
+                self.mouse-y < self.height / 2 ? "G" : "A");
+            if (self.active_quadrant != quad) {
+                self.active_quadrant = quad;
+                corner_hovered(path, self.active_quadrant);
+            }
+        }
+        // Return reject so standard TouchArea logic (hover leave, pressed, clicked) still executes! ---
+        EventResult.reject
+    }
+
+    changed has-hover => {
+        if (!self.has-hover) {
+            self.active_quadrant = "RGB";
+            corner_hovered(path, self.active_quadrant);
+        }
+    }
+
+    rect := Rectangle {
+        width: 100%;
+        height: 100%;
+        background: #111214;
+        border-radius: 4px;
+        clip: true;
+
+        Image {
+            source: checkerboard;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        Image {
+            source: source;
+            width: 100%;
+            height: 100%;
+            image-fit: contain;
+        }
+
+        if show_corners && root.has-hover: Rectangle {
+            x: 2px;
+            y: 2px;
+            width: 12px;
+            height: 12px;
+            background: root.active_quadrant == "R" ? #f23f43 : #f23f43.darker(0.3).with-alpha(0.35);
+            border-radius: 2px;
+            Text {
+                text: "R";
+                font-size: 8px;
+                font-weight: 700;
+                color: root.active_quadrant == "R" ? #ffffff : #ffffff.with-alpha(0.4);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        if show_corners && root.has-hover: Rectangle {
+            x: rect.width - 14px;
+            y: 2px;
+            width: 12px;
+            height: 12px;
+            background: root.active_quadrant == "G" ? #23a55a : #23a55a.darker(0.3).with-alpha(0.35);
+            border-radius: 2px;
+            Text {
+                text: "G";
+                font-size: 8px;
+                font-weight: 700;
+                color: root.active_quadrant == "G" ? #ffffff : #ffffff.with-alpha(0.4);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        if show_corners && root.has-hover: Rectangle {
+            x: 2px;
+            y: rect.height - 14px;
+            width: 12px;
+            height: 12px;
+            background: root.active_quadrant == "B" ? #5865f2 : #5865f2.darker(0.3).with-alpha(0.35);
+            border-radius: 2px;
+            Text {
+                text: "B";
+                font-size: 8px;
+                font-weight: 700;
+                color: root.active_quadrant == "B" ? #ffffff : #ffffff.with-alpha(0.4);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        if show_corners && root.has-hover: Rectangle {
+            x: rect.width - 14px;
+            y: rect.height - 14px;
+            width: 12px;
+            height: 12px;
+            background: root.active_quadrant == "A" ? #ffffff : #ffffff.darker(0.5).with-alpha(0.35);
+            border-radius: 2px;
+            Text {
+                text: "A";
+                font-size: 8px;
+                font-weight: 700;
+                color: root.active_quadrant == "A" ? #000000 : #ffffff.with-alpha(0.4);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

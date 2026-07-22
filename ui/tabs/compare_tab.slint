@@ -1,0 +1,1026 @@
+// ui/tabs/compare_tab.slint
+
+import {
+    Palette,
+    Slider,
+    SpinBox,
+    ComboBox,
+    LineEdit,
+    CheckBox,
+    ScrollView,
+    ListView,
+} from "std-widgets.slint";
+
+import { ResultsRow, SelectedFile, GridRow } from "../structs.slint";
+import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
+import {
+    TabButton,
+    ChannelButton,
+    CustomButton,
+} from "../components/buttons.slint";
+import { SpecsRow, WipeViewport } from "../components/common.slint";
+import {
+    InteractiveCompareViewport,
+} from "../components/compare_viewport.slint";
+import { InteractiveThumbnail } from "../components/thumbnail.slint";
+
+export component CompareTab inherits HorizontalLayout {
+    spacing: 0px;
+    width: 100%;
+    height: 100%;
+
+    // Total animation frames dynamically resolved based on mode (0: Spritesheet, 1: Group Sequence)
+    property <int> total_anim_frames: ViewportState.anim_source == 1 ? ScanConfig.selected_group_files.length : (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows);
+
+    // Dynamic scale calculation for Zoom % display in Fit vs Manual modes
+    property <int> display_zoom_pct: ViewportState.viewer.fit_to_window ? (
+        ViewportState.sprite_width > 0 ? Math.round(((root.width - ScanConfig.ui.compare_sidebar_width - 20px) / 2) / (ViewportState.sprite_width * 1px) * 100) : 100) : Math.round(ViewportState.zoom_factor * 100);
+
+    VerticalLayout {
+        horizontal-stretch: 1;
+        padding-right: 12px;
+        spacing: 12px;
+        Text {
+            text: "Interactive Compare Viewport";
+            font-size: 15px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        // TOOLBAR 1: Comparison Modes, HDR, Mips, Zoom, Inspector & Loupe Controls
+        HorizontalLayout {
+            spacing: 8px;
+            height: 28px;
+            ComboBox {
+                model: [
+                    "Side-by-Side",
+                    "Wipe Mode",
+                    "Overlay Blend",
+                    "Difference Heatmap",
+                    "Flicker Mode"
+                ];
+                current-index <=> ViewportState.compare_mode;
+                width: 160px;
+                selected(val) => { ViewportState.compare_mode_changed(); }
+            }
+
+            if ViewportState.compare_mode == 1 || ViewportState.compare_mode == 2: HorizontalLayout {
+                spacing: 8px;
+                horizontal-stretch: 0;
+                Text {
+                    text: "Wipe Shift:";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #cfcfcf;
+                }
+
+                Slider {
+                    value <=> ViewportState.wipe_slider_val;
+                    minimum: 0.0;
+                    maximum: 1.0;
+                    height: 24px;
+                    width: 120px;
+                }
+            }
+            if ViewportState.compare_mode == 4: HorizontalLayout {
+                spacing: 8px;
+                horizontal-stretch: 0;
+                Text {
+                    text: "Flicker Speed:";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #cfcfcf;
+                }
+
+                Slider {
+                    value <=> ViewportState.flicker_interval_val;
+                    minimum: 30.0;
+                    maximum: 2000.0;
+                    height: 24px;
+                    width: 100px;
+                }
+
+                Text {
+                    text: Math.round(ViewportState.flicker_interval_val) + "ms";
+                    vertical-alignment: center;
+                    font-size: 11px;
+                    color: #cfcfcf;
+                    width: 45px;
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                horizontal-stretch: 0;
+                Text {
+                    text: "Mip Level:";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: ViewportState.max_available_mips > 1 ? #cfcfcf : #555555;
+                }
+
+                SpinBox {
+                    value: ViewportState.active_mip_level;
+                    minimum: 0;
+                    maximum: ViewportState.max_available_mips > 1 ? ViewportState.max_available_mips - 1 : 0;
+                    height: 24px;
+                    width: 100px;
+                    enabled: ViewportState.max_available_mips > 1;
+                    edited(val) => { ViewportState.active_mip_level = val; ViewportState.mip_level_changed(); }
+                }
+            }
+
+            CheckBox {
+                text: "HDR";
+                checked <=> ViewportState.tonemap.tonemap_enabled;
+                height: 24px;
+                toggled => { ViewportState.tonemap_toggled(); }
+            }
+
+            if ViewportState.tonemap.tonemap_enabled: CheckBox {
+                text: "Auto Exp";
+                checked <=> ViewportState.tonemap.tonemap_auto_exposure;
+                height: 24px;
+                toggled => { ViewportState.tonemap_toggled(); }
+            }
+
+            if ViewportState.tonemap.tonemap_enabled: ComboBox {
+                model: [
+                    "None",
+                    "False Color",
+                    "ACES Filmic",
+                    "ACES 2.0 Fit",
+                    "Khronos PBR Neutral",
+                    "ICtCp BT.2446c",
+                    "ICtCp Lumina"
+                ];
+                current-index <=> ViewportState.tonemap.tonemap_operator;
+                height: 24px;
+                width: 165px;
+                selected(val) => { ViewportState.tonemap_toggled(); }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+
+            HorizontalLayout {
+                spacing: 4px;
+                alignment: end;
+
+                // Interactive Pixel Inspector Toggle Button
+                CustomButton {
+                    text: "🎯 Inspector";
+                    height: 24px;
+                    primary-color: ViewportState.enable_inspector ? #f0b132 : #474747;
+                    clicked => {
+                        ViewportState.enable_inspector = !ViewportState.enable_inspector;
+                    }
+                }
+
+                // Interactive Loupe (Magnifier) Toggle & Factor Selector
+                HorizontalLayout {
+                    spacing: 2px;
+                    CustomButton {
+                        text: "🔍 Loupe";
+                        height: 24px;
+                        primary-color: ViewportState.enable_loupe ? #f0b132 : #474747;
+                        clicked => {
+                            ViewportState.enable_loupe = !ViewportState.enable_loupe;
+                        }
+                    }
+
+                    if ViewportState.enable_loupe: ComboBox {
+                        model: ["2x", "2.5x", "4x", "8x", "16x"];
+                        current-index: 1; // Default 2.5x
+                        width: 65px;
+                        height: 24px;
+                        selected(val) => {
+                            if (self.current-index == 0) { ViewportState.loupe_factor = 2.0; }
+                            else if (self.current-index == 1) { ViewportState.loupe_factor = 2.5; }
+                            else if (self.current-index == 2) { ViewportState.loupe_factor = 4.0; }
+                            else if (self.current-index == 3) { ViewportState.loupe_factor = 8.0; }
+                            else if (self.current-index == 4) { ViewportState.loupe_factor = 16.0; }
+                        }
+                    }
+                }
+
+                // Zoom Input SpinBox (Fully Synchronized Percentage Value)
+                SpinBox {
+                    value: root.display_zoom_pct;
+                    minimum: 10;
+                    maximum: 1000;
+                    height: 24px;
+                    width: 100px;
+                    edited(val) => {
+                        ViewportState.viewer.fit_to_window = false; // Sync: manual editing turns off Fit mode
+                        ViewportState.zoom_factor = val / 100.0;
+                    }
+                }
+
+                Text {
+                    text: "%";
+                    font-size: 12px;
+                    color: #cfcfcf;
+                    vertical-alignment: center;
+                }
+
+                // Fit to Window button (Scale to Fit)
+                CustomButton {
+                    text: "Fit";
+                    height: 24px;
+                    width: 45px;
+                    primary-color: ViewportState.viewer.fit_to_window ? #3e6a90 : #474747;
+                    clicked => {
+                        ViewportState.viewer.fit_to_window = true;
+                        ViewportState.zoom_factor = 1.0;
+                        ViewportState.pan_x = 0px;
+                        ViewportState.pan_y = 0px;
+                    }
+                }
+
+                // Original Size button (1:1 Pixel-Perfect 100%)
+                CustomButton {
+                    text: "1:1";
+                    height: 24px;
+                    width: 45px;
+                    primary-color: (!ViewportState.viewer.fit_to_window && Math.round(ViewportState.zoom_factor * 100) == 100) ? #3e6a90 : #474747;
+                    clicked => {
+                        ViewportState.viewer.fit_to_window = false;
+                        ViewportState.zoom_factor = 1.0;
+                        ViewportState.pan_x = 0px;
+                        ViewportState.pan_y = 0px;
+                    }
+                }
+
+                // Reset Zoom (Default Reset to Fit)
+                CustomButton {
+                    text: "Reset Zoom";
+                    height: 24px;
+                    primary-color: #474747;
+                    clicked => {
+                        ViewportState.viewer.fit_to_window = true;
+                        ViewportState.zoom_factor = 1.0;
+                        ViewportState.pan_x = 0px;
+                        ViewportState.pan_y = 0px;
+                    }
+                }
+            }
+        }
+
+        // TOOLBAR 2: Spritesheet slicing subdivision & Group Animation controls
+        HorizontalLayout {
+            spacing: 8px;
+            height: 28px;
+            alignment: start;
+
+            Text {
+                text: "Anim Mode:";
+                vertical-alignment: center;
+                font-size: 12px;
+                color: #cfcfcf;
+            }
+
+            ComboBox {
+                model: ["Spritesheet Grid", "Group Files Sequence"];
+                current-index <=> ViewportState.anim_source;
+                height: 24px;
+                width: 175px;
+                selected(val) => { ViewportState.active_frame_changed(); }
+            }
+
+            if ViewportState.anim_source == 0: HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                horizontal-stretch: 0;
+
+                Text {
+                    text: "Grid (Col x Row):";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #cfcfcf;
+                }
+
+                SpinBox {
+                    value <=> ViewportState.viewer.grid_cols;
+                    minimum: 1;
+                    maximum: 64;
+                    height: 24px;
+                    width: 90px;
+                    horizontal-stretch: 0;
+                    edited(val) => { ViewportState.viewer.grid_cols = val; ViewportState.active_frame_changed(); }
+                }
+
+                Text {
+                    text: "x";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #cfcfcf;
+                }
+
+                SpinBox {
+                    value <=> ViewportState.viewer.grid_rows;
+                    minimum: 1;
+                    maximum: 64;
+                    height: 24px;
+                    width: 90px;
+                    horizontal-stretch: 0;
+                    edited(val) => { ViewportState.viewer.grid_rows = val; ViewportState.active_frame_changed(); }
+                }
+
+                CustomButton {
+                    text: "Reset Grid";
+                    height: 24px;
+                    primary-color: #474747;
+                    clicked => {
+                        ViewportState.viewer.grid_cols = 1;
+                        ViewportState.viewer.grid_rows = 1;
+                        ViewportState.active_frame = 0;
+                        ViewportState.active_frame_changed();
+                    }
+                }
+            }
+
+            if ViewportState.anim_source == 1: Text {
+                text: "Playing " + ScanConfig.selected_group_files.length + " sequence files";
+                vertical-alignment: center;
+                font-size: 11px;
+                font-weight: 700;
+                color: #e59535;
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+        }
+
+        // TOOLBAR 3: Manual color tweaks (Brightness, Contrast, Gamma), Ratio and Background selections
+        HorizontalLayout {
+            spacing: 12px;
+            height: 28px;
+
+            Text {
+                text: "Bg:";
+                vertical-alignment: center;
+                font-size: 12px;
+                color: #cfcfcf;
+            }
+
+            ComboBox {
+                model: ["Dark Checkerboard", "Light Checkerboard", "Solid Black", "Solid White"];
+                current-index <=> ViewportState.viewer.background_mode;
+                height: 24px;
+                width: 135px;
+                selected(val) => { ViewportState.active_frame_changed(); }
+            }
+
+            Text {
+                text: "Brightness:";
+                vertical-alignment: center;
+                font-size: 12px;
+                color: #cfcfcf;
+            }
+
+            Slider {
+                value <=> ViewportState.viewer.manual_brightness;
+                minimum: 0.1;
+                maximum: 3.0;
+                height: 24px;
+                width: 100px;
+                changed(val) => { ViewportState.active_frame_changed(); }
+            }
+
+            Text {
+                text: "Contrast:";
+                vertical-alignment: center;
+                font-size: 12px;
+                color: #cfcfcf;
+            }
+
+            Slider {
+                value <=> ViewportState.viewer.manual_contrast;
+                minimum: 0.1;
+                maximum: 3.0;
+                height: 24px;
+                width: 100px;
+                changed(val) => { ViewportState.active_frame_changed(); }
+            }
+
+            Text {
+                text: "Gamma:";
+                vertical-alignment: center;
+                font-size: 12px;
+                color: #cfcfcf;
+            }
+
+            Slider {
+                value <=> ViewportState.viewer.manual_gamma;
+                minimum: 0.1;
+                maximum: 3.0;
+                height: 24px;
+                width: 100px;
+                changed(val) => { ViewportState.active_frame_changed(); }
+            }
+
+            Text {
+                text: "Ratio:";
+                vertical-alignment: center;
+                font-size: 12px;
+                color: #cfcfcf;
+            }
+
+            Slider {
+                value <=> ViewportState.viewer.aspect_ratio_modifier;
+                minimum: 0.2;
+                maximum: 3.0;
+                height: 24px;
+                width: 100px;
+                changed(val) => { ViewportState.active_frame_changed(); }
+            }
+
+            CustomButton {
+                text: "Reset Adjustments";
+                height: 24px;
+                primary-color: #474747;
+                clicked => {
+                    ViewportState.viewer.manual_brightness = 1.0;
+                    ViewportState.viewer.manual_contrast = 1.0;
+                    ViewportState.viewer.manual_gamma = 1.0;
+                    ViewportState.viewer.aspect_ratio_modifier = 1.0;
+                    ViewportState.active_frame_changed();
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+            }
+        }
+
+        // ENCAPSULATED COMPARISON VIEWPORT
+        InteractiveCompareViewport { }
+
+        // FIXED BOTTOM TIMELINE PLAYER
+        if (ViewportState.anim_source == 0 && (ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1)) || (ViewportState.anim_source == 1 && ScanConfig.selected_group_files.length > 1): Rectangle {
+            height: 38px;
+            background: #1e1e1e;
+            border-color: #353535;
+            border-width: 1px;
+            border-radius: 6px;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 12px;
+                cross-axis-alignment: center;
+
+                // Playback buttons
+                HorizontalLayout {
+                    spacing: 4px;
+                    alignment: start;
+                    cross-axis-alignment: center;
+
+                    // Go to Start
+                    CustomButton {
+                        text: "|<";
+                        height: 24px;
+                        width: 24px;
+                        compact: true;
+                        primary-color: #3d3d3d;
+                        clicked => {
+                            ViewportState.active_frame = 0;
+                            ViewportState.active_frame_changed();
+                        }
+                    }
+
+                    // Prev Frame
+                    CustomButton {
+                        text: "<";
+                        height: 24px;
+                        width: 24px;
+                        compact: true;
+                        primary-color: #3d3d3d;
+                        clicked => {
+                            ViewportState.active_frame = Math.max(0, ViewportState.active_frame - 1);
+                            ViewportState.active_frame_changed();
+                        }
+                    }
+
+                    // Play / Pause
+                    CustomButton {
+                        text: ViewportState.play_flipbook ? "||" : ">";
+                        height: 24px;
+                        width: 28px;
+                        compact: true;
+                        primary-color: ViewportState.play_flipbook ? #aa3838 : #23a55a;
+                        clicked => {
+                            ViewportState.play_flipbook = !ViewportState.play_flipbook;
+                        }
+                    }
+
+                    // Next Frame
+                    CustomButton {
+                        text: ">";
+                        height: 24px;
+                        width: 24px;
+                        compact: true;
+                        primary-color: #3d3d3d;
+                        clicked => {
+                            ViewportState.active_frame = Math.min(root.total_anim_frames - 1, ViewportState.active_frame + 1);
+                            ViewportState.active_frame_changed();
+                        }
+                    }
+
+                    // Go to End
+                    CustomButton {
+                        text: ">|";
+                        height: 24px;
+                        width: 24px;
+                        compact: true;
+                        primary-color: #3d3d3d;
+                        clicked => {
+                            ViewportState.active_frame = Math.max(0, root.total_anim_frames - 1);
+                            ViewportState.active_frame_changed();
+                        }
+                    }
+                }
+
+                // Current Frame Input
+                SpinBox {
+                    value: ViewportState.active_frame + 1;
+                    minimum: 1;
+                    maximum: Math.max(1, root.total_anim_frames);
+                    height: 24px;
+                    width: 90px;
+                    edited(val) => {
+                        ViewportState.active_frame = val - 1;
+                        ViewportState.active_frame_changed();
+                    }
+                }
+
+                Text {
+                    text: "f";
+                    font-size: 11px;
+                    color: #cfcfcf;
+                    vertical-alignment: center;
+                }
+
+                // FPS Input
+                SpinBox {
+                    value: Math.round(ViewportState.viewer.flipbook_fps);
+                    minimum: 1;
+                    maximum: 144;
+                    height: 24px;
+                    width: 90px;
+                    edited(val) => {
+                        ViewportState.viewer.flipbook_fps = val;
+                    }
+                }
+
+                Text {
+                    text: "fps";
+                    font-size: 11px;
+                    color: #cfcfcf;
+                    vertical-alignment: center;
+                }
+
+                // Speed Multiplier Slider
+                Text {
+                    text: "Speed:";
+                    font-size: 11px;
+                    color: #cfcfcf;
+                    vertical-alignment: center;
+                }
+
+                Slider {
+                    value <=> ViewportState.viewer.play_speed;
+                    minimum: 0.1;
+                    maximum: 4.0;
+                    height: 24px;
+                    width: 80px;
+                }
+
+                Text {
+                    text: (Math.round(ViewportState.viewer.play_speed * 10) / 10) + "x";
+                    font-size: 11px;
+                    color: #ffffff;
+                    vertical-alignment: center;
+                    width: 30px;
+                }
+
+                // Frame Blending CheckBox
+                CheckBox {
+                    text: "Blend";
+                    checked <=> ViewportState.viewer.enable_frame_blending;
+                    height: 24px;
+                }
+
+                // Timeline scrubbing track
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+
+                    timeline-track := Rectangle {
+                        height: 10px;
+                        background: #181818;
+                        border-color: #353535;
+                        border-width: 1px;
+                        border-radius: 5px;
+
+                        // Fill bar
+                        Rectangle {
+                            x: 0px;
+                            width: parent.width * (ViewportState.active_frame / Math.max(1, root.total_anim_frames - 1));
+                            height: 100%;
+                            background: #e59535;
+                            border-radius: 5px;
+                        }
+
+                        // Handle
+                        Rectangle {
+                            x: (parent.width - self.width) * (ViewportState.active_frame / Math.max(1, root.total_anim_frames - 1));
+                            y: (parent.height - self.height) / 2;
+                            width: 14px;
+                            height: 14px;
+                            background: #ffffff;
+                            border-radius: 7px;
+                            border-color: #e59535;
+                            border-width: 2px;
+                        }
+
+                        timeline-ta := TouchArea {
+                            width: 100%;
+                            height: 100%;
+                            moved => {
+                                if (self.pressed) {
+                                    let total_frames = root.total_anim_frames;
+                                    let ratio = self.mouse-x / parent.width;
+                                    let raw_frame = Math.round(ratio * (total_frames - 1));
+                                    ViewportState.active_frame = raw_frame.clamp(0, total_frames - 1);
+                                    ViewportState.active_frame_changed();
+                                }
+                            }
+                            clicked => {
+                                let total_frames = root.total_anim_frames;
+                                let ratio = self.mouse-x / parent.width;
+                                let raw_frame = Math.round(ratio * (total_frames - 1));
+                                ViewportState.active_frame = raw_frame.clamp(0, total_frames - 1);
+                                ViewportState.active_frame_changed();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            height: 28px;
+            alignment: center;
+            ChannelButton {
+                text: "R";
+                active-color: #aa3838;
+                active <=> ViewportState.active_r;
+                clicked => { ViewportState.active_r = !ViewportState.active_r; if ViewportState.active_r { ViewportState.active_g = false; ViewportState.active_b = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
+            }
+
+            ChannelButton {
+                text: "G";
+                active-color: #3e7a5a;
+                active <=> ViewportState.active_g;
+                clicked => { ViewportState.active_g = !ViewportState.active_g; if ViewportState.active_g { ViewportState.active_r = false; ViewportState.active_b = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
+            }
+
+            ChannelButton {
+                text: "B";
+                active-color: #3e6a90;
+                active <=> ViewportState.active_b;
+                clicked => { ViewportState.active_b = !ViewportState.active_b; if ViewportState.active_b { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_a = false; } ViewportState.channel_toggled(); }
+            }
+
+            ChannelButton {
+                text: "A";
+                active-color: #ffffff;
+                text-color: #000000;
+                active <=> ViewportState.active_a;
+                clicked => { ViewportState.active_a = !ViewportState.active_a; if ViewportState.active_a { ViewportState.active_r = false; ViewportState.active_g = false; ViewportState.active_b = false; } ViewportState.channel_toggled(); }
+            }
+        }
+    }
+
+    // SPLITTER
+    Rectangle {
+        width: 8px;
+        horizontal-stretch: 0;
+        background: compare-splitter-ta.has-hover ? #474747 : #1e1e1e;
+        Rectangle {
+            width: 2px;
+            height: 20px;
+            background: #808080;
+            border-radius: 1px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+        }
+
+        compare-splitter-ta := TouchArea {
+            mouse-cursor: MouseCursor.col-resize;
+            moved => { if (self.pressed) { ScanConfig.ui.compare_sidebar_width = (ScanConfig.ui.compare_sidebar_width + self.pressed-x - self.mouse-x).clamp(380px, 800px); } }
+        }
+    }
+
+    // COMPARISON SIDEBAR
+    VerticalLayout {
+        width: ScanConfig.ui.compare_sidebar_width;
+        padding-left: 12px;
+        spacing: 12px;
+        Text {
+            text: "Group Duplicates (" + ScanConfig.selected_group_files.length + " items)";
+            font-size: 13px;
+            font-weight: 700;
+            color: #808080;
+        }
+
+        Rectangle {
+            height: ScanConfig.ui.duplicates_panel_height;
+            background: #181818;
+            border-color: #353535;
+            border-width: 1px;
+            border-radius: 4px;
+            if ScanConfig.selected_group_files.length > 0: ListView {
+                for row[idx] in ScanConfig.selected_group_files: Rectangle {
+                    height: 38px;
+                    background: (row.path == ViewportState.duplicate_meta.path) ? #36536d : (right_row_ta.has-hover ? #474747 : #181818);
+                    border-radius: 4px;
+                    right_row_ta := TouchArea {
+                        x: 46px;
+                        width: parent.width - self.x;
+                        height: 100%;
+                        clicked => { ScanConfig.row_clicked(idx, false, row.group_index, row.path); }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 6px;
+                        padding-right: 6px;
+                        spacing: 8px;
+                        alignment: space-between;
+                        InteractiveThumbnail {
+                            source: row.thumbnail;
+                            path: row.path;
+                            show_corners: true;
+                            checkerboard: ViewportState.checkerboard_pattern;
+                            width: 32px;
+                            height: 32px;
+                            corner_hovered(path, chan) => { ScanConfig.thumbnail_channel_hovered(path, chan); }
+                            clicked => { ScanConfig.row_clicked(idx, false, row.group_index, row.path); }
+                        }
+
+                        Text {
+                            text: row.name;
+                            color: #cfcfcf;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+
+                        Text {
+                            text: row.is_best ? "[Best]" : row.score_or_detail;
+                            color: row.is_best ? #e59535 : #cfcfcf;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 8px;
+            vertical-stretch: 0;
+            background: splitter-ta.has-hover ? #474747 : #2d2d2d;
+            border-radius: 4px;
+            Rectangle {
+                width: 20px;
+                height: 2px;
+                background: #808080;
+                border-radius: 1px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+            }
+
+            splitter-ta := TouchArea {
+                mouse-cursor: row-resize;
+                moved => { if (self.pressed) { ScanConfig.ui.duplicates_panel_height = (self.y + self.mouse-y - self.pressed-y).clamp(80px, 450px); } }
+            }
+        }
+
+        Text {
+            text: "Luminance Histogram Comparison";
+            font-size: 13px;
+            font-weight: 700;
+            color: #808080;
+        }
+
+        Rectangle {
+            height: 130px;
+            background: #181818;
+            border-color: #353535;
+            border-width: 1px;
+            border-radius: 4px;
+            clip: true;
+            Image {
+                source: ViewportState.histogram_image;
+                width: 100%;
+                height: 100%;
+                image-fit: contain;
+            }
+        }
+
+        Text {
+            text: "Comparison Specifications Matrix";
+            font-size: 13px;
+            font-weight: 700;
+            color: #808080;
+        }
+
+        Rectangle {
+            border-color: #353535;
+            border-width: 1px;
+            background: #181818;
+            border-radius: 4px;
+            vertical-stretch: 1;
+            ScrollView {
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 4px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "Specification";
+                            width: ScanConfig.col_spec_name_w;
+                            font-weight: 700;
+                            color: #808080;
+                            font-size: 12px;
+                        }
+
+                        Rectangle {
+                            width: 1px;
+                            background: spec_split1.has-hover ? #e59535 : #353535;
+                            spec_split1 := TouchArea {
+                                x: -4px;
+                                width: 9px;
+                                mouse-cursor: col-resize;
+                                moved => {
+                                    if (self.pressed) {
+                                        ScanConfig.col_spec_name_w = (ScanConfig.col_spec_name_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Original [Best]";
+                            width: ScanConfig.col_spec_val1_w;
+                            font-weight: 700;
+                            color: #e59535;
+                            font-size: 12px;
+                        }
+
+                        Rectangle {
+                            width: 1px;
+                            background: spec_split2.has-hover ? #e59535 : #353535;
+                            spec_split2 := TouchArea {
+                                x: -4px;
+                                width: 9px;
+                                mouse-cursor: col-resize;
+                                moved => {
+                                    if (self.pressed) {
+                                        ScanConfig.col_spec_val1_w = (ScanConfig.col_spec_val1_w + self.mouse-x - self.pressed-x).clamp(80px, 300px);
+                                    }
+                                }
+                            }
+                        }
+
+                        Text {
+                            text: "Duplicate";
+                            font-weight: 700;
+                            color: #cfcfcf;
+                            font-size: 12px;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: #353535;
+                        vertical-stretch: 0;
+                    }
+
+                    SpecsRow {
+                        name: "File Name";
+                        val1: ViewportState.original_meta.name;
+                        val2: ViewportState.duplicate_meta.name;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "File Size";
+                        val1: ViewportState.original_meta.size_str;
+                        val2: ViewportState.duplicate_meta.size_str;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Format / Codec";
+                        val1: ViewportState.original_meta.format;
+                        val2: ViewportState.duplicate_meta.format;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Resolution";
+                        val1: ViewportState.original_meta.resolution;
+                        val2: ViewportState.duplicate_meta.resolution;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Bit Depth";
+                        val1: ViewportState.original_meta.bit_depth;
+                        val2: ViewportState.duplicate_meta.bit_depth;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Color Space";
+                        val1: ViewportState.original_meta.color_space;
+                        val2: ViewportState.duplicate_meta.color_space;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Mipmaps";
+                        val1: ViewportState.original_meta.mipmaps;
+                        val2: ViewportState.duplicate_meta.mipmaps;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Alpha Channel";
+                        val1: ViewportState.original_meta.alpha;
+                        val2: ViewportState.duplicate_meta.alpha;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Similarity";
+                        val1: "100.0%";
+                        val2: ViewportState.duplicate_meta.similarity;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Sprites Count";
+                        val1: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? ViewportState.sprites_count : "-";
+                        val2: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? ViewportState.sprites_count : "-";
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    SpecsRow {
+                        name: "Sprite Size";
+                        val1: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? "\{ViewportState.sprite_width}x\{ViewportState.sprite_height}" : "-";
+                        val2: ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1 ? "\{ViewportState.sprite_width}x\{ViewportState.sprite_height}" : "-";
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    Rectangle {
+                        height: 1px;
+                        background: #353535;
+                        vertical-stretch: 0;
+                    }
+
+                    SpecsRow {
+                        name: "Full Path";
+                        val1: ViewportState.original_meta.path;
+                        val2: ViewportState.duplicate_meta.path;
+                        col-spec-name-w: ScanConfig.col_spec_name_w;
+                        col-spec-val1-w: ScanConfig.col_spec_val1_w;
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                    }
+                }
+            }
+        }
+    }
+}

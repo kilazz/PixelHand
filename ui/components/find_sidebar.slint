@@ -1,0 +1,910 @@
+// ui/components/find_sidebar.slint
+
+import {
+    ScrollView,
+    ComboBox,
+    LineEdit,
+    Slider,
+    CheckBox,
+    SpinBox,
+} from "std-widgets.slint";
+import { ScanConfig, ViewportState, Diagnostics } from "../store.slint";
+import { SearchMethod, ExecutionProvider, AiModelType } from "../structs.slint";
+import { PanelSection, FormRow } from "./common.slint";
+import { CustomButton, ChannelButton } from "./buttons.slint";
+
+export component FindSidebar inherits Rectangle {
+    width: ScanConfig.ui.sidebar_width;
+    background: #2b2d31;
+    border-color: #1f2023;
+    border-width: 1px;
+    border-radius: 4px;
+
+    callback show_formats_popup();
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 8px;
+
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                alignment: start;
+                spacing: 12px;
+
+                PanelSection {
+                    title: "Operation Mode";
+                    ComboBox {
+                        model: [
+                            "Exact Match (xxHash)",
+                            "Simple Duplicates (dHash)",
+                            "AI Semantic/Visual Search",
+                            "Asset Inventory (Detailed Audit)",
+                            "Technical QC Audit"
+                        ];
+                        current-index: ScanConfig.search_method == SearchMethod.exact ? 0 : (
+                            ScanConfig.search_method == SearchMethod.perceptual ? 1 : (
+                            ScanConfig.search_method == SearchMethod.ai ? 2 : (
+                            ScanConfig.search_method == SearchMethod.inventory ? 3 : 4)));
+                        height: 32px;
+                        selected(val) => {
+                            if (self.current-index == 0) { ScanConfig.search_method = SearchMethod.exact; }
+                            else if (self.current-index == 1) { ScanConfig.search_method = SearchMethod.perceptual; }
+                            else if (self.current-index == 2) { ScanConfig.search_method = SearchMethod.ai; }
+                            else if (self.current-index == 3) { ScanConfig.search_method = SearchMethod.inventory; }
+                            else if (self.current-index == 4) { ScanConfig.search_method = SearchMethod.qc; }
+                            ScanConfig.qc.qc_mode = ScanConfig.search_method == SearchMethod.qc;
+                            ScanConfig.save_settings();
+                        }
+                    }
+                }
+
+                PanelSection {
+                    title: "Target Directories";
+                    VerticalLayout {
+                        spacing: 4px;
+                        FormRow {
+                            title: "Folder A:";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    text <=> ScanConfig.paths.dir_a;
+                                    height: 32px;
+                                    placeholder-text: "Source folder...";
+                                    edited => { ScanConfig.save_settings(); }
+                                }
+
+                                CustomButton {
+                                    text: "...";
+                                    width: 32px;
+                                    height: 32px;
+                                    clicked => { ScanConfig.select_folder_a(); }
+                                }
+                            }
+                        }
+
+                        if ScanConfig.search_method == SearchMethod.qc: FormRow {
+                            title: "Folder B:";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    text <=> ScanConfig.paths.dir_b;
+                                    height: 32px;
+                                    placeholder-text: "Comparison folder...";
+                                    edited => { ScanConfig.save_settings(); }
+                                }
+
+                                CustomButton {
+                                    text: "...";
+                                    width: 32px;
+                                    height: 32px;
+                                    clicked => { ScanConfig.select_folder_b(); }
+                                }
+                            }
+                        }
+                        FormRow {
+                            title: "Exclude:";
+                            LineEdit {
+                                text <=> ScanConfig.paths.excluded_folders;
+                                placeholder-text: "e.g. .cache, previews, temp_files";
+                                height: 22px;
+                                edited => { ScanConfig.save_settings(); }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            padding-top: 4px;
+                            CustomButton {
+                                text: "File Formats";
+                                height: 32px;
+                                primary-color: #4e5058;
+                                clicked => {
+                                    Diagnostics.ext_popup_x = self.absolute-position.x;
+                                    Diagnostics.ext_popup_y = self.absolute-position.y + self.height;
+                                    root.show_formats_popup();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if ScanConfig.search_method == SearchMethod.exact || ScanConfig.search_method == SearchMethod.perceptual: PanelSection {
+                    title: "Duplicates Finder Options";
+                    VerticalLayout {
+                        spacing: 4px;
+
+                        if ScanConfig.search_method == SearchMethod.perceptual: FormRow {
+                            title: "Similarity:";
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Slider {
+                                    value <=> ScanConfig.similarity_threshold;
+                                    minimum: 50;
+                                    maximum: 100;
+                                    height: 32px;
+                                    changed(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: Math.round(ScanConfig.similarity_threshold) + "%";
+                                    width: 36px;
+                                    font-size: 12px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        CheckBox {
+                            text: "Save Visual Reports";
+                            checked <=> ScanConfig.visuals.save_visuals;
+                            height: 20px;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        if ScanConfig.visuals.save_visuals: VerticalLayout {
+                            spacing: 4px;
+                            padding-left: 8px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Cols:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> ScanConfig.visuals.visuals_columns;
+                                    minimum: 2;
+                                    maximum: 12;
+                                    height: 32px;
+                                    width: 95px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Max:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> ScanConfig.visuals.visuals_max_count;
+                                    minimum: 1;
+                                    maximum: 1000;
+                                    height: 32px;
+                                    width: 110px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Font:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> ScanConfig.visuals.visuals_font_size;
+                                    minimum: 8;
+                                    maximum: 36;
+                                    height: 32px;
+                                    width: 95px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Scale:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                Slider {
+                                    value <=> ScanConfig.visuals.visuals_scale;
+                                    minimum: 1.0;
+                                    maximum: 4.0;
+                                    height: 32px;
+                                    width: 70px;
+                                    changed(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: (Math.round(ScanConfig.visuals.visuals_scale * 10) / 10) + "x";
+                                    width: 30px;
+                                    font-size: 11px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                        if ScanConfig.search_method == SearchMethod.perceptual: CheckBox {
+                            text: "Compare by luminance only";
+                            checked <=> ScanConfig.prep.prep_luminance;
+                            height: 20px;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+                        if ScanConfig.search_method == SearchMethod.perceptual: CheckBox {
+                            text: "Compare by specific channels";
+                            checked <=> ScanConfig.prep.prep_channels;
+                            height: 20px;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+                        if ScanConfig.search_method == SearchMethod.perceptual && ScanConfig.prep.prep_channels: VerticalLayout {
+                            spacing: 4px;
+                            padding-left: 12px;
+                            FormRow {
+                                title: "Channels:";
+                                label-width: 60px;
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    ChannelButton {
+                                        text: "R";
+                                        active-color: #f23f43;
+                                        active <=> ScanConfig.prep.prep_r;
+                                        clicked => { ScanConfig.prep.prep_r = !ScanConfig.prep.prep_r; ScanConfig.save_settings(); }
+                                    }
+
+                                    ChannelButton {
+                                        text: "G";
+                                        active-color: #23a55a;
+                                        active <=> ScanConfig.prep.prep_g;
+                                        clicked => { ScanConfig.prep.prep_g = !ScanConfig.prep.prep_g; ScanConfig.save_settings(); }
+                                    }
+
+                                    ChannelButton {
+                                        text: "B";
+                                        active-color: #5865f2;
+                                        active <=> ScanConfig.prep.prep_b;
+                                        clicked => { ScanConfig.prep.prep_b = !ScanConfig.prep.prep_b; ScanConfig.save_settings(); }
+                                    }
+
+                                    ChannelButton {
+                                        text: "A";
+                                        active-color: #ffffff;
+                                        text-color: #000000;
+                                        active <=> ScanConfig.prep.prep_a;
+                                        clicked => { ScanConfig.prep.prep_a = !ScanConfig.prep.prep_a; ScanConfig.save_settings(); }
+                                    }
+                                }
+                            }
+
+                            FormRow {
+                                title: "Tags:";
+                                label-width: 40px;
+                                LineEdit {
+                                    text <=> ScanConfig.prep.prep_tags;
+                                    placeholder-text: "_mask, _ddn";
+                                    height: 32px;
+                                    edited => { ScanConfig.save_settings(); }
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Ignore solid channels";
+                                checked <=> ScanConfig.prep.prep_ignore_solid;
+                                height: 20px;
+                                toggled => { ScanConfig.save_settings(); }
+                            }
+                        }
+                    }
+                }
+
+                if ScanConfig.search_method == SearchMethod.ai: PanelSection {
+                    title: "AI Semantic Search Options";
+                    VerticalLayout {
+                        spacing: 4px;
+                        FormRow {
+                            title: "Query AI:";
+                            HorizontalLayout {
+                                spacing: 4px;
+                                LineEdit {
+                                    text <=> ScanConfig.paths.query_text;
+                                    height: 32px;
+                                    placeholder-text: ScanConfig.ai.ai_model == AiModelType.dino-v2-base ? "Text query disabled for DINOv2-B..." : "Optional text or path...";
+                                    enabled: ScanConfig.ai.ai_model != AiModelType.dino-v2-base;
+                                    edited => { ScanConfig.save_settings(); }
+                                }
+
+                                CustomButton {
+                                    text: "";
+                                    icon-type: 1;
+                                    width: 32px;
+                                    height: 32px;
+                                    enabled: ScanConfig.ai.ai_model != AiModelType.dino-v2-base;
+                                    clicked => { ScanConfig.select_reference_image(); }
+                                }
+                            }
+                        }
+
+                        if ScanConfig.paths.query_text == "": FormRow {
+                            title: "Similarity:";
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Slider {
+                                    value <=> ScanConfig.similarity_threshold;
+                                    minimum: 50;
+                                    maximum: 100;
+                                    height: 32px;
+                                    changed(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: Math.round(ScanConfig.similarity_threshold) + "%";
+                                    width: 36px;
+                                    font-size: 12px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        FormRow {
+                            title: "Model:";
+                            ComboBox {
+                                model: [
+                                    "Fastest (CLIP-B/32)",
+                                    "Balanced (CLIP-L/14)",
+                                    "Compact (SigLIP-B)",
+                                    "High Quality (SigLIP-L)",
+                                    "Visual Structure (DINOv2-B)",
+                                    "Google SigLIP 2 Base",
+                                    "LLM2CLIP OpenAI-B-16",
+                                    "Custom (Local ONNX)"
+                                ];
+                                current-index: ScanConfig.ai.ai_model == AiModelType.clip-vit-b32 ? 0 : (
+                                    ScanConfig.ai.ai_model == AiModelType.clip-vit-l14 ? 1 : (
+                                    ScanConfig.ai.ai_model == AiModelType.siglip-base ? 2 : (
+                                    ScanConfig.ai.ai_model == AiModelType.siglip-large ? 3 : (
+                                    ScanConfig.ai.ai_model == AiModelType.dino-v2-base ? 4 : (
+                                    ScanConfig.ai.ai_model == AiModelType.siglip2-base ? 5 : (
+                                    ScanConfig.ai.ai_model == AiModelType.llm2-clip-base ? 6 : 7))))));
+                                height: 32px;
+                                selected(val) => {
+                                    if (self.current-index == 0) { ScanConfig.ai.ai_model = AiModelType.clip-vit-b32; }
+                                    else if (self.current-index == 1) { ScanConfig.ai.ai_model = AiModelType.clip-vit-l14; }
+                                    else if (self.current-index == 2) { ScanConfig.ai.ai_model = AiModelType.siglip-base; }
+                                    else if (self.current-index == 3) { ScanConfig.ai.ai_model = AiModelType.siglip-large; }
+                                    else if (self.current-index == 4) { ScanConfig.ai.ai_model = AiModelType.dino-v2-base; }
+                                    else if (self.current-index == 5) { ScanConfig.ai.ai_model = AiModelType.siglip2-base; }
+                                    else if (self.current-index == 6) { ScanConfig.ai.ai_model = AiModelType.llm2-clip-base; }
+                                    else if (self.current-index == 7) { ScanConfig.ai.ai_model = AiModelType.custom; }
+                                    ScanConfig.save_settings();
+                                }
+                            }
+                        }
+
+                        if ScanConfig.ai.ai_model == AiModelType.custom: VerticalLayout {
+                            spacing: 4px;
+                            FormRow {
+                                title: "Local Path:";
+                                HorizontalLayout {
+                                    spacing: 4px;
+                                    LineEdit {
+                                        text <=> ScanConfig.ai.custom_model_path;
+                                        height: 32px;
+                                        edited => { ScanConfig.save_settings(); }
+                                    }
+
+                                    CustomButton {
+                                        text: "...";
+                                        width: 32px;
+                                        height: 32px;
+                                        clicked => { ScanConfig.select_custom_model(); }
+                                    }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Arch:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 30px;
+                                }
+
+                                ComboBox {
+                                    model: ["CLIP", "SigLIP", "DINOv2"];
+                                    current-index <=> ScanConfig.ai.custom_model_arch;
+                                    height: 32px;
+                                    selected(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Dim:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 30px;
+                                }
+
+                                SpinBox {
+                                    value: ScanConfig.ai.custom_model_dim;
+                                    minimum: 64;
+                                    maximum: 4096;
+                                    height: 32px;
+                                    edited(val) => { ScanConfig.ai.custom_model_dim = val; ScanConfig.save_settings(); }
+                                }
+                            }
+                        }
+
+                        if ScanConfig.paths.query_text == "": CheckBox {
+                            text: "Save Visual Reports";
+                            checked <=> ScanConfig.visuals.save_visuals;
+                            height: 20px;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        if ScanConfig.paths.query_text == "" && ScanConfig.visuals.save_visuals: VerticalLayout {
+                            spacing: 4px;
+                            padding-left: 8px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Cols:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> ScanConfig.visuals.visuals_columns;
+                                    minimum: 2;
+                                    maximum: 12;
+                                    height: 32px;
+                                    width: 95px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Max:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> ScanConfig.visuals.visuals_max_count;
+                                    minimum: 1;
+                                    maximum: 1000;
+                                    height: 32px;
+                                    width: 110px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Text {
+                                    text: "Font:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                SpinBox {
+                                    value <=> ScanConfig.visuals.visuals_font_size;
+                                    minimum: 8;
+                                    maximum: 36;
+                                    height: 32px;
+                                    width: 95px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: "Scale:";
+                                    vertical-alignment: center;
+                                    font-size: 11px;
+                                    color: #dcddde;
+                                    width: 35px;
+                                }
+
+                                Slider {
+                                    value <=> ScanConfig.visuals.visuals_scale;
+                                    minimum: 1.0;
+                                    maximum: 4.0;
+                                    height: 32px;
+                                    width: 70px;
+                                    changed(val) => { ScanConfig.save_settings(); }
+                                }
+
+                                Text {
+                                    text: (Math.round(ScanConfig.visuals.visuals_scale * 10) / 10) + "x";
+                                    width: 30px;
+                                    font-size: 11px;
+                                    color: #ffffff;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if ScanConfig.search_method == SearchMethod.qc: PanelSection {
+                    title: "QC Criteria List";
+                    VerticalLayout {
+                        spacing: 6px;
+
+                        Text {
+                            text: "General Settings";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
+                        CheckBox {
+                            text: "Match by stem";
+                            checked <=> ScanConfig.qc.qc_match_by_stem;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Hide same resolution";
+                            checked <=> ScanConfig.qc.qc_hide_same_resolution;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        Text {
+                            text: "Standalone Asset Rules";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
+                        CheckBox {
+                            text: "Check NPOT (Power of 2)";
+                            checked <=> ScanConfig.qc.qc_npot;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Mip-Maps";
+                            checked <=> ScanConfig.qc.qc_mipmaps;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check BlockAlignment";
+                            checked <=> ScanConfig.qc.qc_block_align;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Bit Depth";
+                            checked <=> ScanConfig.qc.qc_bit_depth;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Solid Colors & Empty Channels";
+                            checked <=> ScanConfig.qc.qc_solid_colors;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Seamless Tiling";
+                            checked <=> ScanConfig.qc.qc_seamless_tiling;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Alpha Bleed (Edge Padding)";
+                            checked <=> ScanConfig.qc.qc_alpha_bleed;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Oversized Textures";
+                            checked <=> ScanConfig.qc.qc_check_oversize;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        if ScanConfig.qc.qc_check_oversize: FormRow {
+                            title: "Max Res (px):";
+                            SpinBox {
+                                value <=> ScanConfig.qc.qc_max_resolution;
+                                minimum: 64;
+                                maximum: 32768;
+                                height: 32px;
+                                edited(val) => { ScanConfig.save_settings(); }
+                            }
+                        }
+
+                        Text {
+                            text: "Normal Maps Validation";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
+                        CheckBox {
+                            text: "Validate Normal Vectors";
+                            checked <=> ScanConfig.qc.qc_normals;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        if ScanConfig.qc.qc_normals: FormRow {
+                            title: "Target Style:";
+                            ComboBox {
+                                model: ["Require DirectX (-Y)", "Require OpenGL (+Y)", "Info / Any"];
+                                current-index <=> ScanConfig.qc.qc_normal_target;
+                                height: 32px;
+                                selected(val) => { ScanConfig.save_settings(); }
+                            }
+                        }
+
+                        if ScanConfig.qc.qc_normals: LineEdit {
+                            text <=> ScanConfig.qc.qc_normals_tags;
+                            placeholder-text: "Tags: _norm, _ddn, _nrm, _orm";
+                            height: 32px;
+                            edited => { ScanConfig.save_settings(); }
+                        }
+
+                        Text {
+                            text: "Relative Comparison (Folder A vs B)";
+                            font-size: 11px;
+                            font-weight: 700;
+                            color: #949ba4;
+                        }
+
+                        CheckBox {
+                            text: "Check Size Bloat";
+                            checked <=> ScanConfig.qc.qc_check_bloat;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Alpha Mismatch";
+                            checked <=> ScanConfig.qc.qc_check_alpha;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Color Space Mismatch";
+                            checked <=> ScanConfig.qc.qc_check_colorspace;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
+                            text: "Check Compression Change";
+                            checked <=> ScanConfig.qc.qc_check_compression;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+                    }
+                }
+
+                PanelSection {
+                    title: "Advanced System Settings";
+                    VerticalLayout {
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "Show Advanced Settings";
+                                font-size: 11px;
+                                color: #dcddde;
+                                vertical-alignment: center;
+                            }
+
+                            CheckBox {
+                                checked <=> ScanConfig.show_advanced;
+                            }
+                        }
+
+                        if ScanConfig.show_advanced: VerticalLayout {
+                            spacing: 4px;
+                            padding-top: 6px;
+
+                            if ScanConfig.search_method == SearchMethod.ai: FormRow {
+                                title: "Batch Size:";
+                                SpinBox {
+                                    value <=> ScanConfig.batch_size;
+                                    minimum: 16;
+                                    maximum: 1024;
+                                    height: 32px;
+                                    edited(val) => { ScanConfig.save_settings(); }
+                                }
+                            }
+
+                            if ScanConfig.search_method == SearchMethod.ai: FormRow {
+                                title: "LanceDB Prec:";
+                                ComboBox {
+                                    model: ["Fast", "Balanced", "Accurate", "Exhaustive"];
+                                    current-index <=> ScanConfig.search_precision;
+                                    height: 32px;
+                                    selected(val) => { ScanConfig.save_settings(); }
+                                }
+                            }
+
+                            if ScanConfig.search_method == SearchMethod.ai: FormRow {
+                                title: "Provider:";
+                                ComboBox {
+                                    model: ["CPU", "DirectML", "CUDA", "TensorRT", "CoreML"];
+                                    current-index: ScanConfig.execution_provider == ExecutionProvider.cpu ? 0 : (
+                                        ScanConfig.execution_provider == ExecutionProvider.direct-ml ? 1 : (
+                                        ScanConfig.execution_provider == ExecutionProvider.cuda ? 2 : (
+                                        ScanConfig.execution_provider == ExecutionProvider.tensor-rt ? 3 : 4)));
+                                    height: 32px;
+                                    selected(val) => {
+                                        if (self.current-index == 0) { ScanConfig.execution_provider = ExecutionProvider.cpu; }
+                                        else if (self.current-index == 1) { ScanConfig.execution_provider = ExecutionProvider.direct-ml; }
+                                        else if (self.current-index == 2) { ScanConfig.execution_provider = ExecutionProvider.cuda; }
+                                        else if (self.current-index == 3) { ScanConfig.execution_provider = ExecutionProvider.tensor-rt; }
+                                        else if (self.current-index == 4) { ScanConfig.execution_provider = ExecutionProvider.core-ml; }
+                                        ScanConfig.save_settings();
+                                    }
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Enable Previews Window";
+                                checked <=> ScanConfig.preview.enable_previews;
+                                toggled => { ScanConfig.save_settings(); }
+                            }
+
+                            if ScanConfig.preview.enable_previews: FormRow {
+                                title: "List Thumb Size:";
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Slider {
+                                        value: ScanConfig.ui.list_preview_size / 1px;
+                                        minimum: 32;
+                                        maximum: 120;
+                                        height: 32px;
+                                        changed(val) => {
+                                            ScanConfig.ui.list_preview_size = val * 1px;
+                                            ScanConfig.save_settings();
+                                        }
+                                    }
+
+                                    Text {
+                                        text: Math.round(ScanConfig.ui.list_preview_size / 1px) + "px";
+                                        width: 36px;
+                                        font-size: 11px;
+                                        color: #ffffff;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            if ScanConfig.preview.enable_previews: FormRow {
+                                title: "Grid Card Size:";
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Slider {
+                                        value: ScanConfig.ui.grid_card_size / 1px;
+                                        minimum: 100;
+                                        maximum: 250;
+                                        height: 32px;
+                                        changed(val) => {
+                                            ScanConfig.ui.grid_card_size = val * 1px;
+                                            ScanConfig.save_settings();
+                                        }
+                                    }
+
+                                    Text {
+                                        text: Math.round(ScanConfig.ui.grid_card_size / 1px) + "px";
+                                        width: 36px;
+                                        font-size: 11px;
+                                        color: #ffffff;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            if ScanConfig.preview.enable_previews: FormRow {
+                                title: "Preview Quality:";
+                                ComboBox {
+                                    model: ["Fast (64px)", "Balanced (128px)", "High Quality (256px)"];
+                                    current-index <=> ScanConfig.preview.preview_quality;
+                                    height: 32px;
+                                    selected(val) => { ScanConfig.save_settings(); }
+                                }
+                            }
+                            CheckBox {
+                                text: "Enable HDR Tonemapping";
+                                checked <=> ViewportState.tonemap.tonemap_enabled;
+                                toggled => { ViewportState.tonemap_toggled(); }
+                            }
+
+                            if ViewportState.tonemap.tonemap_enabled: CheckBox {
+                                text: "Enable Auto Exposure";
+                                checked <=> ViewportState.tonemap.tonemap_auto_exposure;
+                                toggled => { ViewportState.tonemap_toggled(); }
+                            }
+
+                            if ViewportState.tonemap.tonemap_enabled: ComboBox {
+                                model: [
+                                    "None",
+                                    "False Color",
+                                    "ACES Filmic",
+                                    "ACES 2.0 Fit",
+                                    "Khronos PBR Neutral",
+                                    "ICtCp BT.2446c",
+                                    "ICtCp Lumina"
+                                ];
+                                current-index <=> ViewportState.tonemap.tonemap_operator;
+                                height: 32px;
+                                selected(val) => { ViewportState.tonemap_toggled(); }
+                            }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                padding-top: 4px;
+                                CustomButton {
+                                    text: "Clear Caches";
+                                    height: 32px;
+                                    primary-color: #4e5058;
+                                    clicked => { ScanConfig.clear_cache(); }
+                                }
+
+                                CustomButton {
+                                    text: "Clear Models";
+                                    height: 32px;
+                                    primary-color: #4e5058;
+                                    clicked => { ScanConfig.clear_models(); }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 40px;
+            vertical-stretch: 0;
+            background: #1e1f22;
+            border-radius: 4px;
+
+            VerticalLayout {
+                padding: 4px;
+                CustomButton {
+                    text: Diagnostics.is_scanning ? "STOP SCAN" : "RUN SCANNER";
+                    primary-color: Diagnostics.is_scanning ? #f23f43 : #23a55a;
+                    height: 32px;
+                    clicked => {
+                        if (Diagnostics.is_scanning) { Diagnostics.cancel_scan(); }
+                        else { Diagnostics.run_scan(); }
+                    }
+                }
+            }
+        }
+    }
+}

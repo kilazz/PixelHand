@@ -1,0 +1,187 @@
+// ui/components/common.slint
+
+export component FormRow {
+    in property <string> title;
+    in property <length> label-width: 90px;
+
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.title;
+            width: root.label-width;
+            vertical-alignment: center;
+            font-size: 12px;
+            color: #dcddde;
+        }
+
+        @children
+    }
+}
+
+export component SpecsRow {
+    in property <string> name;
+    in property <string> val1;
+    in property <string> val2;
+
+    // Decoupled properties passed as inputs
+    in property <length> col-spec-name-w: 130px;
+    in property <length> col-spec-val1-w: 140px;
+
+    height: 24px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text {
+            text: name;
+            width: root.col-spec-name-w;
+            color: #808080;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Rectangle {
+            width: 1px;
+            background: #353535;
+        }
+
+        Text {
+            text: val1;
+            width: root.col-spec-val1-w;
+            color: #e59535;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        Rectangle {
+            width: 1px;
+            background: #353535;
+        }
+
+        Text {
+            text: val2;
+            color: #cfcfcf;
+            font-size: 12px;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+    }
+}
+
+export component SectionTitle {
+    in property <string> text;
+    height: 22px;
+    VerticalLayout {
+        Text {
+            text: root.text;
+            font-size: 12px;
+            font-weight: 700;
+            color: #808080;
+        }
+
+        Rectangle {
+            height: 1px;
+            background: #353535;
+        }
+    }
+}
+
+export component PanelSection {
+    in property <string> title;
+    VerticalLayout {
+        spacing: 4px;
+        SectionTitle {
+            text: root.title;
+        }
+
+        @children
+    }
+}
+
+export component WipeViewport {
+    in property <image> original;
+    in property <image> duplicate;
+    in-out property <float> wipe-val;
+    in property <image> checkerboard;
+
+    // Decoupled background modes and properties passed as inputs
+    in property <int> background-mode: 0;
+    in property <image> checkerboard-light;
+
+    viewport-root := Rectangle {
+        background: root.background-mode == 2 ? #000000 : (root.background-mode == 3 ? #ffffff : #181818);
+        clip: true;
+
+        if root.background-mode == 0: Image {
+            source: checkerboard;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        if root.background-mode == 1: Image {
+            source: root.checkerboard-light;
+            horizontal-tiling: repeat;
+            vertical-tiling: repeat;
+            width: 100%;
+            height: 100%;
+        }
+
+        Image {
+            source: original;
+            width: 100%;
+            height: 100%;
+            image-fit: contain;
+        }
+
+        Rectangle {
+            clip: true;
+            x: 0px;
+            y: 0px;
+            width: parent.width * wipe-val;
+            height: parent.height;
+
+            Image {
+                source: duplicate;
+                x: 0px;
+                y: 0px;
+                width: viewport-root.width;
+                height: viewport-root.height;
+                image-fit: contain;
+            }
+        }
+
+        // Interactive separator line with TouchArea bounding box
+        Rectangle {
+            x: parent.width * wipe-val - 6px;
+            y: 0px;
+            width: 12px;
+            height: parent.height;
+            background: transparent;
+
+            Rectangle {
+                x: 5px;
+                y: 0px;
+                width: 2px;
+                height: parent.height;
+                background: #e59535;
+            }
+
+            TouchArea {
+                width: 100%;
+                height: 100%;
+                mouse-cursor: MouseCursor.col-resize;
+
+                // Calculates the new localized wipe ratio relative to current mouse x positions
+                moved => {
+                    if (self.pressed) {
+                        let new_val = (self.mouse-x + parent.x) / viewport-root.width;
+                        root.wipe-val = new_val.clamp(0.0, 1.0);
+                    }
+                }
+            }
+        }
+    }
+}

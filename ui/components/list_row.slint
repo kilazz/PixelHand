@@ -1,0 +1,334 @@
+// ui/components/list_row.slint
+
+import { CheckBox } from "std-widgets.slint";
+import { ResultsRow, SearchMethod } from "../structs.slint";
+import { InteractiveThumbnail } from "./thumbnail.slint";
+
+export component ListRow inherits Rectangle {
+    in property <ResultsRow> row-data;
+    in property <length> list-preview-size: 40px;
+    in property <bool> enable-previews: true;
+    in property <SearchMethod> search-method: SearchMethod.exact;
+    in property <image> checkerboard-pattern;
+
+    // Draggable Table Column Widths passed from the parent container
+    in property <length> col-file-w: 320px;
+    in property <length> col-score-w: 80px;
+    in property <length> col-path-w: 380px;
+    in property <length> col-format-w: 220px;
+    in property <length> col-dimensions-w: 110px;
+    in property <length> col-mipmaps-w: 80px;
+    in property <length> col-cubemap-w: 80px;
+    in property <length> col-size-w: 90px;
+
+    callback row_clicked(bool, int, string);
+    callback checkbox_toggled();
+    callback right_clicked(length, length);
+    callback channel_hovered(string, string);
+    callback delete_group_clicked(int);
+
+    height: root.list-preview-size + 8px;
+    background: row-data.is_header ? #1e1f22 : (row-data.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
+    border-color: #1f2023;
+    border-width: 1px;
+
+    main_row_ta := TouchArea {
+        x: 28px + 24px + 8px + root.list-preview-size + 8px;
+        width: parent.width - self.x;
+        height: 100%;
+        clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
+        pointer-event(evt) => {
+            if (evt.button == PointerEventButton.right && evt.kind == PointerEventKind.down) {
+                if (!row-data.is_header) { root.right_clicked(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
+            }
+        }
+    }
+
+    if row-data.is_header: Rectangle {
+        background: transparent;
+
+        header_ta := TouchArea {
+            width: 100%;
+            height: 100%;
+            clicked => { root.row_clicked(true, row-data.group_index, row-data.path); }
+        }
+
+        HorizontalLayout {
+            width: 100%;
+            height: 100%;
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 8px;
+            alignment: space-between;
+            cross-axis-alignment: center;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                cross-axis-alignment: center;
+
+                Text {
+                    text: row-data.is_checked ? "▶" : "▼";
+                    color: #949ba4;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+
+                trash_ta := TouchArea {
+                    width: 22px;
+                    height: 22px;
+                    mouse-cursor: pointer;
+                    clicked => { root.delete_group_clicked(row-data.group_index); }
+                    Rectangle {
+                        width: 100%;
+                        height: 100%;
+                        y: 1.5px;
+                        Text {
+                            text: "🗑";
+                            color: trash_ta.has-hover ? #ff6b6b : #f23f43;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                        }
+                    }
+                }
+
+                Text {
+                    text: row-data.is_qc ? ("QC Issue: " + row-data.hash_or_issue) : ("Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
+                    color: header_ta.has-hover ? #ffffff : #949ba4;
+                    font-size: 12px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+
+            Text {
+                text: row-data.size_str;
+                color: #949ba4;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    if !row-data.is_header: HorizontalLayout {
+        padding-left: 28px;
+        padding-right: 8px;
+        spacing: 0px;
+
+        CheckBox {
+            checked: row-data.is_checked;
+            toggled => { root.checkbox_toggled(); }
+            width: 24px;
+        }
+
+        Rectangle {
+            width: 8px;
+        }
+
+        if root.enable-previews: InteractiveThumbnail {
+            source: row-data.thumbnail;
+            path: row-data.path;
+            show_corners: true;
+            checkerboard: root.checkerboard-pattern;
+            width: root.list-preview-size;
+            height: root.list-preview-size;
+            corner_hovered(path, chan) => { root.channel_hovered(path, chan); }
+            clicked => { root.row_clicked(false, row-data.group_index, row-data.path); }
+        }
+        if root.enable-previews: Rectangle {
+            width: 8px;
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 0px;
+                width: 100%;
+                height: 100%;
+
+                HorizontalLayout {
+                    width: root.enable-previews ? (root.col-file-w - root.list-preview-size - 8px) : root.col-file-w;
+                    Text {
+                        text: row-data.name;
+                        color: #dcddde;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                Rectangle {
+                    width: 8px;
+                }
+
+                if root.search-method != SearchMethod.inventory: HorizontalLayout {
+                    spacing: 0px;
+                    HorizontalLayout {
+                        width: root.col-score-w;
+                        Text {
+                            text: row-data.is_best ? "[Best]" : row-data.score_or_detail;
+                            color: row-data.is_best ? #f0b132 : #dcddde;
+                            font-size: 12px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            width: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        width: root.col-path-w;
+                        Text {
+                            text: row-data.path;
+                            color: #949ba4;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        Text {
+                            text: row-data.meta_str;
+                            color: #949ba4;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+                }
+
+                if root.search-method == SearchMethod.inventory: HorizontalLayout {
+                    spacing: 0px;
+
+                    // FORMAT (Clip & Left align)
+                    Rectangle {
+                        width: root.col-format-w;
+                        clip: true;
+                        Text {
+                            text: row-data.format_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: left;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    // DIMENSIONS (Centered)
+                    Rectangle {
+                        width: root.col-dimensions-w;
+                        clip: true;
+                        Text {
+                            text: row-data.dimensions_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    // MIPMAPS (Centered)
+                    Rectangle {
+                        width: root.col-mipmaps-w;
+                        clip: true;
+                        Text {
+                            text: row-data.mipmaps_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    // CUBEMAP (Centered)
+                    Rectangle {
+                        width: root.col-cubemap-w;
+                        clip: true;
+                        Text {
+                            text: row-data.cubemap_str;
+                            color: row-data.cubemap_str == "YES" ? #f0b132 : #dcddde;
+                            font-weight: row-data.cubemap_str == "YES" ? 700 : 400;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    // SIZE (Centered)
+                    Rectangle {
+                        width: root.col-size-w;
+                        clip: true;
+                        Text {
+                            text: row-data.size_str;
+                            color: #dcddde;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
+                    }
+
+                    Rectangle {
+                        width: 8px;
+                    }
+
+                    // PATH (Left align, expand)
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        clip: true;
+                        Text {
+                            text: row-data.path;
+                            color: #5865f2;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            horizontal-alignment: left;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
