@@ -79,8 +79,13 @@ export global ScanConfig {
         qc_block_align: true,
         qc_bit_depth: true,
         qc_solid_colors: true,
+        qc_alpha_bleed: true,
         qc_normals: true,
+        qc_normal_target: 0,
         qc_normals_tags: "",
+        qc_seamless_tiling: false,
+        qc_check_oversize: true,
+        qc_max_resolution: 4096,
         qc_match_by_stem: true,
         qc_hide_same_resolution: false,
         qc_check_bloat: true,
@@ -115,11 +120,11 @@ export global ScanConfig {
     in-out property <length> col_file_w: 320px;
     in-out property <length> col_score_w: 80px;
     in-out property <length> col_path_w: 380px;
-    in-out property <length> col_format_w: 110px;
+    in-out property <length> col_format_w: 220px;
     in-out property <length> col_dimensions_w: 110px;
-    in-out property <length> col_mipmaps_w: 75px;
-    in-out property <length> col_cubemap_w: 75px;
-    in-out property <length> col_size_w: 85px;
+    in-out property <length> col_mipmaps_w: 80px;
+    in-out property <length> col_cubemap_w: 80px;
+    in-out property <length> col_size_w: 90px;
 
     // Draggable columns for the Comparison Specifications Matrix
     in-out property <length> col_spec_name_w: 130px;

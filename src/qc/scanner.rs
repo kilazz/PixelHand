@@ -65,7 +65,7 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                 }
 
                 // Alpha Bleed (Edge Padding) check
-                if params.qc.qc_check_alpha
+                if params.qc.qc_alpha_bleed
                     && let Some((issue, details)) = check_alpha_bleed(p)
                 {
                     file_issues.push(QcIssueSummary {

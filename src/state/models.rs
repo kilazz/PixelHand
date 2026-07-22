@@ -96,6 +96,7 @@ pub struct ScanQcRules {
     pub qc_block_align: bool,
     pub qc_bit_depth: bool,
     pub qc_solid_colors: bool,
+    pub qc_alpha_bleed: bool,
     pub qc_normals: bool,
     pub qc_normal_target: i32,
     pub qc_normals_tags: String,
@@ -232,6 +233,7 @@ impl ScanParams {
         }
         if ext.ext_svg {
             extensions.push(".svg".to_string());
+            extensions.push(".svgz".to_string());
         }
         if ext.ext_astc {
             extensions.push(".astc".to_string());
@@ -274,6 +276,7 @@ impl ScanParams {
                 qc_block_align: qc.qc_block_align,
                 qc_bit_depth: qc.qc_bit_depth,
                 qc_solid_colors: qc.qc_solid_colors,
+                qc_alpha_bleed: qc.qc_alpha_bleed,
                 qc_normals: qc.qc_normals,
                 qc_normal_target: qc.qc_normal_target,
                 qc_normals_tags: qc.qc_normals_tags.to_string(),
@@ -412,6 +415,7 @@ impl Default for AppSettings {
                 qc_block_align: true,
                 qc_bit_depth: true,
                 qc_solid_colors: true,
+                qc_alpha_bleed: true,
                 qc_normals: true,
                 qc_normal_target: 0,
                 qc_normals_tags: "".into(),

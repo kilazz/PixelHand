@@ -58,6 +58,7 @@ fn print_help() {
     println!("  --check-mipmaps       Verify if mipmaps are generated");
     println!("  --check-block         Verify if dimensions are 4px block aligned");
     println!("  --check-bit           Verify bit depths");
+    println!("  --check-alpha-bleed   Verify alpha edge padding / bleed");
     println!("  --validate-normals    Validate typical normal maps format");
 }
 
@@ -77,6 +78,7 @@ fn create_default_cli_params(dir: String) -> ScanParams {
             qc_block_align: false,
             qc_bit_depth: false,
             qc_solid_colors: false,
+            qc_alpha_bleed: false,
             qc_normals: false,
             qc_normal_target: 0,
             qc_normals_tags: String::new(),
@@ -169,12 +171,13 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
     let check_mipmaps = args.iter().any(|arg| arg == "--check-mipmaps");
     let check_block = args.iter().any(|arg| arg == "--check-block");
     let check_bit = args.iter().any(|arg| arg == "--check-bit");
+    let check_alpha_bleed = args.iter().any(|arg| arg == "--check-alpha-bleed");
     let validate_normals = args.iter().any(|arg| arg == "--validate-normals");
 
     println!("[CLI] Running Technical Quality Control Scan on: {}", dir);
     println!(
-        "      Options: NPOT={}, Mipmaps={}, BlockAlign={}, BitDepth={}, Normals={}\n",
-        check_npot, check_mipmaps, check_block, check_bit, validate_normals
+        "      Options: NPOT={}, Mipmaps={}, BlockAlign={}, BitDepth={}, AlphaBleed={}, Normals={}\n",
+        check_npot, check_mipmaps, check_block, check_bit, check_alpha_bleed, validate_normals
     );
 
     let mut params = create_default_cli_params(dir);
@@ -185,6 +188,7 @@ async fn run_qc_cli_scan(dir: String, args: &[String]) -> Result<()> {
     params.qc.qc_mipmaps = check_mipmaps;
     params.qc.qc_block_align = check_block;
     params.qc.qc_bit_depth = check_bit;
+    params.qc.qc_alpha_bleed = check_alpha_bleed;
     params.qc.qc_normals = validate_normals;
 
     match crate::qc::scanner::run_qc_scan_internal(params).await {

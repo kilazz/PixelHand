@@ -625,6 +625,12 @@ export component FindSidebar inherits Rectangle {
                         }
 
                         CheckBox {
+                            text: "Check Alpha Bleed (Edge Padding)";
+                            checked <=> ScanConfig.qc.qc_alpha_bleed;
+                            toggled => { ScanConfig.save_settings(); }
+                        }
+
+                        CheckBox {
                             text: "Check Oversized Textures";
                             checked <=> ScanConfig.qc.qc_check_oversize;
                             toggled => { ScanConfig.save_settings(); }
