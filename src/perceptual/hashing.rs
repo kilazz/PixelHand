@@ -1,7 +1,6 @@
 // src/perceptual/hashing.rs
 
 use image::{DynamicImage, RgbaImage};
-use image_hasher::{HashAlg, HasherConfig};
 use std::path::Path;
 
 // ==========================================
@@ -101,30 +100,37 @@ pub fn preprocess_image_channels(
     Some(processed)
 }
 
-/// Computes the dHash visual signature as a 64-bit integer (`u64`) kept directly in CPU registers.
+/// Computes the 64-bit dHash (Difference Hash) visual signature natively without external dependencies.
+/// Resizes the image to 9x8 in Grayscale (9 columns yield 8 horizontal comparisons per row across 8 rows = 64 bits).
 pub fn calculate_perceptual_hash(
     path: &Path,
     analysis_type: AnalysisType,
     ignore_solid_channels: bool,
 ) -> Option<u64> {
     let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(128), None).ok()?;
-    let resized_img = img.resize(128, 128, image::imageops::FilterType::Nearest);
 
+    // 1. Resize to 9x8 dimensions for horizontal pixel comparison
+    let resized_img = img.resize_exact(9, 8, image::imageops::FilterType::Triangle);
     let processed_image =
         preprocess_image_channels(&resized_img, analysis_type, ignore_solid_channels)?;
+    let luma = processed_image.to_luma8();
 
-    let dhash_result = HasherConfig::new()
-        .hash_alg(HashAlg::Gradient)
-        .hash_size(8, 8)
-        .to_hasher()
-        .hash_image(&processed_image);
+    let mut hash: u64 = 0;
+    let mut bit_index = 0;
 
-    let bytes = dhash_result.as_bytes();
-    if bytes.len() >= 8 {
-        Some(u64::from_le_bytes(bytes[0..8].try_into().ok()?))
-    } else {
-        None
+    // 2. Compare adjacent horizontal pixels to construct the 64-bit register signature
+    for y in 0..8 {
+        for x in 0..8 {
+            let left = luma.get_pixel(x, y)[0];
+            let right = luma.get_pixel(x + 1, y)[0];
+            if left > right {
+                hash |= 1u64 << bit_index;
+            }
+            bit_index += 1;
+        }
     }
+
+    Some(hash)
 }
 
 /// Hardware-accelerated Hamming distance calculated via hardware `POPCNT` instruction in 1 clock cycle.
