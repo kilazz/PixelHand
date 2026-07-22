@@ -29,6 +29,9 @@ export component CompareTab inherits HorizontalLayout {
     width: 100%;
     height: 100%;
 
+    // Total animation frames dynamically resolved based on mode (0: Spritesheet, 1: Group Sequence)
+    property <int> total_anim_frames: ViewportState.anim_source == 1 ? ScanConfig.selected_group_files.length : (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows);
+
     VerticalLayout {
         horizontal-stretch: 1;
         padding-right: 12px;
@@ -242,41 +245,67 @@ export component CompareTab inherits HorizontalLayout {
             }
         }
 
-        // TOOLBAR 2: Spritesheet slicing subdivision & Animation Flipbook controls
+        // TOOLBAR 2: Spritesheet slicing subdivision & Group Animation controls
         HorizontalLayout {
             spacing: 8px;
             height: 28px;
 
             Text {
-                text: "Grid Slice (Col x Row):";
+                text: "Anim Mode:";
                 vertical-alignment: center;
                 font-size: 12px;
                 color: #cfcfcf;
             }
 
-            SpinBox {
-                value <=> ViewportState.viewer.grid_cols;
-                minimum: 1;
-                maximum: 64;
+            ComboBox {
+                model: ["Spritesheet Grid", "Group Files Sequence"];
+                current-index <=> ViewportState.anim_source;
                 height: 24px;
-                width: 90px;
-                edited(val) => { ViewportState.viewer.grid_cols = val; ViewportState.active_frame_changed(); }
+                width: 175px;
+                selected(val) => { ViewportState.active_frame_changed(); }
             }
 
-            Text {
-                text: "x";
+            if ViewportState.anim_source == 0: HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: "Grid (Col x Row):";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #cfcfcf;
+                }
+
+                SpinBox {
+                    value <=> ViewportState.viewer.grid_cols;
+                    minimum: 1;
+                    maximum: 64;
+                    height: 24px;
+                    width: 80px;
+                    edited(val) => { ViewportState.viewer.grid_cols = val; ViewportState.active_frame_changed(); }
+                }
+
+                Text {
+                    text: "x";
+                    vertical-alignment: center;
+                    font-size: 12px;
+                    color: #cfcfcf;
+                }
+
+                SpinBox {
+                    value <=> ViewportState.viewer.grid_rows;
+                    minimum: 1;
+                    maximum: 64;
+                    height: 24px;
+                    width: 80px;
+                    edited(val) => { ViewportState.viewer.grid_rows = val; ViewportState.active_frame_changed(); }
+                }
+            }
+
+            if ViewportState.anim_source == 1: Text {
+                text: "Playing " + ScanConfig.selected_group_files.length + " sequence files";
                 vertical-alignment: center;
-                font-size: 12px;
-                color: #cfcfcf;
-            }
-
-            SpinBox {
-                value <=> ViewportState.viewer.grid_rows;
-                minimum: 1;
-                maximum: 64;
-                height: 24px;
-                width: 90px;
-                edited(val) => { ViewportState.viewer.grid_rows = val; ViewportState.active_frame_changed(); }
+                font-size: 11px;
+                font-weight: 700;
+                color: #e59535;
             }
 
             Rectangle {
@@ -390,7 +419,7 @@ export component CompareTab inherits HorizontalLayout {
         InteractiveCompareViewport { }
 
         // FIXED BOTTOM TIMELINE PLAYER
-        if ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1: Rectangle {
+        if (ViewportState.anim_source == 0 && (ViewportState.viewer.grid_cols > 1 || ViewportState.viewer.grid_rows > 1)) || (ViewportState.anim_source == 1 && ScanConfig.selected_group_files.length > 1): Rectangle {
             height: 38px;
             background: #1e1e1e;
             border-color: #353535;
@@ -455,8 +484,7 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
-                            ViewportState.active_frame = Math.min(total_frames - 1, ViewportState.active_frame + 1);
+                            ViewportState.active_frame = Math.min(root.total_anim_frames - 1, ViewportState.active_frame + 1);
                             ViewportState.active_frame_changed();
                         }
                     }
@@ -469,8 +497,7 @@ export component CompareTab inherits HorizontalLayout {
                         compact: true;
                         primary-color: #3d3d3d;
                         clicked => {
-                            let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
-                            ViewportState.active_frame = total_frames - 1;
+                            ViewportState.active_frame = Math.max(0, root.total_anim_frames - 1);
                             ViewportState.active_frame_changed();
                         }
                     }
@@ -480,7 +507,7 @@ export component CompareTab inherits HorizontalLayout {
                 SpinBox {
                     value: ViewportState.active_frame + 1;
                     minimum: 1;
-                    maximum: Math.max(1, ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows);
+                    maximum: Math.max(1, root.total_anim_frames);
                     height: 24px;
                     width: 90px;
                     edited(val) => {
@@ -561,7 +588,7 @@ export component CompareTab inherits HorizontalLayout {
                         // Fill bar
                         Rectangle {
                             x: 0px;
-                            width: parent.width * (ViewportState.active_frame / Math.max(1, (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows) - 1));
+                            width: parent.width * (ViewportState.active_frame / Math.max(1, root.total_anim_frames - 1));
                             height: 100%;
                             background: #e59535;
                             border-radius: 5px;
@@ -569,7 +596,7 @@ export component CompareTab inherits HorizontalLayout {
 
                         // Handle
                         Rectangle {
-                            x: (parent.width - self.width) * (ViewportState.active_frame / Math.max(1, (ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows) - 1));
+                            x: (parent.width - self.width) * (ViewportState.active_frame / Math.max(1, root.total_anim_frames - 1));
                             y: (parent.height - self.height) / 2;
                             width: 14px;
                             height: 14px;
@@ -584,7 +611,7 @@ export component CompareTab inherits HorizontalLayout {
                             height: 100%;
                             moved => {
                                 if (self.pressed) {
-                                    let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
+                                    let total_frames = root.total_anim_frames;
                                     let ratio = self.mouse-x / parent.width;
                                     let raw_frame = Math.round(ratio * (total_frames - 1));
                                     ViewportState.active_frame = raw_frame.clamp(0, total_frames - 1);
@@ -592,7 +619,7 @@ export component CompareTab inherits HorizontalLayout {
                                 }
                             }
                             clicked => {
-                                let total_frames = ViewportState.viewer.grid_cols * ViewportState.viewer.grid_rows;
+                                let total_frames = root.total_anim_frames;
                                 let ratio = self.mouse-x / parent.width;
                                 let raw_frame = Math.round(ratio * (total_frames - 1));
                                 ViewportState.active_frame = raw_frame.clamp(0, total_frames - 1);

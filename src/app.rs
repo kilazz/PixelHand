@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use slint::ComponentHandle;
+use slint::Model;
 use std::fs;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, OnceLock};
@@ -319,9 +320,18 @@ pub fn run_gui() -> Result<()> {
             let viewer = vp.get_viewer();
 
             if vp.get_play_flipbook() {
-                let cols = viewer.grid_cols.max(1) as u32;
-                let rows = viewer.grid_rows.max(1) as u32;
-                let total_frames = cols * rows;
+                // Dynamically resolve total frame count based on animation source mode:
+                // anim_source == 1: Group Files Sequence
+                // anim_source == 0: Spritesheet Grid subdivision
+                let anim_source = vp.get_anim_source();
+                let total_frames = if anim_source == 1 {
+                    let scan_cfg = ui.global::<ScanConfig>();
+                    scan_cfg.get_selected_group_files().row_count() as u32
+                } else {
+                    let cols = viewer.grid_cols.max(1) as u32;
+                    let rows = viewer.grid_rows.max(1) as u32;
+                    cols * rows
+                };
 
                 if total_frames > 1 {
                     let fps = viewer.flipbook_fps.max(1.0) as f64;

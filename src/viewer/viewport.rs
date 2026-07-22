@@ -8,6 +8,7 @@ use crate::utils::image_processing::{
 use crate::utils::slint_conversions::{convert_to_slint_image, get_current_active_channel};
 use crate::viewer::tonemapping::{apply_manual_corrections, calculate_difference_map};
 use slint::ComponentHandle;
+use slint::Model;
 
 /// Isolated parameter DTO extracted from UI thread state for safe background processing.
 struct ViewportStateParams {
@@ -22,10 +23,11 @@ struct ViewportStateParams {
     grid_rows: u32,
     active_frame: u32,
     enable_blending: bool,
+    anim_source: i32,
 }
 
 /// Triggers an asynchronous, non-blocking viewport preview update.
-/// Retrieves cached texture channel channels, slices spritesheet sub-regions on background task threads,
+/// Retrieves cached texture channel channels, slices spritesheet sub-regions or resolves sequence files,
 /// applies manual color corrections and tonemapping configuration metrics, and dispatches outputs back to Slint's UI thread.
 pub fn trigger_viewport_update(
     app_weak: slint::Weak<AppWindow>,
@@ -39,6 +41,9 @@ pub fn trigger_viewport_update(
     let viewport_state = ui.global::<ViewportState>();
     let viewer = viewport_state.get_viewer();
 
+    let anim_source = viewport_state.get_anim_source();
+    let current_frame_idx = viewport_state.get_active_frame() as usize;
+
     // Extract thread-safe parameters to prevent capturing active Slint component reference handles
     let params = ViewportStateParams {
         channel: get_current_active_channel(&viewport_state).to_string(),
@@ -50,15 +55,47 @@ pub fn trigger_viewport_update(
         ratio: viewer.aspect_ratio_modifier,
         grid_cols: viewer.grid_cols as u32,
         grid_rows: viewer.grid_rows as u32,
-        active_frame: viewport_state.get_active_frame() as u32,
+        active_frame: current_frame_idx as u32,
         enable_blending: viewer.enable_frame_blending,
+        anim_source,
     };
 
-    let total_frames = params.grid_cols * params.grid_rows;
+    // Determine total frame count and active duplicate paths based on animation mode
+    let scan_config = ui.global::<crate::app::ScanConfig>();
+    let group_files = scan_config.get_selected_group_files();
+    let total_group_files = group_files.row_count();
+
+    let total_frames = if anim_source == 1 {
+        total_group_files as u32
+    } else {
+        params.grid_cols * params.grid_rows
+    };
+
     let next_frame = if total_frames > 1 {
         (params.active_frame + 1) % total_frames
     } else {
         params.active_frame
+    };
+
+    // Resolves current and next duplicate frame paths when playing a group files sequence
+    let active_dup_path = if anim_source == 1 && total_group_files > 0 {
+        let clamped_idx = current_frame_idx.min(total_group_files - 1);
+        group_files
+            .row_data(clamped_idx)
+            .map(|r| r.path.to_string())
+            .unwrap_or_else(|| dup_path.clone())
+    } else {
+        dup_path.clone()
+    };
+
+    let next_dup_path = if anim_source == 1 && total_group_files > 0 {
+        let clamped_idx = (next_frame as usize).min(total_group_files - 1);
+        group_files
+            .row_data(clamped_idx)
+            .map(|r| r.path.to_string())
+            .unwrap_or_else(|| dup_path.clone())
+    } else {
+        dup_path.clone()
     };
 
     // Keep global thread-safe settings context updated before launching tasks
@@ -75,11 +112,20 @@ pub fn trigger_viewport_update(
         // Fetch requested channel preview buffers asynchronously (disk/memory-bound cache hits)
         let raw_orig =
             get_channel_preview_image(&orig_path, &params.channel, params.mip_level).await;
-        let raw_dup = get_channel_preview_image(&dup_path, &params.channel, params.mip_level).await;
+        let raw_dup =
+            get_channel_preview_image(&active_dup_path, &params.channel, params.mip_level).await;
 
-        // Reuse fetched base image buffers for the next frame if animation blending is active
+        // Fetch next frame buffers if frame blending animation is active
         let (raw_orig_next, raw_dup_next) = if params.enable_blending && total_frames > 1 {
-            (raw_orig.clone(), raw_dup.clone())
+            if params.anim_source == 1 {
+                (
+                    raw_orig.clone(),
+                    get_channel_preview_image(&next_dup_path, &params.channel, params.mip_level)
+                        .await,
+                )
+            } else {
+                (raw_orig.clone(), raw_dup.clone())
+            }
         } else {
             (None, None)
         };
@@ -91,8 +137,8 @@ pub fn trigger_viewport_update(
             let mut o_n = raw_orig_next;
             let mut d_n = raw_dup_next;
 
-            // Perform sub-region frame cropping if spritesheet slicing is configured (Current Frame)
-            if params.grid_cols > 1 || params.grid_rows > 1 {
+            // Perform sub-region frame cropping ONLY in Spritesheet Grid mode (anim_source == 0)
+            if params.anim_source == 0 && (params.grid_cols > 1 || params.grid_rows > 1) {
                 if let Some(ref img) = o {
                     o = Some(slice_spritesheet_frame(
                         img,
