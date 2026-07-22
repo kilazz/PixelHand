@@ -18,9 +18,13 @@ pub fn bgra_to_rgba_in_place(buf: &mut [u8]) {
 }
 
 /// Converts a u32 slice (in LE BGRA format from texture2ddecoder) into an RGBA u8 byte vector.
+/// Single-pass approach avoids flat_map allocation and the secondary in-place swapping pass.
 pub fn bgra_u32_to_rgba_bytes(rgba_u32: Vec<u32>) -> Vec<u8> {
-    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
-    bgra_to_rgba_in_place(&mut raw_bytes);
+    let mut raw_bytes = Vec::with_capacity(rgba_u32.len() * 4);
+    for p in rgba_u32 {
+        let [b, g, r, a] = p.to_le_bytes();
+        raw_bytes.extend_from_slice(&[r, g, b, a]);
+    }
     raw_bytes
 }
 

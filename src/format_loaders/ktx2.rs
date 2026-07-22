@@ -232,15 +232,15 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
 
         if header.pixel_depth > 1 {
             let mut patched = bytes.to_vec();
-            // 1. Set pixel_depth (bytes 28..32) to 0
+            // Set pixel_depth (bytes 28..32) to 0
             patched[28..32].copy_from_slice(&0u32.to_le_bytes());
 
-            // 2. Map Z-slices to Array Layers: new_layers = max(layers, 1) * pixel_depth
+            // Map Z-slices to Array Layers: new_layers = max(layers, 1) * pixel_depth
             let layers = header.layer_count.max(1);
             let new_layers = layers * header.pixel_depth;
             patched[32..36].copy_from_slice(&new_layers.to_le_bytes());
 
-            // 3. Force level_count (bytes 40..44) to 1 to bypass mipmap size validation mismatches
+            // Force level_count (bytes 40..44) to 1 to bypass mipmap size validation mismatches
             //    (since 3D mips reduce in Z-axis, but 2D Array mips do not)
             patched[40..44].copy_from_slice(&1u32.to_le_bytes());
 

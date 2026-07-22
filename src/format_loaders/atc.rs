@@ -29,26 +29,26 @@ fn infer_atc_dimensions(payload_len: usize) -> Option<(usize, usize, bool)> {
         return None;
     }
 
-    // 1. Check for Square RGBA8 (16 bytes per 4x4 block -> 1 byte per pixel)
+    // Check for Square RGBA8 (16 bytes per 4x4 block -> 1 byte per pixel)
     let side_rgba8 = (payload_len as f64).sqrt() as usize;
     if side_rgba8 > 0 && side_rgba8.is_multiple_of(4) && side_rgba8 * side_rgba8 == payload_len {
         return Some((side_rgba8, side_rgba8, true));
     }
 
-    // 2. Check for Square RGB4 (8 bytes per 4x4 block -> 0.5 bytes per pixel)
+    // Check for Square RGB4 (8 bytes per 4x4 block -> 0.5 bytes per pixel)
     let total_pixels_rgb4 = payload_len * 2;
     let side_rgb4 = (total_pixels_rgb4 as f64).sqrt() as usize;
     if side_rgb4 > 0 && side_rgb4.is_multiple_of(4) && side_rgb4 * side_rgb4 == total_pixels_rgb4 {
         return Some((side_rgb4, side_rgb4, false));
     }
 
-    // 3. Check for 2:1 Aspect Ratio RGBA8 (Width = 2 * Height)
+    // Check for 2:1 Aspect Ratio RGBA8 (Width = 2 * Height)
     let h_rgba8 = ((payload_len / 2) as f64).sqrt() as usize;
     if h_rgba8 > 0 && h_rgba8.is_multiple_of(4) && (h_rgba8 * 2) * h_rgba8 == payload_len {
         return Some((h_rgba8 * 2, h_rgba8, true));
     }
 
-    // 4. Check for 2:1 Aspect Ratio RGB4 (Width = 2 * Height)
+    // Check for 2:1 Aspect Ratio RGB4 (Width = 2 * Height)
     let h_rgb4 = ((total_pixels_rgb4 / 2) as f64).sqrt() as usize;
     if h_rgb4 > 0 && h_rgb4.is_multiple_of(4) && (h_rgb4 * 2) * h_rgb4 == total_pixels_rgb4 {
         return Some((h_rgb4 * 2, h_rgb4, false));

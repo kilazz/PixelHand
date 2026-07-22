@@ -131,7 +131,7 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
 
     match search_method {
         SearchMethod::Qc => {
-            // 1. Group and map QC issues on the fly
+            // Group and map QC issues on the fly
             let mut grouped_issues: HashMap<String, Vec<&QcIssueSummary>> = HashMap::new();
             for issue in &state.qc_issues {
                 let filename = Path::new(&issue.path)
@@ -209,7 +209,7 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
             }
         }
         SearchMethod::Inventory => {
-            // 2. Map and filter flat Asset Inventory files on the fly
+            // Map and filter flat Asset Inventory files on the fly
             let filtered_files: Vec<&DuplicateFileSummary> = state
                 .inventory_files
                 .iter()
@@ -287,7 +287,7 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
             }
         }
         _ => {
-            // 3. Map, filter and group duplicate clusters on the fly (using FilteredGroupMatch type)
+            // Map, filter and group duplicate clusters on the fly (using FilteredGroupMatch type)
             let filtered_groups: Vec<FilteredGroupMatch> = state
                 .groups
                 .iter()

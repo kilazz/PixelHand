@@ -169,7 +169,9 @@ async fn scan_and_index_directory(
     let items = generate_analysis_items(&paths, params);
 
     let mut final_records = Vec::with_capacity(items.len());
-    let mut items_to_encode = Vec::new();
+
+    // Store file_size and mtime directly to avoid redundant disk I/O queries later
+    let mut items_to_encode: Vec<(AnalysisItem, u64, i64)> = Vec::new();
     let mut paths_to_prune = std::collections::HashSet::new();
 
     for item in &items {
@@ -215,7 +217,7 @@ async fn scan_and_index_directory(
             }
         }
 
-        items_to_encode.push(item.clone());
+        items_to_encode.push((item.clone(), size, mtime));
     }
 
     if !items_to_encode.is_empty() {
@@ -225,7 +227,8 @@ async fn scan_and_index_directory(
             folder_name
         ));
 
-        let chunks: Vec<&[AnalysisItem]> = items_to_encode.chunks(params.batch_size).collect();
+        let chunks: Vec<&[(AnalysisItem, u64, i64)]> =
+            items_to_encode.chunks(params.batch_size).collect();
         let cancel_token = params.cancel_token.clone();
         let total_items = items_to_encode.len();
         let processed_items = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -247,26 +250,25 @@ async fn scan_and_index_directory(
 
             // Offload CPU-heavy file decoding and ONNX batch encoding to blocking task pools
             let chunk_records_res = tokio::task::spawn_blocking(move || {
-                let loaded_images: Vec<(AnalysisItem, image::DynamicImage)> = chunk_vec
+                let loaded_images: Vec<((AnalysisItem, u64, i64), image::DynamicImage)> = chunk_vec
                     .par_iter()
-                    .filter_map(|item| {
+                    .filter_map(|(item, size, mtime)| {
                         if cancel_token_clone.load(Ordering::Relaxed) {
                             return None;
                         }
 
                         let p = &item.path;
-                        let file_size = fs::metadata(p).map(|m| m.len()).unwrap_or(0);
                         let (width, height) = match imagesize::size(p) {
                             Ok(dim) => (dim.width, dim.height),
                             Err(_) => (0, 0),
                         };
 
-                        let _guard =
-                            if file_size > 10 * 1024 * 1024 || width > 2048 || height > 2048 {
-                                Some(get_decode_semaphore().acquire())
-                            } else {
-                                None
-                            };
+                        // Uses pre-queried size instead of issuing another fs::metadata system call
+                        let _guard = if *size > 10 * 1024 * 1024 || width > 2048 || height > 2048 {
+                            Some(get_decode_semaphore().acquire())
+                        } else {
+                            None
+                        };
 
                         // Select closest target resolution bounds based on model requirements
                         let target_size = match params_ai_model {
@@ -301,11 +303,11 @@ async fn scan_and_index_directory(
                             cb(current as f32 / total_items as f32, current, total_items);
                         }
 
-                        Some((item.clone(), final_img))
+                        Some(((item.clone(), *size, *mtime), final_img))
                     })
                     .collect();
 
-                let (chunk_items, imgs): (Vec<AnalysisItem>, Vec<image::DynamicImage>) =
+                let (chunk_items, imgs): (Vec<(AnalysisItem, u64, i64)>, Vec<image::DynamicImage>) =
                     loaded_images.into_iter().unzip();
                 let mut chunk_records = Vec::new();
 
@@ -315,7 +317,7 @@ async fn scan_and_index_directory(
                         &PreprocessingConfig::for_model(params_ai_model, params_ai_custom_arch),
                     )
                 {
-                    for (item, vector) in chunk_items.into_iter().zip(vectors) {
+                    for ((item, size, mtime), vector) in chunk_items.into_iter().zip(vectors) {
                         let chan_str = match item.analysis_type {
                             AnalysisType::R => "R",
                             AnalysisType::G => "G",
@@ -324,15 +326,6 @@ async fn scan_and_index_directory(
                             AnalysisType::Luminance => "Luminance",
                             _ => "Composite",
                         };
-
-                        let file_meta = fs::metadata(&item.path);
-                        let size = file_meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                        let mtime = file_meta
-                            .and_then(|m| m.modified())
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0);
 
                         let path_str = item.path.to_string_lossy().to_string();
                         let mut hasher = Xxh64::new(0);
@@ -395,6 +388,13 @@ pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGr
 
     let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
 
+    //O(1) HashMap lookup table eliminates the previous O(N^2) linear search bottleneck
+    let mut lookup_map: std::collections::HashMap<(&str, &str), usize> =
+        std::collections::HashMap::with_capacity(records.len());
+    for (idx, r) in records.iter().enumerate() {
+        lookup_map.insert((r.path.as_str(), r.channel.as_str()), idx);
+    }
+
     {
         use futures::StreamExt;
         let query_items: Vec<(usize, Vec<f32>)> = records
@@ -424,9 +424,8 @@ pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGr
             let src_vec = &records[src_idx].vector; // Bypassing LanceDB L2 squared metric inaccuracies
 
             for m in matches {
-                if let Some(target_idx) = records
-                    .iter()
-                    .position(|r| r.path == m.path && r.channel == m.channel)
+                // Collapsed condition and instant O(1) target index resolution
+                if let Some(&target_idx) = lookup_map.get(&(m.path.as_str(), m.channel.as_str()))
                     && target_idx != src_idx
                 {
                     let target_vec = &records[target_idx].vector;

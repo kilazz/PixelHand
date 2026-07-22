@@ -110,7 +110,7 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // 1. Create temporary hard link alongside target path with safely appended suffix
+        // Create temporary hard link alongside target path with safely appended suffix
         let target_filename = target.file_name().unwrap_or_default().to_string_lossy();
         let temp_target = target.with_file_name(format!("{}.ph_tmp_hardlink", target_filename));
 
@@ -129,7 +129,7 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // 2. Atomically replace the original target file with the validated hard link
+        // Atomically replace the original target file with the validated hard link
         if let Err(e) = fs::rename(&temp_target, &target) {
             tracing::error!(
                 "Failed to atomically replace target '{}' with created hard link: {}",
@@ -176,7 +176,7 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // 1. Create temporary reflink alongside target path with safely appended suffix
+        // Create temporary reflink alongside target path with safely appended suffix
         let target_filename = target.file_name().unwrap_or_default().to_string_lossy();
         let temp_target = target.with_file_name(format!("{}.ph_tmp_reflink", target_filename));
 
@@ -195,7 +195,7 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // 2. Atomically replace the original target file with the validated reflink
+        // Atomically replace the original target file with the validated reflink
         if let Err(e) = fs::rename(&temp_target, &target) {
             tracing::error!(
                 "Failed to atomically replace target '{}' with created reflink: {}",

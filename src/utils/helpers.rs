@@ -91,14 +91,14 @@ pub fn discover_files(
     (files, warnings)
 }
 
-/// Computes high-speed xxHash64 hash from file stream using an optimized buffer memory page.
+/// Computes high-speed xxHash64 hash from file stream using a zero-allocation stack buffer.
 pub fn calculate_xxhash(path: &Path) -> std::io::Result<String> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Xxh64::new(0);
 
-    // Configured to a 1 MB buffer chunk instead of 8 MB to protect CPU cache levels
-    // and minimize system RAM footprint during parallel runs inside Rayon thread pools.
-    let mut buffer = vec![0; 1024 * 1024];
+    // Fixed 64 KB stack buffer eliminates heap allocation churn
+    // across parallel Rayon threads and fits perfectly into L1/L2 CPU caches.
+    let mut buffer = [0u8; 64 * 1024];
 
     loop {
         let bytes_read = file.read(&mut buffer)?;

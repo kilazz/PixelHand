@@ -29,7 +29,7 @@ impl ImageFormatLoader for StandardLoader {
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
 
-        // 1. Open reader and automatically guess real image format by Magic Bytes signature
+        // Open reader and automatically guess real image format by Magic Bytes signature
         let mut reader = ImageReader::open(path)
             .context("Failed to open image file")?
             .with_guessed_format()
@@ -42,16 +42,16 @@ impl ImageFormatLoader for StandardLoader {
             .into_decoder()
             .context("Failed to construct image format decoder")?;
 
-        // 2. Extract EXIF orientation metadata natively supported in image 0.25.10
+        // Extract EXIF orientation metadata natively supported in image 0.25.10
         let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
 
         let mut img = DynamicImage::from_decoder(decoder)
             .context("Failed to decode standard image format payload")?;
 
-        // 3. Apply EXIF orientation transforms (auto-rotate/flip)
+        // Apply EXIF orientation transforms (auto-rotate/flip)
         img.apply_orientation(orientation);
 
-        // 4. Handle HDR / 32-bit Float image formats via the tonemapping pipeline
+        // Handle HDR / 32-bit Float image formats via the tonemapping pipeline
         if ext == "hdr" || matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F) {
             let float_img = img.to_rgba32f();
             let width = float_img.width();
@@ -75,7 +75,7 @@ impl ImageFormatLoader for StandardLoader {
             img = DynamicImage::ImageRgba8(ldr_img);
         }
 
-        // 5. Downscale thumbnail if target_size is requested
+        //  Downscale thumbnail if target_size is requested
         if let Some(target) = target_size
             && (img.width() > target || img.height() > target)
         {

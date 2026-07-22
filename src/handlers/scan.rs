@@ -22,6 +22,28 @@ fn compare_partial<T: PartialOrd>(a: T, b: T, asc: bool) -> std::cmp::Ordering {
     if asc { order } else { order.reverse() }
 }
 
+/// Decodes Percent-Encoded URL string sequences (e.g. %20, %23, UTF-8 multi-byte sequences)
+/// into a native valid path string.
+fn decode_url(url: &str) -> String {
+    let mut bytes = Vec::with_capacity(url.len());
+    let mut i = 0;
+    let url_bytes = url.as_bytes();
+    while i < url_bytes.len() {
+        if url_bytes[i] == b'%'
+            && i + 2 < url_bytes.len()
+            && let Ok(hex_str) = std::str::from_utf8(&url_bytes[i + 1..i + 3])
+            && let Ok(b) = u8::from_str_radix(hex_str, 16)
+        {
+            bytes.push(b);
+            i += 3;
+            continue;
+        }
+        bytes.push(url_bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 pub struct ScanController {
     pub ui_weak: slint::Weak<AppWindow>,
     store: AppStateStore,
@@ -160,7 +182,9 @@ impl ScanController {
         if cfg!(windows) && clean_path.starts_with('/') {
             clean_path = &clean_path[1..];
         }
-        let clean_path = clean_path.replace("%20", " ");
+
+        // Decode full percent-encoded URL sequences
+        let clean_path = decode_url(clean_path);
         let p = std::path::Path::new(&clean_path);
 
         if let Some(ui) = self.ui_weak.upgrade() {
