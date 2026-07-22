@@ -51,6 +51,11 @@ impl ViewerController {
             self_clone.tonemap_toggled();
         });
 
+        let self_clone = self.clone();
+        viewport_state.on_inspect_pixel(move |x, y| {
+            self_clone.inspect_pixel(x as u32, y as u32);
+        });
+
         let scan_config = ui.global::<ScanConfig>();
         let self_clone = self.clone();
         scan_config.on_thumbnail_channel_hovered(move |path, channel| {
@@ -86,6 +91,81 @@ impl ViewerController {
 
             self.viewport_settings_changed();
         }
+    }
+
+    fn inspect_pixel(&self, x: u32, y: u32) {
+        let ui = match self.ui_weak.upgrade() {
+            Some(ui) => ui,
+            None => return,
+        };
+
+        let vp = ui.global::<ViewportState>();
+        let orig_path = vp.get_original_meta().path.to_string();
+        let dup_path = vp.get_duplicate_meta().path.to_string();
+        let ui_weak = self.ui_weak.clone();
+
+        tokio::spawn(async move {
+            let orig_img =
+                crate::utils::cache::get_channel_preview_image(&orig_path, "RGB", 0).await;
+            let dup_img = crate::utils::cache::get_channel_preview_image(&dup_path, "RGB", 0).await;
+
+            if let Some(o) = orig_img
+                && x < o.width()
+                && y < o.height()
+            {
+                let p = o.get_pixel(x, y);
+                let r = p[0];
+                let g = p[1];
+                let b = p[2];
+                let a = p[3];
+
+                let hex = format!("#{:02X}{:02X}{:02X}{:02X}", r, g, b, a);
+
+                // Calculate Tangent-Space Normal Vector N = (X, Y, Z)
+                let mut nx = (r as f32 / 255.0) * 2.0 - 1.0;
+                let mut ny = (g as f32 / 255.0) * 2.0 - 1.0;
+                let mut nz = (b as f32 / 255.0) * 2.0 - 1.0;
+                let len = (nx * nx + ny * ny + nz * nz).sqrt();
+                if len > 1e-4 {
+                    nx /= len;
+                    ny /= len;
+                    nz /= len;
+                }
+
+                // Calculate Pixel Delta Difference with duplicate image
+                let diff_str = if let Some(d) = dup_img
+                    && x < d.width()
+                    && y < d.height()
+                {
+                    let dp = d.get_pixel(x, y);
+                    let delta = (p[0].abs_diff(dp[0]) as f32
+                        + p[1].abs_diff(dp[1]) as f32
+                        + p[2].abs_diff(dp[2]) as f32)
+                        / 3.0;
+                    format!("{:.1}% (Δ {:.0})", (delta / 255.0) * 100.0, delta)
+                } else {
+                    "-".to_string()
+                };
+
+                let _ = ui_weak.upgrade_in_event_loop(move |ui| {
+                    let vp = ui.global::<ViewportState>();
+                    let mut insp = vp.get_inspection();
+                    insp.valid = true;
+                    insp.x = x as i32;
+                    insp.y = y as i32;
+                    insp.r_255 = r as i32;
+                    insp.g_255 = g as i32;
+                    insp.b_255 = b as i32;
+                    insp.a_255 = a as i32;
+                    insp.hex_code = hex.into();
+                    insp.norm_x = (nx * 100.0).round() / 100.0;
+                    insp.norm_y = (ny * 100.0).round() / 100.0;
+                    insp.norm_z = (nz * 100.0).round() / 100.0;
+                    insp.pixel_diff = diff_str.into();
+                    vp.set_inspection(insp);
+                });
+            }
+        });
     }
 
     fn thumbnail_channel_hovered(&self, path: &str, channel: &str) {

@@ -40,7 +40,7 @@ export component CompareTab inherits HorizontalLayout {
             color: #ffffff;
         }
 
-        // TOOLBAR 1: Comparison Modes, HDR, Mips & Zoom / Loupe Controls
+        // TOOLBAR 1: Comparison Modes, HDR, Mips, Zoom, Inspector & Loupe Controls
         HorizontalLayout {
             spacing: 8px;
             height: 28px;
@@ -159,6 +159,16 @@ export component CompareTab inherits HorizontalLayout {
             HorizontalLayout {
                 spacing: 4px;
                 alignment: end;
+
+                // Interactive Pixel Inspector Toggle Button
+                CustomButton {
+                    text: "🎯 Inspector";
+                    height: 24px;
+                    primary-color: ViewportState.enable_inspector ? #f0b132 : #474747;
+                    clicked => {
+                        ViewportState.enable_inspector = !ViewportState.enable_inspector;
+                    }
+                }
 
                 // Interactive Loupe (Magnifier 2.5x) Toggle Button
                 CustomButton {

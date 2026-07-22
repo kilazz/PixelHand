@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use crate::qc::rules::{
-    QcImageMetadata, TargetNormalStyle, check_absolute, check_color_space_misconfiguration,
-    check_empty_channels, check_normal_map_integrity, check_normal_map_orientation, check_relative,
-    check_seamless_tiling, check_solid_texture, check_texel_density_oversize,
+    QcImageMetadata, TargetNormalStyle, check_absolute, check_alpha_bleed,
+    check_color_space_misconfiguration, check_empty_channels, check_normal_map_integrity,
+    check_normal_map_orientation, check_relative, check_seamless_tiling, check_solid_texture,
+    check_texel_density_oversize,
 };
 use crate::state::models::{DuplicateFileSummary, QcIssueSummary, ScanParams};
 use crate::utils::helpers::{discover_files, run_scan_pipeline};
@@ -61,6 +62,17 @@ pub async fn run_qc_scan_internal(params: ScanParams) -> Result<Vec<QcIssueSumma
                             details,
                         });
                     }
+                }
+
+                // Alpha Bleed (Edge Padding) check
+                if params.qc.qc_check_alpha
+                    && let Some((issue, details)) = check_alpha_bleed(p)
+                {
+                    file_issues.push(QcIssueSummary {
+                        path: p.to_string_lossy().to_string(),
+                        issue,
+                        details,
+                    });
                 }
 
                 // Color Space Misconfiguration check

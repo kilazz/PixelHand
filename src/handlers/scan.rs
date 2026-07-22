@@ -584,51 +584,86 @@ impl ScanController {
                 return;
             }
 
-            let (max_file_len, max_path_len, has_qc) = self.store.read(|state| {
-                let mut f_len = 4;
-                let mut p_len = 4;
-                for group in &state.groups {
-                    for file in &group.files {
-                        let name = std::path::Path::new(&file.path)
+            let scan_config = ui.global::<ScanConfig>();
+
+            self.store.read(|state| {
+                if !state.inventory_files.is_empty() {
+                    // --- Inventory Mode Column Calculation ---
+                    let mut max_format_len = 6;     // "FORMAT"
+                    let mut max_dim_len = 10;       // "DIMENSIONS"
+                    let mut max_mips_len = 7;       // "MIPMAPS"
+                    let mut max_cube_len = 7;       // "CUBEMAP"
+                    let mut max_size_len = 4;       // "SIZE"
+                    let mut max_path_len = 4;       // "PATH"
+
+                    for file in &state.inventory_files {
+                        max_format_len = max_format_len.max(file.compression_format.chars().count());
+                        let dim_str = format!("{} x {}", file.width, file.height);
+                        max_dim_len = max_dim_len.max(dim_str.chars().count());
+                        max_mips_len = max_mips_len.max(file.mipmap_count.to_string().chars().count());
+                        max_cube_len = max_cube_len.max(if file.is_cubemap { 3 } else { 2 });
+                        let size_str = crate::utils::helpers::format_size(file.size);
+                        max_size_len = max_size_len.max(size_str.chars().count());
+                        max_path_len = max_path_len.max(file.path.chars().count());
+                    }
+
+                    let format_w = (max_format_len as f32 * 7.5) + 30.0;
+                    let dim_w = (max_dim_len as f32 * 7.5) + 24.0;
+                    let mips_w = (max_mips_len as f32 * 7.5) + 30.0;
+                    let cube_w = (max_cube_len as f32 * 7.5) + 30.0;
+                    let size_w = (max_size_len as f32 * 7.5) + 24.0;
+                    let path_w = (max_path_len as f32 * 6.5) + 20.0;
+
+                    scan_config.set_col_format_w(format_w.clamp(140.0, 600.0));
+                    scan_config.set_col_dimensions_w(dim_w.clamp(90.0, 300.0));
+                    scan_config.set_col_mipmaps_w(mips_w.clamp(75.0, 150.0));
+                    scan_config.set_col_cubemap_w(cube_w.clamp(75.0, 150.0));
+                    scan_config.set_col_size_w(size_w.clamp(80.0, 200.0));
+                    scan_config.set_col_path_w(path_w.clamp(150.0, 1000.0));
+
+                    self.notifier.notify_info(&format!(
+                        "Inventory columns auto-resized. FORMAT: {:.0}px, DIM: {:.0}px, PATH: {:.0}px",
+                        format_w, dim_w, path_w
+                    ));
+                } else {
+                    // --- Duplicates / QC Mode Column Calculation ---
+                    let mut f_len = 4;
+                    let mut p_len = 4;
+                    let has_qc = !state.qc_issues.is_empty();
+
+                    for group in &state.groups {
+                        for file in &group.files {
+                            let name = std::path::Path::new(&file.path)
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy();
+                            f_len = f_len.max(name.chars().count());
+                            p_len = p_len.max(file.path.chars().count());
+                        }
+                    }
+                    for issue in &state.qc_issues {
+                        let name = std::path::Path::new(&issue.path)
                             .file_name()
                             .unwrap_or_default()
                             .to_string_lossy();
                         f_len = f_len.max(name.chars().count());
-                        p_len = p_len.max(file.path.chars().count());
+                        p_len = p_len.max(issue.path.chars().count());
                     }
+
+                    let file_w = (f_len as f32 * 7.2) + 68.0;
+                    let score_w = if has_qc { 230.0f32 } else { 80.0f32 };
+                    let path_w = (p_len as f32 * 6.5) + 20.0;
+
+                    scan_config.set_col_file_w(file_w.clamp(120.0, 600.0));
+                    scan_config.set_col_score_w(score_w);
+                    scan_config.set_col_path_w(path_w.clamp(150.0, 800.0));
+
+                    self.notifier.notify_info(&format!(
+                        "Columns auto-resized. FILE: {:.0}px, SCORE: {:.0}px, PATH: {:.0}px",
+                        file_w, score_w, path_w
+                    ));
                 }
-                for issue in &state.qc_issues {
-                    let name = std::path::Path::new(&issue.path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy();
-                    f_len = f_len.max(name.chars().count());
-                    p_len = p_len.max(issue.path.chars().count());
-                }
-                for file in &state.inventory_files {
-                    let name = std::path::Path::new(&file.path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy();
-                    f_len = f_len.max(name.chars().count());
-                    p_len = p_len.max(file.path.chars().count());
-                }
-                (f_len, p_len, !state.qc_issues.is_empty())
             });
-
-            let file_w = (max_file_len as f32 * 7.2) + 68.0;
-            let score_w = if has_qc { 230.0f32 } else { 80.0f32 };
-            let path_w = (max_path_len as f32 * 6.5) + 20.0;
-
-            let scan_config = ui.global::<ScanConfig>();
-            scan_config.set_col_file_w(file_w.clamp(120.0, 600.0));
-            scan_config.set_col_score_w(score_w);
-            scan_config.set_col_path_w(path_w.clamp(150.0, 800.0));
-
-            self.notifier.notify_info(&format!(
-                "Columns auto-resized. FILE: {:.0}px, SCORE: {:.0}px, PATH: {:.0}px",
-                file_w, score_w, path_w
-            ));
         }
     }
 
@@ -638,11 +673,11 @@ impl ScanController {
             scan_config.set_col_file_w(320.0);
             scan_config.set_col_score_w(80.0);
             scan_config.set_col_path_w(380.0);
-            scan_config.set_col_format_w(110.0);
+            scan_config.set_col_format_w(220.0);
             scan_config.set_col_dimensions_w(110.0);
-            scan_config.set_col_mipmaps_w(75.0);
-            scan_config.set_col_cubemap_w(75.0);
-            scan_config.set_col_size_w(85.0);
+            scan_config.set_col_mipmaps_w(80.0);
+            scan_config.set_col_cubemap_w(80.0);
+            scan_config.set_col_size_w(90.0);
             self.notifier.notify_info("Column sizes reset to defaults.");
         }
     }

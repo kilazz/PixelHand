@@ -437,6 +437,74 @@ pub fn check_empty_channels(path: &Path) -> Option<(String, String)> {
     None
 }
 
+/// Checks transparent boundary pixels for missing alpha dilation/padding (Alpha Bleed).
+/// Prevents dark outline/seam artifacts when mipmaps are filtered in game engines.
+pub fn check_alpha_bleed(path: &Path) -> Option<(String, String)> {
+    let img = crate::format_loaders::open_image_with_dds_fallback(path, Some(256), None).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+
+    if w < 4 || h < 4 {
+        return None;
+    }
+
+    let mut has_transparent = false;
+    let mut unpadded_edge_pixels = 0u64;
+    let mut total_edge_pixels = 0u64;
+
+    // 8-neighbor offsets
+    let dx = [-1, 0, 1, -1, 1, -1, 0, 1];
+    let dy = [-1, -1, -1, 0, 0, 1, 1, 1];
+
+    for y in 1..(h - 1) {
+        for x in 1..(w - 1) {
+            let px = rgba.get_pixel(x, y);
+
+            // Look for fully transparent boundary pixels (Alpha < 10)
+            if px[3] < 10 {
+                has_transparent = true;
+
+                // Check if adjacent to an opaque pixel (Alpha > 200)
+                let mut is_edge = false;
+                for i in 0..8 {
+                    let nx = (x as i32 + dx[i]) as u32;
+                    let ny = (y as i32 + dy[i]) as u32;
+                    if rgba.get_pixel(nx, ny)[3] > 200 {
+                        is_edge = true;
+                        break;
+                    }
+                }
+
+                if is_edge {
+                    total_edge_pixels += 1;
+                    // Check if transparent boundary pixel is unpadded black RGB(0,0,0)
+                    if px[0] < 5 && px[1] < 5 && px[2] < 5 {
+                        unpadded_edge_pixels += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    if !has_transparent || total_edge_pixels < 10 {
+        return None;
+    }
+
+    let unpadded_ratio = unpadded_edge_pixels as f32 / total_edge_pixels as f32;
+
+    if unpadded_ratio > 0.40 {
+        return Some((
+            "Missing Alpha Bleed (Edge Padding)".to_string(),
+            format!(
+                "{:.0}% of transparent boundary pixels are unpadded black RGB(0,0,0). Will cause dark outline artifacts when mipmapped in game engines.",
+                unpadded_ratio * 100.0
+            ),
+        ));
+    }
+
+    None
+}
+
 /// Analyzes Green channel gradients to verify if normal map layout matches the target pipeline (DirectX vs OpenGL)
 pub fn check_normal_map_orientation(
     path: &Path,

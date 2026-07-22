@@ -14,6 +14,7 @@ import {
     ResultsRow,
     SelectedFile,
     GridRow,
+    PixelInspection,
     SearchMethod,
     ExecutionProvider,
     AiModelType,
@@ -206,6 +207,23 @@ export global ViewportState {
     // Interactive Loupe (Magnifier) Toggle
     in-out property <bool> enable_loupe: false;
 
+    // Interactive Pixel Inspector HUD
+    in-out property <bool> enable_inspector: false;
+    in-out property <PixelInspection> inspection: {
+        valid: false,
+        x: 0,
+        y: 0,
+        r_255: 0,
+        g_255: 0,
+        b_255: 0,
+        a_255: 0,
+        hex_code: "#000000FF",
+        norm_x: 0.0,
+        norm_y: 0.0,
+        norm_z: 1.0,
+        pixel_diff: "-"
+    };
+
     // Viewport channel-isolation layers
     in-out property <bool> active_r: false;
     in-out property <bool> active_g: false;
@@ -265,6 +283,7 @@ export global ViewportState {
     callback compare_mode_changed();
     callback active_frame_changed();
     callback tonemap_toggled();
+    callback inspect_pixel(int, int);
 }
 
 export global Diagnostics {

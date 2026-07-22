@@ -78,6 +78,21 @@ export struct GridRow {
                 items: [ResultsRow],
             }
 
+export struct PixelInspection {
+                valid: bool,
+                x: int,
+                y: int,
+                r_255: int,
+                g_255: int,
+                b_255: int,
+                a_255: int,
+                hex_code: string,
+                norm_x: float,
+                norm_y: float,
+                norm_z: float,
+                pixel_diff: string,
+            }
+
 // ==========================================
 // --- GROUPED CONFIGURATION STRUCTURES -----
 // ==========================================

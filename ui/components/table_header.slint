@@ -134,7 +134,7 @@ export component TableHeader inherits Rectangle {
                 background: format_split.has-hover ? #4e5058 : transparent;
                 format_split := TouchArea {
                     mouse-cursor: col-resize;
-                    moved => { if (self.pressed) { ScanConfig.col_format_w = (ScanConfig.col_format_w + self.mouse-x - self.pressed-x).clamp(50px, 300px); } }
+                    moved => { if (self.pressed) { ScanConfig.col_format_w = (ScanConfig.col_format_w + self.mouse-x - self.pressed-x).clamp(80px, 600px); } }
                 }
             }
 
@@ -151,6 +151,8 @@ export component TableHeader inherits Rectangle {
                         font-size: 11px;
                         font-weight: 700;
                         vertical-alignment: center;
+                        horizontal-alignment: center;
+                        width: 100%;
                     }
                 }
             }
@@ -233,6 +235,8 @@ export component TableHeader inherits Rectangle {
                         font-size: 11px;
                         font-weight: 700;
                         vertical-alignment: center;
+                        horizontal-alignment: center;
+                        width: 100%;
                     }
                 }
             }

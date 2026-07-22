@@ -7,7 +7,7 @@ export component InteractiveCompareViewport inherits Rectangle {
     background: #111214;
     clip: true;
 
-    // Interactive TouchArea handling panning, zooming, and magnifier loupe tracking
+    // Interactive TouchArea handling panning, zooming, magnifier loupe tracking & pixel inspection
     main_ta := TouchArea {
         property <length> pressed-pan-x;
         property <length> pressed-pan-y;
@@ -33,6 +33,25 @@ export component InteractiveCompareViewport inherits Rectangle {
             if (self.enabled && self.pressed) {
                 ViewportState.pan_x = self.pressed-pan-x + (self.mouse-x - self.pressed-x);
                 ViewportState.pan_y = self.pressed-pan-y + (self.mouse-y - self.pressed-y);
+            }
+
+            // Real-time Pixel Inspector coordinate sampling
+            if (ViewportState.enable_inspector) {
+                let img_w = ViewportState.viewer.fit_to_window ? root.width / 2 : (ViewportState.sprite_width * 1px * ViewportState.zoom_factor);
+                let img_h = ViewportState.viewer.fit_to_window ? root.height : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
+                let img_x = root.width / 4 - img_w / 2 + ViewportState.pan_x;
+                let img_y = root.height / 2 - img_h / 2 + ViewportState.pan_y;
+
+                let scale = ViewportState.viewer.fit_to_window ? (img_w / Math.max(1px, ViewportState.sprite_width * 1px)) : ViewportState.zoom_factor;
+                let rel_x = (self.mouse-x - img_x) / Math.max(0.001, scale);
+                let rel_y = (self.mouse-y - img_y) / Math.max(0.001, scale);
+
+                let px = Math.round(rel_x / 1px);
+                let py = Math.round(rel_y / 1px);
+
+                if (px >= 0 && py >= 0) {
+                    ViewportState.inspect_pixel(px, py);
+                }
             }
         }
 
@@ -347,6 +366,65 @@ export component InteractiveCompareViewport inherits Rectangle {
             height: ViewportState.viewer.fit_to_window ? (parent.height * ViewportState.zoom_factor) : (ViewportState.sprite_height * 1px * ViewportState.zoom_factor);
             x: parent.width / 2 - self.width / 2 + ViewportState.pan_x;
             y: parent.height / 2 - self.height / 2 + ViewportState.pan_y;
+        }
+    }
+
+    // =========================================================================
+    // PIXEL INSPECTOR OVERLAY HUD
+    // =========================================================================
+    if ViewportState.enable_inspector && ViewportState.inspection.valid: Rectangle {
+        x: 12px;
+        y: 12px;
+        width: 220px;
+        height: 125px;
+        background: #18191cb0;
+        border-color: #f0b132;
+        border-width: 1.5px;
+        border-radius: 6px;
+
+        VerticalLayout {
+            padding: 8px;
+            spacing: 3px;
+
+            HorizontalLayout {
+                alignment: space-between;
+                Text {
+                    text: "Pixel (" + ViewportState.inspection.x + ", " + ViewportState.inspection.y + ")";
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: #ffffff;
+                }
+
+                Text {
+                    text: ViewportState.inspection.hex_code;
+                    font-size: 11px;
+                    font-weight: 700;
+                    color: #f0b132;
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: #353535;
+            }
+
+            Text {
+                text: "RGBA: [" + ViewportState.inspection.r_255 + ", " + ViewportState.inspection.g_255 + ", " + ViewportState.inspection.b_255 + ", " + ViewportState.inspection.a_255 + "]";
+                font-size: 10px;
+                color: #dcddde;
+            }
+
+            Text {
+                text: "Normal: (" + ViewportState.inspection.norm_x + ", " + ViewportState.inspection.norm_y + ", " + ViewportState.inspection.norm_z + ")";
+                font-size: 10px;
+                color: #5865f2;
+            }
+
+            Text {
+                text: "Diff ΔE: " + ViewportState.inspection.pixel_diff;
+                font-size: 10px;
+                color: #f23f43;
+            }
         }
     }
 }

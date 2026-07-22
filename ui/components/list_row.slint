@@ -5,7 +5,6 @@ import { ResultsRow, SearchMethod } from "../structs.slint";
 import { InteractiveThumbnail } from "./thumbnail.slint";
 
 export component ListRow inherits Rectangle {
-    // Decoupled properties passed as inputs
     in property <ResultsRow> row-data;
     in property <length> list-preview-size: 40px;
     in property <bool> enable-previews: true;
@@ -16,20 +15,18 @@ export component ListRow inherits Rectangle {
     in property <length> col-file-w: 320px;
     in property <length> col-score-w: 80px;
     in property <length> col-path-w: 380px;
-    in property <length> col-format-w: 110px;
+    in property <length> col-format-w: 220px;
     in property <length> col-dimensions-w: 110px;
-    in property <length> col-mipmaps-w: 75px;
-    in property <length> col-cubemap-w: 75px;
-    in property <length> col-size-w: 85px;
+    in property <length> col-mipmaps-w: 80px;
+    in property <length> col-cubemap-w: 80px;
+    in property <length> col-size-w: 90px;
 
-    // Callbacks to emit context events to parent controllers
     callback row_clicked(bool, int, string);
     callback checkbox_toggled();
     callback right_clicked(length, length);
     callback channel_hovered(string, string);
     callback delete_group_clicked(int);
 
-    // Fixed height to ensure ListView virtualization works correctly
     height: root.list-preview-size + 8px;
     background: row-data.is_header ? #1e1f22 : (row-data.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
     border-color: #1f2023;
@@ -50,7 +47,6 @@ export component ListRow inherits Rectangle {
     if row-data.is_header: Rectangle {
         background: transparent;
 
-        // Click anywhere else to expand/collapse
         header_ta := TouchArea {
             width: 100%;
             height: 100%;
@@ -71,7 +67,6 @@ export component ListRow inherits Rectangle {
                 alignment: start;
                 cross-axis-alignment: center;
 
-                // Expand/Collapse arrow icon
                 Text {
                     text: row-data.is_checked ? "▶" : "▼";
                     color: #949ba4;
@@ -79,7 +74,6 @@ export component ListRow inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                // Inline Trash action placed right at the front for ergonomic reasons
                 trash_ta := TouchArea {
                     width: 22px;
                     height: 22px;
@@ -99,7 +93,6 @@ export component ListRow inherits Rectangle {
                     }
                 }
 
-                // Group details label
                 Text {
                     text: row-data.is_qc ? ("QC Issue: " + row-data.hash_or_issue) : ("Group #" + (row-data.group_index + 1) + " (Hash: " + row-data.hash_or_issue + ")");
                     color: header_ta.has-hover ? #ffffff : #949ba4;
@@ -217,13 +210,20 @@ export component ListRow inherits Rectangle {
 
                 if root.search-method == SearchMethod.inventory: HorizontalLayout {
                     spacing: 0px;
-                    HorizontalLayout {
+
+                    // FORMAT (Clip & Left align)
+                    Rectangle {
                         width: root.col-format-w;
+                        clip: true;
                         Text {
                             text: row-data.format_str;
                             color: #dcddde;
                             font-size: 11px;
                             vertical-alignment: center;
+                            horizontal-alignment: left;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
                         }
                     }
 
@@ -231,13 +231,19 @@ export component ListRow inherits Rectangle {
                         width: 8px;
                     }
 
-                    HorizontalLayout {
+                    // DIMENSIONS (Centered)
+                    Rectangle {
                         width: root.col-dimensions-w;
+                        clip: true;
                         Text {
                             text: row-data.dimensions_str;
                             color: #dcddde;
                             font-size: 11px;
                             vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
                         }
                     }
 
@@ -245,13 +251,19 @@ export component ListRow inherits Rectangle {
                         width: 8px;
                     }
 
-                    HorizontalLayout {
+                    // MIPMAPS (Centered)
+                    Rectangle {
                         width: root.col-mipmaps-w;
+                        clip: true;
                         Text {
                             text: row-data.mipmaps_str;
                             color: #dcddde;
                             font-size: 11px;
                             vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
                         }
                     }
 
@@ -259,14 +271,20 @@ export component ListRow inherits Rectangle {
                         width: 8px;
                     }
 
-                    HorizontalLayout {
+                    // CUBEMAP (Centered)
+                    Rectangle {
                         width: root.col-cubemap-w;
+                        clip: true;
                         Text {
                             text: row-data.cubemap_str;
                             color: row-data.cubemap_str == "YES" ? #f0b132 : #dcddde;
                             font-weight: row-data.cubemap_str == "YES" ? 700 : 400;
                             font-size: 11px;
                             vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
                         }
                     }
 
@@ -274,13 +292,19 @@ export component ListRow inherits Rectangle {
                         width: 8px;
                     }
 
-                    HorizontalLayout {
+                    // SIZE (Centered)
+                    Rectangle {
                         width: root.col-size-w;
+                        clip: true;
                         Text {
                             text: row-data.size_str;
                             color: #dcddde;
                             font-size: 11px;
                             vertical-alignment: center;
+                            horizontal-alignment: center;
+                            overflow: elide;
+                            width: 100%;
+                            height: 100%;
                         }
                     }
 
@@ -288,14 +312,19 @@ export component ListRow inherits Rectangle {
                         width: 8px;
                     }
 
-                    HorizontalLayout {
+                    // PATH (Left align, expand)
+                    Rectangle {
                         horizontal-stretch: 1;
+                        clip: true;
                         Text {
                             text: row-data.path;
                             color: #5865f2;
                             font-size: 11px;
                             vertical-alignment: center;
+                            horizontal-alignment: left;
                             overflow: elide;
+                            width: 100%;
+                            height: 100%;
                         }
                     }
                 }
