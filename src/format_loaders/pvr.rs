@@ -30,8 +30,13 @@ pub fn decode_pvr_bytes(bytes: &[u8]) -> Result<DynamicImage> {
             let pvr_format = bytes[16];
             let data_offset = 52;
 
-            if width == 0 || height == 0 {
-                return Err(anyhow!("Invalid PVR v2 dimensions {}x{}", width, height));
+            // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
+            if width == 0 || height == 0 || width > 16384 || height > 16384 {
+                return Err(anyhow!(
+                    "Invalid or oversized PVR v2 dimensions: {}x{} (max 16384x16384)",
+                    width,
+                    height
+                ));
             }
 
             let total_pixels = (width * height) as usize;
@@ -71,8 +76,13 @@ pub fn decode_pvr_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let width = u32::from_le_bytes(bytes[28..32].try_into()?);
     let meta_size = u32::from_le_bytes(bytes[48..52].try_into()?);
 
-    if width == 0 || height == 0 {
-        return Err(anyhow!("Invalid PVR v3 dimensions {}x{}", width, height));
+    // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
+    if width == 0 || height == 0 || width > 16384 || height > 16384 {
+        return Err(anyhow!(
+            "Invalid or oversized PVR v3 dimensions: {}x{} (max 16384x16384)",
+            width,
+            height
+        ));
     }
 
     let data_offset = (52 + meta_size) as usize;

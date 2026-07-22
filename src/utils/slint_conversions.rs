@@ -229,7 +229,9 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
                         .to_lowercase()
                         .contains("uncompressed");
                     let matches_uncompressed = !filter_uncompressed || is_uncompressed_bool;
-                    let is_missing_mips_bool = file.mipmap_count <= 1;
+
+                    let is_missing_mips_bool =
+                        file.mipmap_count <= 1 && file.width >= 64 && file.height >= 64;
                     let matches_missing_mips = !filter_missing_mips || is_missing_mips_bool;
                     let matches_cubemaps = !filter_cubemaps || file.is_cubemap;
 
@@ -304,7 +306,9 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
                             .to_lowercase()
                             .contains("uncompressed");
                         let matches_uncompressed = !filter_uncompressed || is_uncompressed_bool;
-                        let is_missing_mips_bool = file.mipmap_count <= 1;
+
+                        let is_missing_mips_bool =
+                            file.mipmap_count <= 1 && file.width >= 64 && file.height >= 64;
                         let matches_missing_mips = !filter_missing_mips || is_missing_mips_bool;
                         let matches_cubemaps = !filter_cubemaps || file.is_cubemap;
                         let matches_similarity = is_best || file.similarity >= min_sim;

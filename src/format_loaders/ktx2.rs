@@ -24,9 +24,10 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let pixel_height = u32::from_le_bytes(bytes[24..28].try_into()?).max(1);
     let level_count = u32::from_le_bytes(bytes[36..40].try_into()?).max(1);
 
-    if pixel_width == 0 || pixel_height == 0 {
+    // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
+    if pixel_width == 0 || pixel_height == 0 || pixel_width > 16384 || pixel_height > 16384 {
         return Err(anyhow!(
-            "Invalid KTX2 dimensions {}x{}",
+            "Invalid or oversized KTX2 dimensions: {}x{} (max 16384x16384)",
             pixel_width,
             pixel_height
         ));

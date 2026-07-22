@@ -36,7 +36,7 @@ impl AiModelType {
             Self::ClipVitB32 => 512,
             Self::ClipVitL14 | Self::SiglipBase | Self::DinoV2Base | Self::Siglip2Base => 768,
             Self::SiglipLarge => 1024,
-            Self::Llm2ClipBase => 1280,
+            Self::Llm2ClipBase => 512,
             Self::Custom => 512,
         }
     }

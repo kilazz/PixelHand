@@ -155,30 +155,37 @@ impl ScanController {
     }
 
     fn handle_path_dropped(&self, path_str: &str) {
-        let p = std::path::Path::new(path_str);
+        // Clean up OS-specific URI prefixes and URL-encoded characters from Drag&Drop operations
+        let mut clean_path = path_str.strip_prefix("file://").unwrap_or(path_str);
+        if cfg!(windows) && clean_path.starts_with('/') {
+            clean_path = &clean_path[1..];
+        }
+        let clean_path = clean_path.replace("%20", " ");
+        let p = std::path::Path::new(&clean_path);
+
         if let Some(ui) = self.ui_weak.upgrade() {
             let scan_config = ui.global::<ScanConfig>();
             if p.is_dir() {
                 let mut paths = scan_config.get_paths();
                 if paths.dir_a.trim().is_empty() {
-                    paths.dir_a = path_str.into();
+                    paths.dir_a = clean_path.clone().into();
                     self.notifier
-                        .notify_info(&format!("Folder A set via Drag-and-Drop: {}", path_str));
+                        .notify_info(&format!("Folder A set via Drag-and-Drop: {}", clean_path));
                 } else {
-                    paths.dir_b = path_str.into();
+                    paths.dir_b = clean_path.clone().into();
                     self.notifier
-                        .notify_info(&format!("Folder B set via Drag-and-Drop: {}", path_str));
+                        .notify_info(&format!("Folder B set via Drag-and-Drop: {}", clean_path));
                 }
                 scan_config.set_paths(paths);
                 utils::settings::save_settings(&scan_config, &ui.global::<ViewportState>());
             } else if p.is_file() {
                 let mut paths = scan_config.get_paths();
-                paths.query_text = path_str.into();
+                paths.query_text = clean_path.clone().into();
                 scan_config.set_paths(paths);
                 scan_config.set_search_method(SearchMethod::Ai);
                 self.notifier.notify_info(&format!(
                     "Reference Image set via Drag-and-Drop: {}",
-                    path_str
+                    clean_path
                 ));
                 utils::settings::save_settings(&scan_config, &ui.global::<ViewportState>());
             }
@@ -372,26 +379,41 @@ impl ScanController {
                     if !params_for_task.paths.query_text.trim().is_empty() {
                         match crate::ai::scanner::run_ai_search(params_for_task_clone).await {
                             Ok(matches) => {
-                                // Map semantic AI results to inventory format for simpler direct layout reuse
-                                let mapped: Vec<crate::state::models::DuplicateFileSummary> =
-                                    matches
-                                        .into_iter()
-                                        .map(|res| crate::state::models::DuplicateFileSummary {
+                                // Maps semantic matches and extracts actual metadata to populate full UI features
+                                let mut mapped: Vec<crate::state::models::DuplicateFileSummary> = matches
+                                    .into_iter()
+                                    .map(|res| {
+                                        let qc_meta = crate::qc::rules::QcImageMetadata::extract_or_fallback(std::path::Path::new(&res.path));
+                                        crate::state::models::DuplicateFileSummary {
                                             path: res.path,
-                                            size: 0,
-                                            width: 0,
-                                            height: 0,
-                                            format_str: String::new(),
-                                            compression_format: String::new(),
-                                            color_space: String::new(),
-                                            has_alpha: false,
-                                            bit_depth: 8,
-                                            mipmap_count: 1,
-                                            is_cubemap: false,
+                                            size: qc_meta.file_size,
+                                            width: qc_meta.width as usize,
+                                            height: qc_meta.height as usize,
+                                            format_str: qc_meta.format_str,
+                                            compression_format: qc_meta.compression_format,
+                                            color_space: qc_meta.color_space,
+                                            has_alpha: qc_meta.has_alpha,
+                                            bit_depth: qc_meta.bit_depth,
+                                            mipmap_count: qc_meta.mipmap_count,
+                                            is_cubemap: qc_meta.is_cubemap,
                                             similarity: res.similarity,
-                                        })
-                                        .collect();
-                                Ok((Vec::new(), Vec::new(), mapped))
+                                        }
+                                    })
+                                    .collect();
+
+                                // Ensuring top match stays at the top of the group visually
+                                mapped.sort_by(|a, b| {
+                                    b.similarity
+                                        .partial_cmp(&a.similarity)
+                                        .unwrap_or(std::cmp::Ordering::Equal)
+                                });
+
+                                // Package into a single dummy group to trigger UI Rendering seamlessly
+                                let group = crate::state::models::DuplicateGroupSummary {
+                                    hash: "Semantic Search Matches".to_string(),
+                                    files: mapped,
+                                };
+                                Ok((vec![group], Vec::new(), Vec::new()))
                             }
                             Err(e) => Err(anyhow::anyhow!("AI Semantic Search failed: {}", e)),
                         }
@@ -728,6 +750,11 @@ impl ScanController {
                         state
                             .inventory_files
                             .sort_by(|a, b| compare_ord(a.mipmap_count, b.mipmap_count, asc));
+                    }
+                    SortColumn::Cubemap => {
+                        state
+                            .inventory_files
+                            .sort_by(|a, b| compare_ord(a.is_cubemap, b.is_cubemap, asc));
                     }
                     _ => {}
                 }

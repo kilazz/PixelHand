@@ -32,8 +32,13 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let w = u32::from(bytes[7]) | (u32::from(bytes[8]) << 8) | (u32::from(bytes[9]) << 16);
     let h = u32::from(bytes[10]) | (u32::from(bytes[11]) << 8) | (u32::from(bytes[12]) << 16);
 
-    if w == 0 || h == 0 {
-        return Err(anyhow!("Invalid ASTC dimensions {}x{}", w, h));
+    // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
+    if w == 0 || h == 0 || w > 16384 || h > 16384 {
+        return Err(anyhow!(
+            "Invalid or oversized ASTC dimensions: {}x{} (max 16384x16384)",
+            w,
+            h
+        ));
     }
 
     let payload = &bytes[16..];

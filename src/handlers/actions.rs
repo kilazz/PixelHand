@@ -387,9 +387,20 @@ impl ActionsController {
                             let group_idx_us = group_idx as usize;
                             if group_idx_us < state.groups.len() {
                                 state.groups.remove(group_idx_us);
+
+                                let mut new_collapsed = std::collections::HashSet::new();
+                                for &idx in &state.collapsed_groups {
+                                    if idx < group_idx {
+                                        new_collapsed.insert(idx);
+                                    } else if idx > group_idx {
+                                        new_collapsed.insert(idx - 1);
+                                    }
+                                }
+                                state.collapsed_groups = new_collapsed;
                             }
                         } else if let Some(ref target_issue) = target_issue_type {
                             state.qc_issues.retain(|r| &r.issue != target_issue);
+                            state.collapsed_groups.clear();
                         }
                     });
 

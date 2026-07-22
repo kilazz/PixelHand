@@ -21,6 +21,16 @@ pub fn decode_qoi_bytes(bytes: &[u8]) -> Result<DynamicImage> {
 
     let width = u32::from_be_bytes(bytes[4..8].try_into()?);
     let height = u32::from_be_bytes(bytes[8..12].try_into()?);
+
+    // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
+    if width == 0 || height == 0 || width > 16384 || height > 16384 {
+        return Err(anyhow!(
+            "Invalid or oversized QOI dimensions: {}x{} (max 16384x16384)",
+            width,
+            height
+        ));
+    }
+
     let _channels = bytes[12];
     let _colorspace = bytes[13];
 

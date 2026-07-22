@@ -29,7 +29,8 @@ export component ListRow inherits Rectangle {
     callback channel_hovered(string, string);
     callback delete_group_clicked(int);
 
-    height: row-data.is_header ? 28px : (root.list-preview-size + 8px);
+    // Fixed height to ensure ListView virtualization works correctly
+    height: root.list-preview-size + 8px;
     background: row-data.is_header ? #1e1f22 : (row-data.is_best ? #2c3e50 : (main_row_ta.has-hover ? #393c41 : #2b2d31));
     border-color: #1f2023;
     border-width: 1px;

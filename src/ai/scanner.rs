@@ -124,7 +124,7 @@ async fn scan_and_index_directory(
 
     let db_dir = app_dir
         .join(".lancedb_cache")
-        .join(format!("{}_{:016x}", folder_name, folder_hash));
+        .join(format!("{}_dim{}_{:016x}", folder_name, dim, folder_hash));
 
     let model_dir = if params.ai.ai_model == AiModelType::Custom {
         PathBuf::from(&folder_name)
@@ -390,7 +390,7 @@ async fn scan_and_index_directory(
 pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGroupSummary>> {
     let (db, _engine, records) = scan_and_index_directory(&params).await?;
 
-    let dist_threshold = 1.0 - (params.similarity / 100.0);
+    let sim_threshold = params.similarity / 100.0;
     let mut uf = UnionFind::new(records.len());
 
     let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
@@ -421,14 +421,25 @@ pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGr
             }
 
             let (src_idx, matches) = res?;
+            let src_vec = &records[src_idx].vector; // Bypassing LanceDB L2 squared metric inaccuracies
+
             for m in matches {
                 if let Some(target_idx) = records
                     .iter()
                     .position(|r| r.path == m.path && r.channel == m.channel)
                     && target_idx != src_idx
-                    && m.distance <= dist_threshold
                 {
-                    uf.union(src_idx, target_idx);
+                    let target_vec = &records[target_idx].vector;
+                    // Calculate exact mathematical Dot Product (Cosine Similarity) ensuring 100% precision
+                    let dot_product: f32 = src_vec
+                        .iter()
+                        .zip(target_vec.iter())
+                        .map(|(a, b)| a * b)
+                        .sum();
+
+                    if dot_product >= sim_threshold {
+                        uf.union(src_idx, target_idx);
+                    }
                 }
             }
         }
@@ -548,14 +559,17 @@ pub async fn run_ai_search(params: ScanParams) -> Result<Vec<AiSearchResultSumma
         engine.encode_text(&params.paths.query_text)?
     };
 
+    // Increased max extraction limits to properly fill UI tables on Semantic queries
     let search_results = db
-        .search_similarity(&query_vector, 20, Some(nprobes), Some(refine_factor))
+        .search_similarity(&query_vector, 250, Some(nprobes), Some(refine_factor))
         .await?;
 
     let results = search_results
         .into_iter()
         .map(|r| {
-            let similarity = (1.0 - r.distance) * 100.0;
+            // LanceDB natively returns squared L2 distance (D^2).
+            // Formula: D^2 = 2 - 2 * CosineSimilarity => CosineSimilarity = 1.0 - (D^2 / 2.0)
+            let similarity = (1.0 - (r.distance / 2.0)).clamp(0.0, 1.0) * 100.0;
             AiSearchResultSummary {
                 path: r.path,
                 similarity,

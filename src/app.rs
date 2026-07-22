@@ -300,11 +300,17 @@ pub fn run_gui() -> Result<()> {
     let flipbook_timer = slint::Timer::default();
     let app_weak_flipbook = app.as_weak();
     let mut continuous_time_ms = 0.0f64;
+    let mut last_tick = std::time::Instant::now();
 
     flipbook_timer.start(
         slint::TimerMode::Repeated,
         std::time::Duration::from_millis(16), // ~16.67ms ticker loop (60 FPS)
         move || {
+            // Use real Delta Time calculation to avoid desyncs and stutters
+            let now = std::time::Instant::now();
+            let delta_ms = now.duration_since(last_tick).as_secs_f64() * 1000.0;
+            last_tick = now;
+
             let ui = match app_weak_flipbook.upgrade() {
                 Some(ui) => ui,
                 None => return,
@@ -321,8 +327,8 @@ pub fn run_gui() -> Result<()> {
                     let fps = viewer.flipbook_fps.max(1.0) as f64;
                     let frame_duration_ms = 1000.0 / fps;
 
-                    // Increment tracking timer with the speed multiplier
-                    continuous_time_ms += 16.0 * viewer.play_speed as f64;
+                    // Increment tracking timer with the speed multiplier and real delta time
+                    continuous_time_ms += delta_ms * viewer.play_speed as f64;
 
                     let frame_position = continuous_time_ms / frame_duration_ms;
                     let current_frame = (frame_position.floor() as u32) % total_frames;
