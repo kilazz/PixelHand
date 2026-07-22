@@ -221,28 +221,49 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let format_raw = header.format.map(|f| f.value()).unwrap_or(0);
 
     // --- TRANSCODING PATH FOR BASISLZ (ETC1S) AND UASTC FORMATS ---
-    // If format is VK_FORMAT_UNDEFINED (0) or BasisLZ supercompression is specified,
-    // invoke the pure-Rust basisu transcoder to output uncompressed RGBA32.
     if header.supercompression_scheme == Some(ktx2::SupercompressionScheme::BasisLZ)
         || format_raw == 0
     {
-        let tex = basisu::Transcoder::new(bytes).map_err(|e| {
+        // The basisu transcoder does not support 3D Volume textures (pixel_depth > 1),
+        // rejecting them with an InvalidData error. Since we only need the first 2D slice (z=0)
+        // for the thumbnail preview, we can elegantly trick the transcoder by patching the KTX2 header
+        // in memory to pretend it's a 2D Texture Array, which basisu natively supports.
+        let mut basis_payload = Cow::Borrowed(bytes);
+
+        if header.pixel_depth > 1 {
+            let mut patched = bytes.to_vec();
+            // 1. Set pixel_depth (bytes 28..32) to 0
+            patched[28..32].copy_from_slice(&0u32.to_le_bytes());
+
+            // 2. Map Z-slices to Array Layers: new_layers = max(layers, 1) * pixel_depth
+            let layers = header.layer_count.max(1);
+            let new_layers = layers * header.pixel_depth;
+            patched[32..36].copy_from_slice(&new_layers.to_le_bytes());
+
+            // 3. Force level_count (bytes 40..44) to 1 to bypass mipmap size validation mismatches
+            //    (since 3D mips reduce in Z-axis, but 2D Array mips do not)
+            patched[40..44].copy_from_slice(&1u32.to_le_bytes());
+
+            basis_payload = Cow::Owned(patched);
+        }
+
+        let tex = basisu::Transcoder::new(&basis_payload).map_err(|e| {
             anyhow!(
                 "Basis Universal transcoder failed to initialize for KTX2 stream: {:?}",
                 e
             )
         })?;
 
-        let mut transcoded_rgba = tex
-            .transcode(0, basisu::TargetFormat::Rgba32, basisu::DecodeFlags::NONE)
+        // Decode exactly the first face of the first layer of the first mip level
+        let transcoded_rgba = tex
+            .transcode_image(
+                0,
+                0,
+                0,
+                basisu::TargetFormat::Rgba32,
+                basisu::DecodeFlags::NONE,
+            )
             .map_err(|e| anyhow!("Basis Universal transcoding failed: {:?}", e))?;
-
-        // If the KTX2 file is a Cubemap, 3D Texture, or Array, the transcoder might return
-        // the payload for all faces/layers combined. We only need the first 2D slice for the preview.
-        let expected_bytes = width * height * 4;
-        if transcoded_rgba.len() > expected_bytes {
-            transcoded_rgba.truncate(expected_bytes);
-        }
 
         let img = image::RgbaImage::from_raw(width as u32, height as u32, transcoded_rgba)
             .ok_or_else(|| anyhow!("Failed to build RGBA image from Basis transcoded buffer"))?;
@@ -250,7 +271,7 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         return Ok(DynamicImage::ImageRgba8(img));
     }
 
-    // Retrieve raw payload bytes for Level 0
+    // --- STANDARD GPU FORMATS DECODING PATH ---
     let first_level = reader
         .levels()
         .next()
