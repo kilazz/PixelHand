@@ -245,6 +245,12 @@ impl ScanParams {
         if ext.ext_pvr {
             extensions.push(".pvr".to_string());
         }
+        if ext.ext_atc {
+            extensions.push(".atc".to_string());
+        }
+        if ext.ext_crn {
+            extensions.push(".crn".to_string());
+        }
 
         let execution_provider = match scan_config.get_execution_provider() {
             ExecutionProvider::DirectMl => "DirectML".to_string(),
@@ -372,6 +378,8 @@ impl Default for AppSettings {
                 ext_qoi: true,
                 ext_ico: true,
                 ext_pvr: true,
+                ext_atc: true,
+                ext_crn: true,
             },
             ui: UiLayoutSettings {
                 duplicates_panel_height: 180.0,

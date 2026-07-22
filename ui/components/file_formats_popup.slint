@@ -6,7 +6,7 @@ import { ScanConfig, Diagnostics } from "../store.slint";
 
 export component FileFormatsPopup inherits PopupWindow {
     width: 640px;
-    height: 250px;
+    height: 290px;
     close-policy: close-on-click;
     x: Diagnostics.ext_popup_x;
     y: Diagnostics.ext_popup_y;
@@ -144,6 +144,18 @@ export component FileFormatsPopup inherits PopupWindow {
                     CheckBox {
                         text: ".pvr";
                         checked <=> ScanConfig.extensions.ext_pvr;
+                        toggled => { ScanConfig.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".atc (Adreno)";
+                        checked <=> ScanConfig.extensions.ext_atc;
+                        toggled => { ScanConfig.save_settings(); }
+                    }
+
+                    CheckBox {
+                        text: ".crn (Unity Crunch)";
+                        checked <=> ScanConfig.extensions.ext_crn;
                         toggled => { ScanConfig.save_settings(); }
                     }
 

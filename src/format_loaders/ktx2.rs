@@ -10,78 +10,92 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct Ktx2Loader;
 
-const KTX2_IDENTIFIER: [u8; 12] = [
-    0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
-];
-
+/// Decodes KTX2 container textures using `ktx2` reader and `texture2ddecoder` for payload decompression.
 pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
-    if bytes.len() < 80 || bytes[0..12] != KTX2_IDENTIFIER {
-        return Err(anyhow!("Invalid KTX2 header magic identifier"));
-    }
+    // Parse KTX2 file container header and level index tables securely via ktx2 crate
+    let reader = ktx2::Reader::new(bytes)
+        .map_err(|e| anyhow!("Invalid KTX2 header or corrupted file: {:?}", e))?;
 
-    let vk_format = u32::from_le_bytes(bytes[12..16].try_into()?);
-    let pixel_width = u32::from_le_bytes(bytes[20..24].try_into()?);
-    let pixel_height = u32::from_le_bytes(bytes[24..28].try_into()?).max(1);
-    let level_count = u32::from_le_bytes(bytes[36..40].try_into()?).max(1);
+    let header = reader.header();
+    let width = header.pixel_width as usize;
+    let height = header.pixel_height.max(1) as usize;
 
-    // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
-    if pixel_width == 0 || pixel_height == 0 || pixel_width > 16384 || pixel_height > 16384 {
+    // OOM Bounds Check: Prevent memory allocation crashes on corrupted/oversized image headers
+    if width == 0 || height == 0 || width > 16384 || height > 16384 {
         return Err(anyhow!(
             "Invalid or oversized KTX2 dimensions: {}x{} (max 16384x16384)",
-            pixel_width,
-            pixel_height
+            width,
+            height
         ));
     }
 
-    // Offset 80 contains level index array (levelCount * 24 bytes)
-    let level_index_offset = 80;
-    let mut data_offset = level_index_offset + (level_count as usize * 24);
+    // Retrieve raw level for the base mipmap level (Level 0)
+    let first_level = reader
+        .levels()
+        .next()
+        .ok_or_else(|| anyhow!("KTX2 container contains no mip levels"))?;
 
-    if data_offset > bytes.len() {
-        data_offset = 80;
-    }
+    // Extract raw byte slice from the Level struct
+    let level_data: &[u8] = first_level.data;
 
-    let payload = &bytes[data_offset..];
-    let total_pixels = (pixel_width * pixel_height) as usize;
-    let mut rgba = vec![0u8; total_pixels * 4];
+    let format_raw = header.format.map(|f| f.value()).unwrap_or(0);
+    let mut rgba_u32 = vec![0u32; width * height];
 
-    match vk_format {
+    match format_raw {
         // VK_FORMAT_R8G8B8A8_UNORM (37) | VK_FORMAT_R8G8B8A8_SRGB (43)
         37 | 43 => {
-            let to_copy = payload.len().min(rgba.len());
-            rgba[..to_copy].copy_from_slice(&payload[..to_copy]);
+            let copy_len = level_data.len().min(width * height * 4);
+            let img = image::RgbaImage::from_raw(
+                width as u32,
+                height as u32,
+                level_data[..copy_len].to_vec(),
+            )
+            .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 UNORM data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
         }
-        // VK_FORMAT_B8G8R8A8_UNORM (44)
-        44 => {
-            let to_copy = payload.len().min(rgba.len());
-            for i in (0..to_copy).step_by(4) {
-                if i + 3 < payload.len() {
-                    rgba[i] = payload[i + 2]; // R
-                    rgba[i + 1] = payload[i + 1]; // G
-                    rgba[i + 2] = payload[i]; // B
-                    rgba[i + 3] = payload[i + 3]; // A
-                }
+        // VK_FORMAT_B8G8R8A8_UNORM (44) | VK_FORMAT_B8G8R8A8_SRGB (50)
+        44 | 50 => {
+            let copy_len = level_data.len().min(width * height * 4);
+            let mut bgra_buf = level_data[..copy_len].to_vec();
+            for chunk in bgra_buf.chunks_exact_mut(4) {
+                chunk.swap(0, 2); // Convert BGRA -> RGBA
             }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, bgra_buf)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 BGRA data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
         }
+        // EAC R11 (Single-channel heightmaps / precision masks)
+        153 | 154 => {
+            texture2ddecoder::decode_eacr(level_data, width, height, &mut rgba_u32)
+                .map_err(|e| anyhow!("EAC R11 decoding failed: {:?}", e))?;
+        }
+        // EAC RG11 (Dual-channel normal maps Red+Green)
+        155 | 156 => {
+            texture2ddecoder::decode_eacrg(level_data, width, height, &mut rgba_u32)
+                .map_err(|e| anyhow!("EAC RG11 decoding failed: {:?}", e))?;
+        }
+        // ETC2 RGBA8 / RGB (147..=152)
+        147..=152 => {
+            texture2ddecoder::decode_etc2_rgba8(level_data, width, height, &mut rgba_u32)
+                .map_err(|e| anyhow!("ETC2 decoding failed: {:?}", e))?;
+        }
+        // ETC1 / Fallback block decoding
         _ => {
-            // Basis Universal / Compressed fallback decoding
-            for (pattern_i, i) in (0..rgba.len()).step_by(4).enumerate() {
-                let src_val = if pattern_i < payload.len() {
-                    payload[pattern_i]
-                } else {
-                    128
-                };
-
-                rgba[i] = src_val;
-                rgba[i + 1] = src_val.wrapping_add(30);
-                rgba[i + 2] = src_val.wrapping_add(60);
-                rgba[i + 3] = 255;
-            }
+            texture2ddecoder::decode_etc1(level_data, width, height, &mut rgba_u32)
+                .map_err(|e| anyhow!("ETC1 decoding failed: {:?}", e))?;
         }
     }
 
-    let img = image::RgbaImage::from_raw(pixel_width, pixel_height, rgba)
-        .ok_or_else(|| anyhow!("Failed to compile KTX2 RGBA image buffer"))?;
+    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
+
+    // Convert BGRA from texture2ddecoder into RGBA for Rust image crate
+    for chunk in raw_bytes.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
+    }
+
+    let img = image::RgbaImage::from_raw(width as u32, height as u32, raw_bytes)
+        .ok_or_else(|| anyhow!("Failed to compile KTX2 RGBA buffer"))?;
+
     Ok(DynamicImage::ImageRgba8(img))
 }
 
@@ -96,7 +110,7 @@ impl ImageFormatLoader for Ktx2Loader {
         _target_size: Option<u32>,
         _tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
-        let bytes = std::fs::read(path).context("Failed to read KTX2 file")?;
+        let bytes = std::fs::read(path).context("Failed to read KTX2 file from disk")?;
         decode_ktx2_bytes(&bytes)
     }
 
@@ -107,28 +121,53 @@ impl ImageFormatLoader for Ktx2Loader {
         let mut w = 0;
         let mut h = 0;
         let mut mips = 1;
+        let mut is_cubemap = false;
+        let mut compression_format = "KTX2".to_string();
+        let mut color_space = "Linear".to_string();
 
-        if bytes.len() >= 40 && bytes[0..12] == KTX2_IDENTIFIER {
-            w = u32::from_le_bytes(bytes[20..24].try_into().unwrap_or([0; 4]));
-            h = u32::from_le_bytes(bytes[24..28].try_into().unwrap_or([0; 4])).max(1);
-            mips = u32::from_le_bytes(bytes[36..40].try_into().unwrap_or([1; 4])).max(1);
+        if let Ok(reader) = ktx2::Reader::new(&bytes) {
+            let header = reader.header();
+            w = header.pixel_width;
+            h = header.pixel_height.max(1);
+            mips = header.level_count.max(1);
+            // Precise Cubemap detection (face_count == 6 in Khronos Spec)
+            is_cubemap = header.face_count == 6;
+
+            // Extract precise format codec or supercompression scheme name
+            if let Some(scheme) = header.supercompression_scheme {
+                compression_format = format!("KTX2 ({:?})", scheme);
+            } else if let Some(fmt) = header.format {
+                compression_format = format!("KTX2 ({:?})", fmt);
+            }
+
+            // Extract exact Color Space from Transfer Function or Format enum
+            if let Some(tf) = reader.transfer_function() {
+                if tf == ktx2::TransferFunction::SRGB {
+                    color_space = "sRGB".to_string();
+                }
+            } else if compression_format.contains("SRGB") {
+                color_space = "sRGB".to_string();
+            }
         } else if let Ok(dim) = imagesize::size(path) {
             w = dim.width as u32;
             h = dim.height as u32;
         }
+
+        let estimated_vram =
+            crate::qc::rules::estimate_vram(w, h, &compression_format, mips, is_cubemap);
 
         Ok(QcImageMetadata {
             width: w,
             height: h,
             file_size: size,
             format_str: "ktx2".to_string(),
-            compression_format: "KTX2 / Basis Universal".to_string(),
-            color_space: "Linear".to_string(),
+            compression_format,
+            color_space,
             has_alpha: true,
             bit_depth: 8,
             mipmap_count: mips,
-            is_cubemap: false,
-            estimated_vram: crate::qc::rules::estimate_vram(w, h, "BC7", mips, false),
+            is_cubemap,
+            estimated_vram,
         })
     }
 }

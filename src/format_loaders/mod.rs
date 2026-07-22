@@ -1,6 +1,8 @@
 // src/format_loaders/mod.rs
 
 pub mod astc;
+pub mod atc;
+pub mod crn;
 pub mod dds;
 pub mod exr;
 pub mod heic;
@@ -27,7 +29,7 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 /// Unified polymorphic interface for all graphics asset loaders.
 pub trait ImageFormatLoader: Send + Sync {
-    /// Supported lowercase file extensions (e.g. "exr", "dds", "ktx2")
+    /// Supported lowercase file extensions (e.g. "exr", "dds", "ktx2", "atc", "crn")
     fn extensions(&self) -> &[&str];
 
     /// High-fidelity decoding into dynamic image memory buffers.
@@ -76,6 +78,8 @@ impl LoaderRegistry {
                 Box::new(pvr::PvrLoader),
                 Box::new(qoi::QoiLoader),
                 Box::new(svg::SvgLoader),
+                Box::new(atc::AtcLoader),
+                Box::new(crn::CrnLoader),
                 Box::new(standard::StandardLoader),
             ],
         }

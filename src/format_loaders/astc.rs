@@ -10,15 +10,15 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct AstcLoader;
 
-/// Decodes ASTC texture files from raw bytes.
+/// Decodes ASTC compressed textures natively on CPU via pure-Rust texture2ddecoder.
 pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     if bytes.len() < 16 || bytes[0..4] != [0x5C, 0xA0, 0x39, 0x5C] {
         return Err(anyhow!("Invalid ASTC texture magic header bytes"));
     }
 
-    let block_x = bytes[4] as u32;
-    let block_y = bytes[5] as u32;
-    let block_z = bytes[6] as u32;
+    let block_x = bytes[4] as usize;
+    let block_y = bytes[5] as usize;
+    let block_z = bytes[6] as usize;
 
     if block_x < 4 || block_y < 4 || block_z == 0 {
         return Err(anyhow!(
@@ -29,10 +29,12 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         ));
     }
 
-    let w = u32::from(bytes[7]) | (u32::from(bytes[8]) << 8) | (u32::from(bytes[9]) << 16);
-    let h = u32::from(bytes[10]) | (u32::from(bytes[11]) << 8) | (u32::from(bytes[12]) << 16);
+    let w =
+        (u32::from(bytes[7]) | (u32::from(bytes[8]) << 8) | (u32::from(bytes[9]) << 16)) as usize;
+    let h = (u32::from(bytes[10]) | (u32::from(bytes[11]) << 8) | (u32::from(bytes[12]) << 16))
+        as usize;
 
-    // OOM Safety Check: Prevent memory allocation crashes on corrupted/oversized image headers
+    // OOM Bounds Check
     if w == 0 || h == 0 || w > 16384 || h > 16384 {
         return Err(anyhow!(
             "Invalid or oversized ASTC dimensions: {}x{} (max 16384x16384)",
@@ -42,58 +44,22 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     }
 
     let payload = &bytes[16..];
-    let blocks_x = w.div_ceil(block_x);
-    let blocks_y = h.div_ceil(block_y);
-    let expected_len = (blocks_x * blocks_y * 16) as usize;
+    let mut rgba_u32 = vec![0u32; w * h];
 
-    let mut rgba_buf = vec![0u8; (w * h * 4) as usize];
+    // True CPU ASTC Decompression
+    texture2ddecoder::decode_astc(payload, w, h, block_x, block_y, &mut rgba_u32)
+        .map_err(|e| anyhow!("ASTC decoding failed: {:?}", e))?;
 
-    if payload.len() >= expected_len {
-        for by in 0..blocks_y {
-            for bx in 0..blocks_x {
-                let block_idx = ((by * blocks_x) + bx) as usize;
-                let block_bytes = &payload[block_idx * 16..(block_idx + 1) * 16];
+    let mut raw_bytes: Vec<u8> = rgba_u32.into_iter().flat_map(|p| p.to_le_bytes()).collect();
 
-                // Extract base ASTC block color endpoints / void-extent fallback
-                let void_extent = (block_bytes[0] & 0x01) != 0 && (block_bytes[1] & 0x01) != 0;
-                let (r, g, b, a) = if void_extent {
-                    let r_val = block_bytes[8];
-                    let g_val = block_bytes[10];
-                    let b_val = block_bytes[12];
-                    let a_val = block_bytes[14];
-                    (r_val, g_val, b_val, a_val)
-                } else {
-                    let weight_base = block_bytes[0] ^ block_bytes[1];
-                    let r_val = weight_base.wrapping_add(128);
-                    let g_val = block_bytes[2].wrapping_add(64);
-                    let b_val = block_bytes[3].wrapping_add(192);
-                    (r_val, g_val, b_val, 255)
-                };
-
-                for py in 0..block_y {
-                    let pixel_y = by * block_y + py;
-                    if pixel_y >= h {
-                        continue;
-                    }
-                    for px in 0..block_x {
-                        let pixel_x = bx * block_x + px;
-                        if pixel_x >= w {
-                            continue;
-                        }
-
-                        let dst = ((pixel_y * w + pixel_x) * 4) as usize;
-                        rgba_buf[dst] = r;
-                        rgba_buf[dst + 1] = g;
-                        rgba_buf[dst + 2] = b;
-                        rgba_buf[dst + 3] = a;
-                    }
-                }
-            }
-        }
+    // Convert BGRA from texture2ddecoder into RGBA for Rust image crate
+    for chunk in raw_bytes.chunks_exact_mut(4) {
+        chunk.swap(0, 2);
     }
 
-    let img = image::RgbaImage::from_raw(w, h, rgba_buf)
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, raw_bytes)
         .ok_or_else(|| anyhow!("Failed to compile ASTC RGBA buffer"))?;
+
     Ok(DynamicImage::ImageRgba8(img))
 }
 
