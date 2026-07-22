@@ -30,6 +30,11 @@ ab_glyph = "0.2.32"
 texture2ddecoder = "0.1.2"
 ktx2 = "0.5.0"
 
+###
+zstd = "0.13.3"
+flate2 = "1.1.9"
+basisu = "0.1.0"
+
 # Image Hashes & Visual Similarity Metrics
 xxhash-rust = { version = "0.8.18", features = ["xxh64"] }
 fast_image_resize = "6.1.0"
@@ -63,10 +68,6 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 anyhow = "1.0.104"
 thiserror = "2.0.19"
-
-###
-zstd = "0.13.3"
-flate2 = "1.1.9"
 
 [patch.crates-io]
 # Override for suffix automaton crate compatibility

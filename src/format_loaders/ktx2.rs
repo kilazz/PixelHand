@@ -13,6 +13,7 @@ use crate::viewer::tonemapping::TonemapConfig;
 pub struct Ktx2Loader;
 
 /// Bitwise conversion of IEEE 754 half-precision float (f16) to single-precision float (f32).
+/// Avoids external dependencies by implementing bitwise exponent bias shifting.
 fn f16_to_f32(h: u16) -> f32 {
     let s = (h >> 15) & 0x0001;
     let e = (h >> 10) & 0x001f;
@@ -22,6 +23,7 @@ fn f16_to_f32(h: u16) -> f32 {
         if m == 0 {
             if s != 0 { -0.0 } else { 0.0 }
         } else {
+            // Normalize subnormal float values
             let mut e_norm = 1u32;
             let mut m_norm = m as u32;
             while (m_norm & 0x0400) == 0 {
@@ -49,11 +51,14 @@ fn f16_to_f32(h: u16) -> f32 {
     }
 }
 
-/// Unpacks B10G11R11_UFLOAT packed 32-bit word into normalized RGB [0..1]
+/// Unpacks `VK_FORMAT_B10G11R11_UFLOAT_PACK32` 32-bit word into normalized RGB [0..1].
+/// - Red: 11 bits (5 exponent, 6 mantissa)
+/// - Green: 11 bits (5 exponent, 6 mantissa)
+/// - Blue: 10 bits (5 exponent, 5 mantissa)
 fn unpack_b10g11r11(val: u32) -> (f32, f32, f32) {
-    let r_bits = val & 0x7FF; // 11 bits
-    let g_bits = (val >> 11) & 0x7FF; // 11 bits
-    let b_bits = (val >> 22) & 0x3FF; // 10 bits
+    let r_bits = val & 0x7FF;
+    let g_bits = (val >> 11) & 0x7FF;
+    let b_bits = (val >> 22) & 0x3FF;
 
     let decode_11 = |bits: u32| -> f32 {
         let exp = (bits >> 6) & 0x1F;
@@ -78,12 +83,16 @@ fn unpack_b10g11r11(val: u32) -> (f32, f32, f32) {
     (decode_11(r_bits), decode_11(g_bits), decode_10(b_bits))
 }
 
-/// Unpacks E5B9G9R9_UFLOAT shared exponent 32-bit word into normalized RGB [0..1]
+/// Unpacks `VK_FORMAT_E5B9G9R9_UFLOAT_PACK32` shared-exponent 32-bit word into RGB [0..1].
+/// - Red: 9-bit mantissa
+/// - Green: 9-bit mantissa
+/// - Blue: 9-bit mantissa
+/// - Shared Exponent: 5 bits
 fn unpack_e5b9g9r9(val: u32) -> (f32, f32, f32) {
-    let r_mant = val & 0x1FF; // 9 bits
-    let g_mant = (val >> 9) & 0x1FF; // 9 bits
-    let b_mant = (val >> 18) & 0x1FF; // 9 bits
-    let exp = (val >> 27) & 0x1F; // 5 bits
+    let r_mant = val & 0x1FF;
+    let g_mant = (val >> 9) & 0x1FF;
+    let b_mant = (val >> 18) & 0x1FF;
+    let exp = (val >> 27) & 0x1F;
 
     let scale = 2.0_f32.powi(exp as i32 - 15 - 9);
     (
@@ -93,6 +102,7 @@ fn unpack_e5b9g9r9(val: u32) -> (f32, f32, f32) {
     )
 }
 
+/// Maps Vulkan `VkFormat` raw enum values to ASTC 2D block dimensions `(block_width, block_height)`.
 fn resolve_astc_block_size(vk_format: u32) -> Option<(usize, usize)> {
     match vk_format {
         157 | 158 | 1000066000 => Some((4, 4)),
@@ -113,6 +123,7 @@ fn resolve_astc_block_size(vk_format: u32) -> Option<(usize, usize)> {
     }
 }
 
+/// Handles container-level supercompression schemes (e.g. Zstandard / Zlib) for non-Basis textures.
 fn decompress_level_payload<'a>(
     header: &ktx2::Header,
     raw_payload: &'a [u8],
@@ -133,9 +144,10 @@ fn decompress_level_payload<'a>(
                 .map_err(|e| anyhow!("Failed to decompress KTX2 Zlib payload: {}", e))?;
             Ok(Cow::Owned(decompressed))
         }
-        Some(ktx2::SupercompressionScheme::BasisLZ) => Err(anyhow!(
-            "BasisLZ ETC1S format requires universal transcoding engine"
-        )),
+        Some(ktx2::SupercompressionScheme::BasisLZ) => {
+            // Handled directly via basis-universal transcoder pipeline
+            Ok(Cow::Borrowed(raw_payload))
+        }
         Some(scheme) => Err(anyhow!(
             "Unsupported KTX2 supercompression scheme: {:?}",
             scheme
@@ -143,6 +155,8 @@ fn decompress_level_payload<'a>(
     }
 }
 
+/// Calculates the exact byte slice length for a single 2D face/layer at Level 0.
+/// Prevents extra array layers or cubemap faces (6x memory size) from overflowing 2D decoders.
 fn calculate_single_slice_bytes(vk_format: u32, width: usize, height: usize) -> Option<usize> {
     match vk_format {
         // Uncompressed 8-bit RGBA / BGRA
@@ -173,11 +187,11 @@ fn calculate_single_slice_bytes(vk_format: u32, width: usize, height: usize) -> 
             let (bx, by) = resolve_astc_block_size(vk_format)?;
             Some(width.div_ceil(bx) * height.div_ceil(by) * 16)
         }
-        // PVRTC 4BPP
+        // PVRTC 4BPP (8 bytes per 4x4 block)
         1000054001 | 1000054003 | 1000054005 | 1000054007 => {
             Some(width.div_ceil(4) * height.div_ceil(4) * 8)
         }
-        // PVRTC 2BPP
+        // PVRTC 2BPP (8 bytes per 8x4 block)
         1000054000 | 1000054002 | 1000054004 | 1000054006 => {
             Some(width.div_ceil(8) * height.div_ceil(4) * 8)
         }
@@ -185,7 +199,9 @@ fn calculate_single_slice_bytes(vk_format: u32, width: usize, height: usize) -> 
     }
 }
 
+/// Decodes KTX2 container textures natively using `ktx2`, `basisu`, and `texture2ddecoder`.
 pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
+    // Parse container header and level index tables
     let reader = ktx2::Reader::new(bytes)
         .map_err(|e| anyhow!("Invalid KTX2 header or corrupted file: {:?}", e))?;
 
@@ -193,6 +209,7 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let width = header.pixel_width as usize;
     let height = header.pixel_height.max(1) as usize;
 
+    // Safety Bounds Check: Guard against memory exhaustion from malformed or corrupted headers
     if width == 0 || height == 0 || width > 16384 || height > 16384 {
         return Err(anyhow!(
             "Invalid or oversized KTX2 dimensions: {}x{}",
@@ -201,6 +218,39 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         ));
     }
 
+    let format_raw = header.format.map(|f| f.value()).unwrap_or(0);
+
+    // --- TRANSCODING PATH FOR BASISLZ (ETC1S) AND UASTC FORMATS ---
+    // If format is VK_FORMAT_UNDEFINED (0) or BasisLZ supercompression is specified,
+    // invoke the pure-Rust basisu transcoder to output uncompressed RGBA32.
+    if header.supercompression_scheme == Some(ktx2::SupercompressionScheme::BasisLZ)
+        || format_raw == 0
+    {
+        let tex = basisu::Transcoder::new(bytes).map_err(|e| {
+            anyhow!(
+                "Basis Universal transcoder failed to initialize for KTX2 stream: {:?}",
+                e
+            )
+        })?;
+
+        let mut transcoded_rgba = tex
+            .transcode(0, basisu::TargetFormat::Rgba32, basisu::DecodeFlags::NONE)
+            .map_err(|e| anyhow!("Basis Universal transcoding failed: {:?}", e))?;
+
+        // If the KTX2 file is a Cubemap, 3D Texture, or Array, the transcoder might return
+        // the payload for all faces/layers combined. We only need the first 2D slice for the preview.
+        let expected_bytes = width * height * 4;
+        if transcoded_rgba.len() > expected_bytes {
+            transcoded_rgba.truncate(expected_bytes);
+        }
+
+        let img = image::RgbaImage::from_raw(width as u32, height as u32, transcoded_rgba)
+            .ok_or_else(|| anyhow!("Failed to build RGBA image from Basis transcoded buffer"))?;
+
+        return Ok(DynamicImage::ImageRgba8(img));
+    }
+
+    // Retrieve raw payload bytes for Level 0
     let first_level = reader
         .levels()
         .next()
@@ -209,7 +259,7 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let decompressed_payload = decompress_level_payload(&header, first_level.data)?;
     let level_data: &[u8] = &decompressed_payload;
 
-    let format_raw = header.format.map(|f| f.value()).unwrap_or(0);
+    // Isolate single 2D slice for 3D volumes, cubemaps (6 faces), or 2D array layers
     let slice_bytes =
         calculate_single_slice_bytes(format_raw, width, height).unwrap_or(level_data.len());
     let slice_data = &level_data[..level_data.len().min(slice_bytes)];
@@ -217,13 +267,6 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let mut rgba_u32 = vec![0u32; width * height];
 
     match format_raw {
-        // VK_FORMAT_UNDEFINED (0) -> Basis Universal / UASTC requiring transcoder
-        0 => {
-            return Err(anyhow!(
-                "UASTC / Basis Universal payload requires transcoder"
-            ));
-        }
-
         // VK_FORMAT_R8G8B8_UNORM (23) | VK_FORMAT_R8G8B8_SRGB (29)
         23 | 29 => {
             let mut out_rgba = vec![255u8; width * height * 4];
@@ -426,21 +469,25 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
                 .map_err(|e| anyhow!("ETC2 RGBA8 decoding failed: {:?}", e))?;
         }
 
-        // EAC R11 (153, 154)
+        // EAC R11 UNORM (153)
         153 => {
             texture2ddecoder::decode_eacr(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("EAC R11 decoding failed: {:?}", e))?;
         }
+
+        // EAC R11 SNORM (154)
         154 => {
             texture2ddecoder::decode_eacr_signed(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("EAC R11 Signed decoding failed: {:?}", e))?;
         }
 
-        // EAC RG11 (155, 156)
+        // EAC RG11 UNORM (155)
         155 => {
             texture2ddecoder::decode_eacrg(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("EAC RG11 decoding failed: {:?}", e))?;
         }
+
+        // EAC RG11 SNORM (156)
         156 => {
             texture2ddecoder::decode_eacrg_signed(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("EAC RG11 Signed decoding failed: {:?}", e))?;
