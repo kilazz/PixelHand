@@ -245,10 +245,11 @@ export component CompareTab inherits HorizontalLayout {
             }
         }
 
-        // TOOLBAR 2: Spritesheet slicing subdivision & Group Animation controls
+        // TOOLBAR 2: Spritesheet slicing subdivision & Group Animation controls (FIXED LAYOUT)
         HorizontalLayout {
             spacing: 8px;
             height: 28px;
+            alignment: start;
 
             Text {
                 text: "Anim Mode:";
@@ -267,6 +268,9 @@ export component CompareTab inherits HorizontalLayout {
 
             if ViewportState.anim_source == 0: HorizontalLayout {
                 spacing: 8px;
+                alignment: start;
+                horizontal-stretch: 0;
+
                 Text {
                     text: "Grid (Col x Row):";
                     vertical-alignment: center;
@@ -279,7 +283,8 @@ export component CompareTab inherits HorizontalLayout {
                     minimum: 1;
                     maximum: 64;
                     height: 24px;
-                    width: 80px;
+                    width: 75px;
+                    horizontal-stretch: 0;
                     edited(val) => { ViewportState.viewer.grid_cols = val; ViewportState.active_frame_changed(); }
                 }
 
@@ -295,8 +300,21 @@ export component CompareTab inherits HorizontalLayout {
                     minimum: 1;
                     maximum: 64;
                     height: 24px;
-                    width: 80px;
+                    width: 75px;
+                    horizontal-stretch: 0;
                     edited(val) => { ViewportState.viewer.grid_rows = val; ViewportState.active_frame_changed(); }
+                }
+
+                CustomButton {
+                    text: "Reset Grid";
+                    height: 24px;
+                    primary-color: #474747;
+                    clicked => {
+                        ViewportState.viewer.grid_cols = 1;
+                        ViewportState.viewer.grid_rows = 1;
+                        ViewportState.active_frame = 0;
+                        ViewportState.active_frame_changed();
+                    }
                 }
             }
 
