@@ -179,26 +179,33 @@ pub async fn get_channel_preview_image(
         manager.decoded_images.invalidate(&cache_key);
     }
 
-    // Atomically load and cache the image, preventing cache stampedes
+    // Atomically load and cache the image, logging explicit decode errors to UI Console
     let cached_item_res = manager.decoded_images.try_get_with(
         cache_key.clone(),
         || -> Result<DecodedCacheItem, String> {
             let t_config = crate::app::get_active_tonemap_config();
 
-            if let Ok(img) =
-                crate::format_loaders::open_image_with_specific_mip(&p, mip_level, Some(t_config))
+            match crate::format_loaders::open_image_with_specific_mip(&p, mip_level, Some(t_config))
             {
-                Ok(DecodedCacheItem {
+                Ok(img) => Ok(DecodedCacheItem {
                     mtime: current_mtime,
                     image: Arc::new(img.into_rgba8()),
-                })
-            } else {
-                Err("Failed to decode image".to_string())
+                }),
+                Err(e) => {
+                    let err_msg = format!("[Format Error] Failed to decode '{}': {:#}", path, e);
+                    crate::app::append_to_console_log(&err_msg);
+                    tracing::error!("{}", err_msg);
+                    Err(err_msg)
+                }
             }
         },
     );
 
-    let cached_item = cached_item_res.ok()?;
+    let cached_item = match cached_item_res {
+        Ok(item) => item,
+        Err(_) => return None,
+    };
+
     let rgba = &*cached_item.image;
 
     let out_img = if channel == "RGB" || channel == "Composite" {

@@ -12,7 +12,87 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct Ktx2Loader;
 
-/// Helper function to resolve ASTC 2D block dimensions (width, height) from Vulkan `VkFormat` raw values.
+/// Bitwise conversion of IEEE 754 half-precision float (f16) to single-precision float (f32).
+fn f16_to_f32(h: u16) -> f32 {
+    let s = (h >> 15) & 0x0001;
+    let e = (h >> 10) & 0x001f;
+    let m = h & 0x03ff;
+
+    if e == 0 {
+        if m == 0 {
+            if s != 0 { -0.0 } else { 0.0 }
+        } else {
+            let mut e_norm = 1u32;
+            let mut m_norm = m as u32;
+            while (m_norm & 0x0400) == 0 {
+                m_norm <<= 1;
+                e_norm += 1;
+            }
+            let shift_e = 127 - 15 - e_norm + 1;
+            let shift_m = (m_norm & 0x03ff) << 13;
+            f32::from_bits(((s as u32) << 31) | (shift_e << 23) | shift_m)
+        }
+    } else if e == 31 {
+        if m == 0 {
+            if s != 0 {
+                f32::NEG_INFINITY
+            } else {
+                f32::INFINITY
+            }
+        } else {
+            f32::NAN
+        }
+    } else {
+        let shift_e = (e as u32) + 127 - 15;
+        let shift_m = (m as u32) << 13;
+        f32::from_bits(((s as u32) << 31) | (shift_e << 23) | shift_m)
+    }
+}
+
+/// Unpacks B10G11R11_UFLOAT packed 32-bit word into normalized RGB [0..1]
+fn unpack_b10g11r11(val: u32) -> (f32, f32, f32) {
+    let r_bits = val & 0x7FF; // 11 bits
+    let g_bits = (val >> 11) & 0x7FF; // 11 bits
+    let b_bits = (val >> 22) & 0x3FF; // 10 bits
+
+    let decode_11 = |bits: u32| -> f32 {
+        let exp = (bits >> 6) & 0x1F;
+        let mant = bits & 0x3F;
+        if exp == 0 {
+            (mant as f32) / 64.0 * (1.0 / 16384.0)
+        } else {
+            (1.0 + (mant as f32) / 64.0) * 2.0_f32.powi(exp as i32 - 15)
+        }
+    };
+
+    let decode_10 = |bits: u32| -> f32 {
+        let exp = (bits >> 5) & 0x1F;
+        let mant = bits & 0x1F;
+        if exp == 0 {
+            (mant as f32) / 32.0 * (1.0 / 16384.0)
+        } else {
+            (1.0 + (mant as f32) / 32.0) * 2.0_f32.powi(exp as i32 - 15)
+        }
+    };
+
+    (decode_11(r_bits), decode_11(g_bits), decode_10(b_bits))
+}
+
+/// Unpacks E5B9G9R9_UFLOAT shared exponent 32-bit word into normalized RGB [0..1]
+fn unpack_e5b9g9r9(val: u32) -> (f32, f32, f32) {
+    let r_mant = val & 0x1FF; // 9 bits
+    let g_mant = (val >> 9) & 0x1FF; // 9 bits
+    let b_mant = (val >> 18) & 0x1FF; // 9 bits
+    let exp = (val >> 27) & 0x1F; // 5 bits
+
+    let scale = 2.0_f32.powi(exp as i32 - 15 - 9);
+    (
+        r_mant as f32 * scale,
+        g_mant as f32 * scale,
+        b_mant as f32 * scale,
+    )
+}
+
 fn resolve_astc_block_size(vk_format: u32) -> Option<(usize, usize)> {
     match vk_format {
         157 | 158 | 1000066000 => Some((4, 4)),
@@ -33,7 +113,6 @@ fn resolve_astc_block_size(vk_format: u32) -> Option<(usize, usize)> {
     }
 }
 
-/// Decompresses level payload if the KTX2 container uses a supercompression scheme.
 fn decompress_level_payload<'a>(
     header: &ktx2::Header,
     raw_payload: &'a [u8],
@@ -55,7 +134,7 @@ fn decompress_level_payload<'a>(
             Ok(Cow::Owned(decompressed))
         }
         Some(ktx2::SupercompressionScheme::BasisLZ) => Err(anyhow!(
-            "BasisLZ supercompressed KTX2 requires universal transcoding"
+            "BasisLZ ETC1S format requires universal transcoding engine"
         )),
         Some(scheme) => Err(anyhow!(
             "Unsupported KTX2 supercompression scheme: {:?}",
@@ -64,20 +143,25 @@ fn decompress_level_payload<'a>(
     }
 }
 
-/// Calculates the expected byte slice length for a single 2D image face/layer at Level 0.
 fn calculate_single_slice_bytes(vk_format: u32, width: usize, height: usize) -> Option<usize> {
     match vk_format {
-        // Uncompressed RGBA8 / BGRA8
+        // Uncompressed 8-bit RGBA / BGRA
         37 | 43 | 44 | 50 => Some(width * height * 4),
-        // Uncompressed RGB8 / BGR8
+        // Uncompressed 8-bit RGB / BGR
         23 | 29 | 30 | 36 => Some(width * height * 3),
-        // Uncompressed R8
+        // Uncompressed 8-bit R
         9 | 15 => Some(width * height),
-        // Uncompressed RG8
+        // Uncompressed 8-bit RG
         16 | 22 => Some(width * height * 2),
+        // Uncompressed 16-bit Float RGBA (97 = VK_FORMAT_R16G16B16A16_SFLOAT)
+        97 => Some(width * height * 8),
+        // Uncompressed 32-bit Float RGBA (109 = VK_FORMAT_R32G32B32A32_SFLOAT)
+        109 => Some(width * height * 16),
+        // Packed 32-bit Floats (122 = B10G11R11, 123 = E5B9G9R9)
+        122 | 123 => Some(width * height * 4),
 
-        // BC1 (DXT1), BC4, ETC1, ETC2 RGB, ETC2 RGBA1, EAC R11 (8 bytes per 4x4 block)
-        131..=134 | 139 | 140 | 147..=150 | 153 | 154 => {
+        // BC1, BC4, ETC1, ETC2 RGB, ETC2 RGBA1, EAC R11 (8 bytes per 4x4 block)
+        131..=134 | 139 | 140 | 147..=150 | 153 | 154 | 160 => {
             Some(width.div_ceil(4) * height.div_ceil(4) * 8)
         }
         // BC2, BC3, BC5, BC6H, BC7, ETC2 RGBA8, EAC RG11 (16 bytes per 4x4 block)
@@ -89,11 +173,11 @@ fn calculate_single_slice_bytes(vk_format: u32, width: usize, height: usize) -> 
             let (bx, by) = resolve_astc_block_size(vk_format)?;
             Some(width.div_ceil(bx) * height.div_ceil(by) * 16)
         }
-        // PVRTC 4BPP (8 bytes per 4x4 block)
+        // PVRTC 4BPP
         1000054001 | 1000054003 | 1000054005 | 1000054007 => {
             Some(width.div_ceil(4) * height.div_ceil(4) * 8)
         }
-        // PVRTC 2BPP (8 bytes per 8x4 block)
+        // PVRTC 2BPP
         1000054000 | 1000054002 | 1000054004 | 1000054006 => {
             Some(width.div_ceil(8) * height.div_ceil(4) * 8)
         }
@@ -101,9 +185,7 @@ fn calculate_single_slice_bytes(vk_format: u32, width: usize, height: usize) -> 
     }
 }
 
-/// Decodes KTX2 container textures natively using `ktx2` reader and `texture2ddecoder` for payload decompression.
 pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
-    // Parse KTX2 container header and level index tables securely via ktx2 crate
     let reader = ktx2::Reader::new(bytes)
         .map_err(|e| anyhow!("Invalid KTX2 header or corrupted file: {:?}", e))?;
 
@@ -111,7 +193,6 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let width = header.pixel_width as usize;
     let height = header.pixel_height.max(1) as usize;
 
-    // OOM Bounds Check: Prevent memory allocation crashes on corrupted/oversized image headers
     if width == 0 || height == 0 || width > 16384 || height > 16384 {
         return Err(anyhow!(
             "Invalid or oversized KTX2 dimensions: {}x{}",
@@ -120,19 +201,15 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         ));
     }
 
-    // Retrieve raw level payload for the base mipmap level (Level 0)
     let first_level = reader
         .levels()
         .next()
         .ok_or_else(|| anyhow!("KTX2 container contains no mip levels"))?;
 
-    // Decompress payload if Zstd/Zlib container supercompression is enabled
     let decompressed_payload = decompress_level_payload(&header, first_level.data)?;
     let level_data: &[u8] = &decompressed_payload;
 
     let format_raw = header.format.map(|f| f.value()).unwrap_or(0);
-
-    // Isolate single 2D slice for cubemaps (face_count == 6) or 2D array layers
     let slice_bytes =
         calculate_single_slice_bytes(format_raw, width, height).unwrap_or(level_data.len());
     let slice_data = &level_data[..level_data.len().min(slice_bytes)];
@@ -140,6 +217,45 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let mut rgba_u32 = vec![0u32; width * height];
 
     match format_raw {
+        // VK_FORMAT_UNDEFINED (0) -> Basis Universal / UASTC requiring transcoder
+        0 => {
+            return Err(anyhow!(
+                "UASTC / Basis Universal payload requires transcoder"
+            ));
+        }
+
+        // VK_FORMAT_R8G8B8_UNORM (23) | VK_FORMAT_R8G8B8_SRGB (29)
+        23 | 29 => {
+            let mut out_rgba = vec![255u8; width * height * 4];
+            for (i, chunk) in slice_data.chunks_exact(3).enumerate() {
+                if i * 4 + 3 >= out_rgba.len() {
+                    break;
+                }
+                out_rgba[i * 4] = chunk[0];
+                out_rgba[i * 4 + 1] = chunk[1];
+                out_rgba[i * 4 + 2] = chunk[2];
+            }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, out_rgba)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 RGB8 data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
+        }
+
+        // VK_FORMAT_B8G8R8_UNORM (30) | VK_FORMAT_B8G8R8_SRGB (36)
+        30 | 36 => {
+            let mut out_rgba = vec![255u8; width * height * 4];
+            for (i, chunk) in slice_data.chunks_exact(3).enumerate() {
+                if i * 4 + 3 >= out_rgba.len() {
+                    break;
+                }
+                out_rgba[i * 4] = chunk[2];
+                out_rgba[i * 4 + 1] = chunk[1];
+                out_rgba[i * 4 + 2] = chunk[0];
+            }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, out_rgba)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 BGR8 data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
+        }
+
         // VK_FORMAT_R8G8B8A8_UNORM (37) | VK_FORMAT_R8G8B8A8_SRGB (43)
         37 | 43 => {
             let copy_len = slice_data.len().min(width * height * 4);
@@ -159,6 +275,86 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
             bgra_to_rgba_in_place(&mut bgra_buf);
             let img = image::RgbaImage::from_raw(width as u32, height as u32, bgra_buf)
                 .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 BGRA data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
+        }
+
+        // VK_FORMAT_R16G16B16A16_SFLOAT (97)
+        97 => {
+            let mut out_rgba = vec![0u8; width * height * 4];
+            for (i, chunk) in slice_data.chunks_exact(8).enumerate() {
+                if i * 4 + 3 >= out_rgba.len() {
+                    break;
+                }
+                let r16 = u16::from_le_bytes([chunk[0], chunk[1]]);
+                let g16 = u16::from_le_bytes([chunk[2], chunk[3]]);
+                let b16 = u16::from_le_bytes([chunk[4], chunk[5]]);
+                let a16 = u16::from_le_bytes([chunk[6], chunk[7]]);
+
+                out_rgba[i * 4] = (f16_to_f32(r16).clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 1] = (f16_to_f32(g16).clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 2] = (f16_to_f32(b16).clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 3] = (f16_to_f32(a16).clamp(0.0, 1.0) * 255.0) as u8;
+            }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, out_rgba)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 f16 data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
+        }
+
+        // VK_FORMAT_R32G32B32A32_SFLOAT (109)
+        109 => {
+            let mut out_rgba = vec![0u8; width * height * 4];
+            for (i, chunk) in slice_data.chunks_exact(16).enumerate() {
+                if i * 4 + 3 >= out_rgba.len() {
+                    break;
+                }
+                let rf = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let gf = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
+                let bf = f32::from_le_bytes([chunk[8], chunk[9], chunk[10], chunk[11]]);
+                let af = f32::from_le_bytes([chunk[12], chunk[13], chunk[14], chunk[15]]);
+
+                out_rgba[i * 4] = (rf.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 1] = (gf.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 2] = (bf.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 3] = (af.clamp(0.0, 1.0) * 255.0) as u8;
+            }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, out_rgba)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 f32 data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
+        }
+
+        // VK_FORMAT_B10G11R11_UFLOAT_PACK32 (122)
+        122 => {
+            let mut out_rgba = vec![255u8; width * height * 4];
+            for (i, chunk) in slice_data.chunks_exact(4).enumerate() {
+                if i * 4 + 3 >= out_rgba.len() {
+                    break;
+                }
+                let val = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let (r, g, b) = unpack_b10g11r11(val);
+                out_rgba[i * 4] = (r.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
+            }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, out_rgba)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 B10G11R11 data"))?;
+            return Ok(DynamicImage::ImageRgba8(img));
+        }
+
+        // VK_FORMAT_E5B9G9R9_UFLOAT_PACK32 (123)
+        123 => {
+            let mut out_rgba = vec![255u8; width * height * 4];
+            for (i, chunk) in slice_data.chunks_exact(4).enumerate() {
+                if i * 4 + 3 >= out_rgba.len() {
+                    break;
+                }
+                let val = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+                let (r, g, b) = unpack_e5b9g9r9(val);
+                out_rgba[i * 4] = (r.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 1] = (g.clamp(0.0, 1.0) * 255.0) as u8;
+                out_rgba[i * 4 + 2] = (b.clamp(0.0, 1.0) * 255.0) as u8;
+            }
+            let img = image::RgbaImage::from_raw(width as u32, height as u32, out_rgba)
+                .ok_or_else(|| anyhow!("Failed to build RGBA image from KTX2 E5B9G9R9 data"))?;
             return Ok(DynamicImage::ImageRgba8(img));
         }
 
@@ -197,6 +393,7 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
             texture2ddecoder::decode_bc6_unsigned(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("BC6H UFLOAT decoding failed: {:?}", e))?;
         }
+
         // BC6H SFLOAT (144)
         144 => {
             texture2ddecoder::decode_bc6_signed(slice_data, width, height, &mut rgba_u32)
@@ -230,15 +427,23 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         }
 
         // EAC R11 (153, 154)
-        153 | 154 => {
+        153 => {
             texture2ddecoder::decode_eacr(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("EAC R11 decoding failed: {:?}", e))?;
         }
+        154 => {
+            texture2ddecoder::decode_eacr_signed(slice_data, width, height, &mut rgba_u32)
+                .map_err(|e| anyhow!("EAC R11 Signed decoding failed: {:?}", e))?;
+        }
 
         // EAC RG11 (155, 156)
-        155 | 156 => {
+        155 => {
             texture2ddecoder::decode_eacrg(slice_data, width, height, &mut rgba_u32)
                 .map_err(|e| anyhow!("EAC RG11 decoding failed: {:?}", e))?;
+        }
+        156 => {
+            texture2ddecoder::decode_eacrg_signed(slice_data, width, height, &mut rgba_u32)
+                .map_err(|e| anyhow!("EAC RG11 Signed decoding failed: {:?}", e))?;
         }
 
         // ASTC 2D formats (157..=184 | 1000066000..=1000066013)
@@ -261,10 +466,7 @@ pub fn decode_ktx2_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         }
 
         _ => {
-            return Err(anyhow!(
-                "Unsupported or unhandled KTX2 VkFormat raw enum: {}",
-                format_raw
-            ));
+            return Err(anyhow!("Unsupported VkFormat enum ID: {}", format_raw));
         }
     }
 

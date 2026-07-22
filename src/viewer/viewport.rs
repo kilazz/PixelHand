@@ -199,6 +199,7 @@ pub fn trigger_viewport_update(
             Ok((sprite_w, sprite_h, o, d, o_n, d_n, raw_diff, hist_img)) => {
                 let _ = app_weak_clone.upgrade_in_event_loop(move |ui| {
                     let viewport_state = ui.global::<ViewportState>();
+                    let diag = ui.global::<crate::app::Diagnostics>();
 
                     viewport_state.set_sprite_width(sprite_w);
                     viewport_state.set_sprite_height(sprite_h);
@@ -206,7 +207,12 @@ pub fn trigger_viewport_update(
 
                     if let Some(img) = o {
                         viewport_state.set_image_original(convert_to_slint_image(&img));
+                    } else {
+                        diag.set_status_text(
+                            "Error: Failed to decode target image format. Check Log tab.".into(),
+                        );
                     }
+
                     if let Some(img) = d {
                         viewport_state.set_image_duplicate(convert_to_slint_image(&img));
                     }
