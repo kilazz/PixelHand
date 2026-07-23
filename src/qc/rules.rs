@@ -136,8 +136,9 @@ pub fn estimate_vram(width: u32, height: u32, format: &str, mipmaps: u32, is_cub
     let pitch_alignment: u64 = 256;
 
     for i in 0..mips {
-        let w = (width >> i).max(1) as u64;
-        let h = (height >> i).max(1) as u64;
+        // Use checked_shr to prevent panics if mipmap count >= 32
+        let w = width.checked_shr(i).unwrap_or(0).max(1) as u64;
+        let h = height.checked_shr(i).unwrap_or(0).max(1) as u64;
 
         let mip_bytes = if block_compressed {
             let blocks_w = w.div_ceil(4);
@@ -667,6 +668,7 @@ pub fn check_normal_map_integrity(
         }
         NormalMapFormat::Bc5RxGy => {
             for pixel in rgb_img.pixels() {
+                // Reconstruct tangent-space X and Y from Red and Green channels UNORM [0..255] -> [-1.0..1.0]
                 let x = (pixel[0] as f32 / 255.0) * 2.0 - 1.0;
                 let y = (pixel[1] as f32 / 255.0) * 2.0 - 1.0;
                 let sq_len = x * x + y * y;

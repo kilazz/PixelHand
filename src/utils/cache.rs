@@ -240,10 +240,18 @@ pub async fn get_channel_preview_image(
     Some(out_img.into_rgba8())
 }
 
-/// Loads thumbnail textures from disk cache, generating compressed fallback files during misses.
+/// Loads thumbnail textures from memory/disk cache, generating compressed fallback files during misses.
 pub fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
     if !ENABLE_PREVIEWS.load(Ordering::Relaxed) {
         return None;
+    }
+
+    let normalized_key = normalize_path_key(path_str);
+    let manager = get_cache_manager();
+
+    // FAST PATH: Check lockless memory cache first
+    if let Some(cached) = manager.thumbnails.get(&normalized_key) {
+        return Some(cached.composite.clone());
     }
 
     let path = PathBuf::from(path_str);
@@ -286,7 +294,7 @@ pub fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
         None
     };
 
-    // Try reading the tiny pre-rendered PNG from the disk cache safely
+    // DISK CACHE PATH: Try reading pre-rendered PNG from disk
     if let Some(ref cp) = cache_path
         && cp.is_file()
         && let Ok(img) = image::open(cp)
@@ -308,7 +316,7 @@ pub fn load_thumbnail_for_path(path_str: &str) -> Option<image::RgbaImage> {
         _ => image::imageops::FilterType::Lanczos3,
     };
 
-    // Fallback: Parse the actual texture and downscale
+    // FALLBACK PATH: Decode actual texture and scale down
     if let Ok(mut img) =
         crate::format_loaders::open_image_with_dds_fallback(&path, Some(target_size), None)
     {
@@ -376,9 +384,14 @@ pub fn run_vector_cache_garbage_collector() {
             let Ok(meta) = path.metadata() else {
                 continue;
             };
-            let accessed_time = meta.accessed().unwrap_or(now);
 
-            if let Ok(age) = now.duration_since(accessed_time)
+            let last_used_time = meta
+                .accessed()
+                .ok()
+                .or_else(|| meta.modified().ok())
+                .unwrap_or(now);
+
+            if let Ok(age) = now.duration_since(last_used_time)
                 && age > max_age
             {
                 let _ = fs::remove_dir_all(&path);
@@ -386,7 +399,7 @@ pub fn run_vector_cache_garbage_collector() {
             }
 
             let folder_size = get_dir_size(&path);
-            cache_folders.push((path, accessed_time, folder_size));
+            cache_folders.push((path, last_used_time, folder_size));
         }
     }
 

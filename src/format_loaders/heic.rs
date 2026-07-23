@@ -63,23 +63,30 @@ impl ImageFormatLoader for HeicLoader {
 
     fn extract_metadata(&self, path: &Path) -> Result<QcImageMetadata> {
         let size = std::fs::metadata(path)?.len();
-        let bytes = std::fs::read(path)?;
 
-        let mut w = 0;
-        let mut h = 0;
+        // Obtain dimensions efficiently without reading the entire payload into RAM
+        let (w, h) = if let Ok(dim) = imagesize::size(path) {
+            (dim.width as u32, dim.height as u32)
+        } else {
+            (0, 0)
+        };
+
         let mut has_alpha = false;
         let mut bit_depth = 8;
         let mut color_space = "sRGB".to_string();
 
-        if let Ok(info) = heic::ImageInfo::from_bytes(&bytes) {
-            w = info.width;
-            h = info.height;
-            has_alpha = info.has_alpha;
-            bit_depth = info.bit_depth as u32;
-            color_space = resolve_cicp_color_space(info.color_primaries);
-        } else if let Ok(dim) = imagesize::size(path) {
-            w = dim.width as u32;
-            h = dim.height as u32;
+        // Read only the initial 64 KB header chunk to parse ISOBMFF/CICP properties
+        if let Ok(file) = std::fs::File::open(path) {
+            use std::io::Read;
+            let mut handle = file.take(64 * 1024);
+            let mut header_bytes = Vec::new();
+            if handle.read_to_end(&mut header_bytes).is_ok()
+                && let Ok(info) = heic::ImageInfo::from_bytes(&header_bytes)
+            {
+                has_alpha = info.has_alpha;
+                bit_depth = info.bit_depth as u32;
+                color_space = resolve_cicp_color_space(info.color_primaries);
+            }
         }
 
         let estimated_vram = crate::qc::rules::estimate_vram(w, h, "HEIC", 1, false);

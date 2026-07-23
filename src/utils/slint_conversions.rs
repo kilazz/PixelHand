@@ -97,7 +97,7 @@ pub fn convert_to_slint_row(
 // ==========================================
 
 /// Synchronizes active Slint list results and grid representations based on filters and collapse states.
-/// Implements high-performance dynamic viewport pagination to handle 100k+ assets instantly.
+/// Implements high-performance dynamic viewport virtualization & pagination to handle 100k+ assets instantly.
 pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
     let search_method = scan_config.get_search_method();
     let is_empty = match search_method {
@@ -287,7 +287,7 @@ pub fn update_results_ui(scan_config: &ScanConfig, state: &mut AppState) {
             }
         }
         _ => {
-            // Map, filter and group duplicate clusters on the fly (using FilteredGroupMatch type)
+            // Map, filter and group duplicate clusters on the fly
             let filtered_groups: Vec<FilteredGroupMatch> = state
                 .groups
                 .iter()

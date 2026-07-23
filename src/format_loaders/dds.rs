@@ -215,6 +215,16 @@ fn analyze_header(dds_bytes: &[u8]) -> Result<AnalyzedHeaderInfo> {
 
     let height = read_u32_le(dds_bytes, 12).context("Failed to read height")?;
     let width = read_u32_le(dds_bytes, 16).context("Failed to read width")?;
+
+    // OOM BOUNDS CHECK: Prevent memory over-allocation on malformed headers
+    if width == 0 || height == 0 || width > 16384 || height > 16384 {
+        return Err(anyhow!(
+            "Invalid or oversized DDS dimensions: {}x{} (max 16384x16384)",
+            width,
+            height
+        ));
+    }
+
     let pf_size = read_u32_le(dds_bytes, 76).context("Failed to read pixel format size")?;
     if pf_size != 32 {
         return Err(anyhow!("Invalid DDS_PIXELFORMAT size"));
@@ -500,7 +510,6 @@ impl ImageFormatLoader for DdsLoader {
         target_size: Option<u32>,
         _tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
-        // Safe, highly-optimized standard file I/O with zero crash risk
         let bytes = std::fs::read(path).context("Failed to read DDS file from disk")?;
         decode_dds_bytes(&bytes, target_size)
     }
@@ -533,6 +542,13 @@ impl ImageFormatLoader for DdsLoader {
 
         let h = read_u32_le(&bytes, 12).unwrap_or(0);
         let w = read_u32_le(&bytes, 16).unwrap_or(0);
+
+        if w == 0 || h == 0 || w > 16384 || h > 16384 {
+            return Err(anyhow!(
+                "Invalid or oversized DDS dimensions in metadata extraction"
+            ));
+        }
+
         let mips = read_u32_le(&bytes, 28).unwrap_or(0);
         let mipmap_count = if mips > 0 { mips } else { 1 };
 

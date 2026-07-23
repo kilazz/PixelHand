@@ -87,7 +87,7 @@ fn delete_files_sync(paths: Vec<String>) -> anyhow::Result<()> {
 }
 
 /// Transforms duplicates into hard links pointing to the master source file safely.
-/// Uses atomic creation to guarantee target file protection if hardlinking fails (e.g., cross-drive EXDEV).
+/// Uses atomic creation and explicit target removal to ensure compatibility across OS targets (Windows/Linux/macOS).
 fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     let mut error_count = 0;
 
@@ -129,10 +129,22 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // Atomically replace the original target file with the validated hard link
+        if target.exists()
+            && let Err(e) = fs::remove_file(&target)
+        {
+            tracing::error!(
+                "Failed to remove target file before link replacement: {}",
+                e
+            );
+            let _ = fs::remove_file(&temp_target);
+            error_count += 1;
+            continue;
+        }
+
+        // Replace the original target file with the created hard link
         if let Err(e) = fs::rename(&temp_target, &target) {
             tracing::error!(
-                "Failed to atomically replace target '{}' with created hard link: {}",
+                "Failed to replace target '{}' with created hard link: {}",
                 target.display(),
                 e
             );
@@ -153,7 +165,7 @@ fn create_hardlinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
 
 /// Transforms duplicates into reflinks pointing to the master source file safely.
 /// Falls back to deep copies if the underlying filesystem does not support reflinking.
-/// Uses atomic creation to guarantee target file protection if operations fail.
+/// Uses atomic creation and explicit target removal to ensure compatibility across OS targets.
 fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
     let mut error_count = 0;
 
@@ -195,10 +207,22 @@ fn create_reflinks_sync(pairs: Vec<(String, String)>) -> anyhow::Result<()> {
             continue;
         }
 
-        // Atomically replace the original target file with the validated reflink
+        if target.exists()
+            && let Err(e) = fs::remove_file(&target)
+        {
+            tracing::error!(
+                "Failed to remove target file before reflink replacement: {}",
+                e
+            );
+            let _ = fs::remove_file(&temp_target);
+            error_count += 1;
+            continue;
+        }
+
+        // Replace the original target file with the created reflink
         if let Err(e) = fs::rename(&temp_target, &target) {
             tracing::error!(
-                "Failed to atomically replace target '{}' with created reflink: {}",
+                "Failed to replace target '{}' with created reflink: {}",
                 target.display(),
                 e
             );

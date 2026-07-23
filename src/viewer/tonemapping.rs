@@ -75,12 +75,12 @@ pub fn calculate_auto_exposure(hdr_pixels: &[f32]) -> f32 {
         return 1.0;
     }
 
-    // Sum log-luminance in parallel across multiple CPU cores
+    // Filter out non-finite (NaN / Infinity) float values prior to log calculations
     let sum_log_lum = hdr_pixels
         .par_chunks_exact(4)
+        .filter(|hdr| hdr[0].is_finite() && hdr[1].is_finite() && hdr[2].is_finite())
         .map(|hdr| {
             let y = hdr[0] * 0.2126 + hdr[1] * 0.7152 + hdr[2] * 0.0722;
-            // Guard against NaN poisoning by clamping y before applying log2
             (y.max(0.0) + 1e-5).log2()
         })
         .sum::<f32>();
@@ -91,7 +91,7 @@ pub fn calculate_auto_exposure(hdr_pixels: &[f32]) -> f32 {
     // Standard photographic key value representing middle grey (18%)
     let key_value = 0.18;
 
-    if geometric_mean > 1e-5 {
+    if geometric_mean.is_finite() && geometric_mean > 1e-5 {
         // Clamp the final factor to prevent extreme blowing out of dark textures
         (key_value / geometric_mean).clamp(0.01, 100.0)
     } else {

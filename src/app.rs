@@ -78,8 +78,10 @@ impl std::io::Write for UiLogWriter {
         }
 
         let ctx = get_ctx();
-        let mut lock = ctx.log_file.lock();
-        if let Some(ref mut file) = *lock {
+        // Collapsed if let chain to resolve clippy::collapsible_if warning
+        if let Some(mut lock) = ctx.log_file.try_lock()
+            && let Some(ref mut file) = *lock
+        {
             let _ = file.write_all(buf);
             let _ = file.flush();
         }
@@ -89,8 +91,10 @@ impl std::io::Write for UiLogWriter {
 
     fn flush(&mut self) -> std::io::Result<()> {
         let ctx = get_ctx();
-        let mut lock = ctx.log_file.lock();
-        if let Some(ref mut file) = *lock {
+        // Collapsed if let chain to resolve clippy::collapsible_if warning
+        if let Some(mut lock) = ctx.log_file.try_lock()
+            && let Some(ref mut file) = *lock
+        {
             let _ = file.flush();
         }
         Ok(())

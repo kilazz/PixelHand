@@ -93,7 +93,12 @@ pub async fn generate_visual_reports(
             }
 
             let mut files = group.files.clone();
-            files.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap());
+            // Safe float sorting fallback prevents task panics when comparing NaN similarity values
+            files.sort_by(|a, b| {
+                b.similarity
+                    .partial_cmp(&a.similarity)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             files.truncate(MAX_IMGS_PER_GROUP);
 
             let total_pages = files.chunks(IMGS_PER_FILE).len();

@@ -23,7 +23,12 @@ impl ImageFormatLoader for PsdLoader {
     ) -> Result<DynamicImage> {
         let bytes = std::fs::read(path).context("Failed to read PSD file from disk")?;
 
-        // Catch potential `unimplemented!()` panics from `psd` crate on Zip-compressed layers
+        // Early validation: Check magic header bytes ("8BPS") before invoking the parser
+        if bytes.len() < 26 || &bytes[0..4] != b"8BPS" {
+            return Err(anyhow!("Invalid PSD header magic bytes (expected '8BPS')"));
+        }
+
+        // Safely catch potential panics from the `psd` crate (e.g., unsupported Zip-compressed layers)
         let psd_result = std::panic::catch_unwind(|| psd::Psd::from_bytes(&bytes));
 
         let psd = match psd_result {
@@ -73,7 +78,11 @@ impl ImageFormatLoader for PsdLoader {
         let mut color_space = "sRGB".to_string();
         let mut compression_format = "PSD".to_string();
 
-        if let Ok(Ok(psd)) = std::panic::catch_unwind(|| psd::Psd::from_bytes(&bytes)) {
+        let is_valid_psd_header = bytes.len() >= 26 && &bytes[0..4] == b"8BPS";
+
+        if is_valid_psd_header
+            && let Ok(Ok(psd)) = std::panic::catch_unwind(|| psd::Psd::from_bytes(&bytes))
+        {
             w = psd.width();
             h = psd.height();
 

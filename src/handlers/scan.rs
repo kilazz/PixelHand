@@ -22,7 +22,7 @@ fn compare_partial<T: PartialOrd>(a: T, b: T, asc: bool) -> std::cmp::Ordering {
     if asc { order } else { order.reverse() }
 }
 
-/// Decodes Percent-Encoded URL string sequences (e.g. %20, %23, UTF-8 multi-byte sequences)
+/// Decodes Percent-Encoded URL string sequences (e.g., %20, %23, UTF-8 multi-byte sequences)
 /// into a native valid path string.
 fn decode_url(url: &str) -> String {
     let mut bytes = Vec::with_capacity(url.len());
@@ -177,7 +177,7 @@ impl ScanController {
     }
 
     fn handle_path_dropped(&self, path_str: &str) {
-        // Clean up OS-specific URI prefixes and URL-encoded characters from Drag&Drop operations
+        // Clean up OS-specific URI prefixes and URL-encoded characters from Drag & Drop operations
         let mut clean_path = path_str.strip_prefix("file://").unwrap_or(path_str);
         if cfg!(windows) && clean_path.starts_with('/') {
             clean_path = &clean_path[1..];
@@ -310,14 +310,24 @@ impl ScanController {
         let mut params = ScanParams::from_store(&scan_config, self.cancel_token.clone());
 
         let ui_weak_progress = self.ui_weak.clone();
+        let last_update = Arc::new(parking_lot::Mutex::new(std::time::Instant::now()));
+
+        // Throttle progress events sent to Slint event loop (~30 FPS / 33ms interval)
+        // to prevent event loop flooding during high-speed parallel worker threads execution.
         params.on_progress = Some(Arc::new(move |prog, current, total| {
-            let _ = ui_weak_progress.upgrade_in_event_loop(move |ui| {
-                let diag = ui.global::<Diagnostics>();
-                diag.set_progress(prog);
-                diag.set_status_text(
-                    format!("Processing assets ({} / {})...", current, total).into(),
-                );
-            });
+            let mut last = last_update.lock();
+            let now = std::time::Instant::now();
+
+            if now.duration_since(*last).as_millis() >= 33 || current == total {
+                *last = now;
+                let _ = ui_weak_progress.upgrade_in_event_loop(move |ui| {
+                    let diag = ui.global::<Diagnostics>();
+                    diag.set_progress(prog);
+                    diag.set_status_text(
+                        format!("Processing assets ({} / {})...", current, total).into(),
+                    );
+                });
+            }
         }));
 
         diagnostics.set_is_scanning(true);

@@ -21,9 +21,10 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let block_y = bytes[5] as usize;
     let block_z = bytes[6] as usize;
 
-    if block_x < 4 || block_y < 4 || block_z == 0 {
+    // Validate block sizes against standard 2D ASTC specification limits (4x4 to 12x12)
+    if block_x < 4 || block_y < 4 || block_x > 12 || block_y > 12 || block_z == 0 {
         return Err(anyhow!(
-            "Invalid ASTC block dimensions: {}x{}x{}",
+            "Invalid ASTC block dimensions: {}x{}x{} (expected block sizes 4..12)",
             block_x,
             block_y,
             block_z

@@ -132,12 +132,17 @@ impl ViewerController {
                     nz /= len;
                 }
 
-                // Calculate Pixel Delta Difference with duplicate image
-                let diff_str = if let Some(d) = dup_img
-                    && x < d.width()
-                    && y < d.height()
-                {
-                    let dp = d.get_pixel(x, y);
+                // Calculate scale ratio to map inspector sampling coordinates dynamically
+                // when original and duplicate images have mismatched resolutions (e.g. 2048x2048 vs 1024x1024)
+                let diff_str = if let Some(d) = dup_img {
+                    let scale_x = d.width() as f32 / o.width() as f32;
+                    let scale_y = d.height() as f32 / o.height() as f32;
+
+                    let dx = ((x as f32 * scale_x).round() as u32).min(d.width().saturating_sub(1));
+                    let dy =
+                        ((y as f32 * scale_y).round() as u32).min(d.height().saturating_sub(1));
+
+                    let dp = d.get_pixel(dx, dy);
                     let delta = (p[0].abs_diff(dp[0]) as f32
                         + p[1].abs_diff(dp[1]) as f32
                         + p[2].abs_diff(dp[2]) as f32)

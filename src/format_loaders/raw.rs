@@ -20,14 +20,18 @@ fn extract_embedded_jpeg_preview(bytes: &[u8]) -> Option<DynamicImage> {
     let mut best_img: Option<DynamicImage> = None;
     let mut max_pixels = 0u64;
 
-    // Scan for all embedded JPEG SOI markers (0xFF, 0xD8, 0xFF) inside the RAW container
+    // Limit scan window to the first 16 MB of the RAW file to prevent O(N*M) loop hangs
+    let scan_limit = bytes.len().min(16 * 1024 * 1024);
     let mut i = 0;
-    while i < bytes.len().saturating_sub(4) {
+
+    while i < scan_limit.saturating_sub(4) {
         if bytes[i] == 0xFF && bytes[i + 1] == 0xD8 && bytes[i + 2] == 0xFF {
             let start = i;
-            // Search for corresponding EOI marker (0xFF, 0xD9)
+            // Cap maximum candidate JPEG search distance to 10 MB per stream
+            let max_end = (start + 10 * 1024 * 1024).min(bytes.len().saturating_sub(2));
             let mut end = start + 512;
-            while end < bytes.len().saturating_sub(2) {
+
+            while end < max_end {
                 if bytes[end] == 0xFF && bytes[end + 1] == 0xD9 {
                     end += 2;
                     break;
@@ -44,7 +48,8 @@ fn extract_embedded_jpeg_preview(bytes: &[u8]) -> Option<DynamicImage> {
                     best_img = Some(img);
                 }
             }
-            i += 512; // Skip ahead after finding an embedded JPEG block
+            // Skip index directly past the current parsed stream
+            i = end.max(i + 512);
         } else {
             i += 1;
         }

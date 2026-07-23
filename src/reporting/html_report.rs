@@ -6,6 +6,14 @@ use std::path::Path;
 
 use crate::state::models::{DuplicateFileSummary, DuplicateGroupSummary, QcIssueSummary};
 
+/// Escapes special characters for safe HTML output rendering.
+fn escape_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Generates a standalone, print-ready HTML/PDF report with full asset metadata and CSS styling.
 pub fn generate_html_report(
     groups: &[DuplicateGroupSummary],
@@ -236,7 +244,7 @@ pub fn generate_html_report(
                         </thead>
                         <tbody>"#,
                 idx + 1,
-                group.hash,
+                escape_html(&group.hash),
                 crate::utils::helpers::format_size(group_size)
             );
 
@@ -263,14 +271,14 @@ pub fn generate_html_report(
                         <td>{}</td>
                         <td class="path-cell">{}</td>
                     </tr>"#,
-                    name,
-                    file.compression_format,
+                    escape_html(&name),
+                    escape_html(&file.compression_format),
                     file.width,
                     file.height,
                     file.mipmap_count,
                     crate::utils::helpers::format_size(file.size),
                     score_str,
-                    file.path
+                    escape_html(&file.path)
                 );
             }
 
@@ -308,7 +316,10 @@ pub fn generate_html_report(
                     <td>{}</td>
                     <td class="path-cell">{}</td>
                 </tr>"#,
-                name, issue.issue, issue.details, issue.path
+                escape_html(&name),
+                escape_html(&issue.issue),
+                escape_html(&issue.details),
+                escape_html(&issue.path)
             );
         }
 
@@ -351,14 +362,14 @@ pub fn generate_html_report(
                     <td>{}</td>
                     <td class="path-cell">{}</td>
                 </tr>"#,
-                name,
-                file.compression_format,
+                escape_html(&name),
+                escape_html(&file.compression_format),
                 file.width,
                 file.height,
                 file.mipmap_count,
                 if file.is_cubemap { "YES" } else { "NO" },
                 crate::utils::helpers::format_size(file.size),
-                file.path
+                escape_html(&file.path)
             );
         }
 

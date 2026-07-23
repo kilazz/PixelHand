@@ -59,6 +59,8 @@ pub fn decode_qoi_bytes(bytes: &[u8]) -> Result<DynamicImage> {
                     px[2] = bytes[p + 2];
                     px[3] = bytes[p + 3];
                     p += 4;
+                } else {
+                    p = chunks_len;
                 }
             } else if b1 == 0b11111110 {
                 // QOI_OP_RGB
@@ -67,6 +69,8 @@ pub fn decode_qoi_bytes(bytes: &[u8]) -> Result<DynamicImage> {
                     px[1] = bytes[p + 1];
                     px[2] = bytes[p + 2];
                     p += 3;
+                } else {
+                    p = chunks_len;
                 }
             } else if (b1 & 0b11000000) == 0b00000000 {
                 // QOI_OP_INDEX
@@ -91,6 +95,8 @@ pub fn decode_qoi_bytes(bytes: &[u8]) -> Result<DynamicImage> {
                     px[0] = px[0].wrapping_add(dr);
                     px[1] = px[1].wrapping_add(vg);
                     px[2] = px[2].wrapping_add(db);
+                } else {
+                    p = chunks_len;
                 }
             } else if (b1 & 0b11000000) == 0b11000000 {
                 // QOI_OP_RUN

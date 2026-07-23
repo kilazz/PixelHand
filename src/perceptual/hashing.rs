@@ -111,12 +111,19 @@ pub fn compute_dhash_64(luma: &image::GrayImage) -> u64 {
 /// valid RGB visual data (common in game engines or packed textures).
 pub fn is_vfx_transparent_texture(rgba: &RgbaImage) -> bool {
     let pixels = rgba.as_raw();
-
-    let has_opaque_alpha = pixels.chunks_exact(4).any(|pixel| pixel[3] > 0);
-    if has_opaque_alpha {
+    let total_pixels = pixels.len() / 4;
+    if total_pixels == 0 {
         return false;
     }
 
+    // Check if more than 0.1% of pixels are opaque (> 10 alpha) instead of triggering on a single noise pixel
+    let opaque_count = pixels.chunks_exact(4).filter(|pixel| pixel[3] > 10).count();
+
+    if opaque_count as f32 > (total_pixels as f32 * 0.001) {
+        return false;
+    }
+
+    // Verify if RGB channels contain actual visual content
     pixels
         .chunks_exact(4)
         .any(|pixel| pixel[0] > 0 || pixel[1] > 0 || pixel[2] > 0)
@@ -178,14 +185,20 @@ pub fn preprocess_image_channels(
                 let mut bg = RgbaImage::new(rgba_img.width(), rgba_img.height());
                 let bg_slice: &mut [u8] = &mut bg;
 
+                // Blending with a neutral mid-gray background (128, 128, 128) instead of black (0, 0, 0)
+                // prevents dark fringing artifacts along mask boundaries from skewing dHash perceptual scores.
+                let neutral_bg = 128.0f32;
+
                 bg_slice
                     .chunks_exact_mut(4)
                     .zip(rgba_img.as_raw().chunks_exact(4))
                     .for_each(|(dst, src)| {
                         let alpha = src[3] as f32 / 255.0;
-                        dst[0] = (src[0] as f32 * alpha) as u8;
-                        dst[1] = (src[1] as f32 * alpha) as u8;
-                        dst[2] = (src[2] as f32 * alpha) as u8;
+                        let inv_alpha = 1.0 - alpha;
+
+                        dst[0] = (src[0] as f32 * alpha + neutral_bg * inv_alpha) as u8;
+                        dst[1] = (src[1] as f32 * alpha + neutral_bg * inv_alpha) as u8;
+                        dst[2] = (src[2] as f32 * alpha + neutral_bg * inv_alpha) as u8;
                         dst[3] = 255;
                     });
 

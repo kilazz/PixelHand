@@ -72,10 +72,7 @@ where
         .build()
         .context("Failed to build secure HTTP client")?;
 
-    tracing::info!(
-        "Connecting to Hugging Face CDN: sending GET request to {}",
-        url
-    );
+    tracing::info!("Connecting to CDN: sending GET request to {}", url);
 
     let response = client.get(url).send().await.context(
         "HTTP request failed. Connection could be blocked by network settings or requires a VPN.",
@@ -124,6 +121,16 @@ where
     file.flush()
         .await
         .context("Failed to flush file buffers to disk")?;
+
+    // Validate that the full payload was received matching the server Content-Length
+    if total_bytes > 0 && bytes_downloaded != total_bytes {
+        return Err(anyhow!(
+            "Incomplete download for '{}': received {} of {} expected bytes",
+            dest_path.display(),
+            bytes_downloaded,
+            total_bytes
+        ));
+    }
 
     Ok(())
 }
@@ -325,9 +332,11 @@ pub async fn verify_and_download_models(
     if model == AiModelType::Llm2ClipBase {
         let visual_dest = model_dir.join("visual.onnx");
         let text_dest = model_dir.join("text.onnx");
-        if text_dest.exists() && !visual_dest.exists() {
+
+        let is_visual_valid = verify_file_integrity(&visual_dest).await;
+        if !is_visual_valid && verify_file_integrity(&text_dest).await {
             tracing::info!(
-                "Duplicating single-file LLM2CLIP model on disk to prevent additional downloads..."
+                "Duplicating single-file LLM2CLIP model on disk to prepare visual model..."
             );
             tokio::fs::copy(&text_dest, &visual_dest)
                 .await

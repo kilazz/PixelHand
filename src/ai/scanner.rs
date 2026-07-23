@@ -351,15 +351,17 @@ async fn scan_and_index_directory(
             newly_encoded_records.extend(chunk_records);
         }
 
+        // Chunk delete SQL filters in batches of 50 paths to prevent SQL AST depth overflow in DataFusion
         if !paths_to_prune.is_empty() {
-            let mut prune_filter = String::new();
-            for (idx, old_p) in paths_to_prune.iter().enumerate() {
-                if idx > 0 {
-                    prune_filter.push_str(" OR ");
-                }
-                prune_filter.push_str(&format!("path = '{}'", old_p.replace("'", "''")));
+            let prune_vec: Vec<&String> = paths_to_prune.iter().collect();
+            for chunk in prune_vec.chunks(50) {
+                let prune_filter = chunk
+                    .iter()
+                    .map(|old_p| format!("path = '{}'", old_p.replace("'", "''")))
+                    .collect::<Vec<_>>()
+                    .join(" OR ");
+                let _ = db.delete(&prune_filter).await;
             }
-            let _ = db.delete(&prune_filter).await;
         }
 
         db.add_batch(&newly_encoded_records).await?;
@@ -388,7 +390,7 @@ pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGr
 
     let (nprobes, refine_factor) = map_precision_presets(params.ai.search_precision);
 
-    //O(1) HashMap lookup table eliminates the previous O(N^2) linear search bottleneck
+    // O(1) HashMap lookup table eliminates linear search bottleneck
     let mut lookup_map: std::collections::HashMap<(&str, &str), usize> =
         std::collections::HashMap::with_capacity(records.len());
     for (idx, r) in records.iter().enumerate() {
@@ -407,8 +409,9 @@ pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGr
             .map(|(idx, query_vec)| {
                 let db_clone = db.clone();
                 async move {
+                    // Expanded query limit from 10 to 100 to prevent cluster fragmentation under IVF-PQ quantization
                     let matches = db_clone
-                        .search_similarity(&query_vec, 10, Some(nprobes), Some(refine_factor))
+                        .search_similarity(&query_vec, 100, Some(nprobes), Some(refine_factor))
                         .await?;
                     Ok::<_, anyhow::Error>((idx, matches))
                 }
@@ -421,15 +424,14 @@ pub async fn run_ai_duplicate_scan(params: ScanParams) -> Result<Vec<DuplicateGr
             }
 
             let (src_idx, matches) = res?;
-            let src_vec = &records[src_idx].vector; // Bypassing LanceDB L2 squared metric inaccuracies
+            let src_vec = &records[src_idx].vector;
 
             for m in matches {
-                // Collapsed condition and instant O(1) target index resolution
                 if let Some(&target_idx) = lookup_map.get(&(m.path.as_str(), m.channel.as_str()))
                     && target_idx != src_idx
                 {
                     let target_vec = &records[target_idx].vector;
-                    // Calculate exact mathematical Dot Product (Cosine Similarity) ensuring 100% precision
+                    // Calculate exact mathematical Dot Product (Cosine Similarity)
                     let dot_product: f32 = src_vec
                         .iter()
                         .zip(target_vec.iter())
@@ -558,7 +560,6 @@ pub async fn run_ai_search(params: ScanParams) -> Result<Vec<AiSearchResultSumma
         engine.encode_text(&params.paths.query_text)?
     };
 
-    // Increased max extraction limits to properly fill UI tables on Semantic queries
     let search_results = db
         .search_similarity(&query_vector, 250, Some(nprobes), Some(refine_factor))
         .await?;
@@ -566,8 +567,6 @@ pub async fn run_ai_search(params: ScanParams) -> Result<Vec<AiSearchResultSumma
     let results = search_results
         .into_iter()
         .map(|r| {
-            // LanceDB with DistanceType::Cosine returns Cosine Distance D = 1.0 - CosineSimilarity
-            // Cosine Similarity = 1.0 - D
             let similarity = (1.0 - r.distance).clamp(0.0, 1.0) * 100.0;
             AiSearchResultSummary {
                 path: r.path,
