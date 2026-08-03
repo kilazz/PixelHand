@@ -46,6 +46,7 @@ fn parse_dimensions_string(s: &str) -> Option<(u32, u32)> {
     None
 }
 
+/// Scans raw binary buffer for embedded JPEG or PNG images and swaps BGR to RGB
 fn scan_embedded_image(bytes: &[u8]) -> Option<DynamicImage> {
     if bytes.len() < 128 {
         return None;
@@ -58,7 +59,10 @@ fn scan_embedded_image(bytes: &[u8]) -> Option<DynamicImage> {
         {
             let slice = &bytes[i..];
             if let Ok(img) = image::load_from_memory(slice) {
-                return Some(img);
+                let mut rgba = img.to_rgba8();
+                // Unreal Engine BGRA embedded JPEG thumbnails
+                crate::utils::image_processing::bgra_to_rgba_in_place(&mut rgba);
+                return Some(DynamicImage::ImageRgba8(rgba));
             }
         }
         i += 1;
