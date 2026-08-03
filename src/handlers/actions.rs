@@ -65,7 +65,6 @@ impl ActionsController {
             self_clone.export_html();
         });
 
-        // Register diagnostics / log exports
         let diagnostics = ui.global::<Diagnostics>();
 
         let self_clone = self.clone();
@@ -113,7 +112,6 @@ impl ActionsController {
                         ))));
                         scan_cfg.set_has_results(false);
 
-                        // Clear and automatically commit/flush to UI
                         store_clone.update(|state| {
                             state.groups.clear();
                             state.qc_issues.clear();
@@ -320,19 +318,7 @@ impl ActionsController {
                     }
 
                     self.store.update(|state| {
-                        let normalized = utils::fs::normalize_path(&path_str);
-                        state
-                            .qc_issues
-                            .retain(|r| utils::fs::normalize_path(&r.path) != normalized);
-                        state
-                            .inventory_files
-                            .retain(|r| utils::fs::normalize_path(&r.path) != normalized);
-                        for group in &mut state.groups {
-                            group
-                                .files
-                                .retain(|r| utils::fs::normalize_path(&r.path) != normalized);
-                        }
-                        state.groups.retain(|g| g.files.len() >= 2);
+                        state.remove_path(&path_str);
                     });
                 }
             }
@@ -384,23 +370,9 @@ impl ActionsController {
 
                     self.store.update(|state| {
                         if !state.groups.is_empty() {
-                            let group_idx_us = group_idx as usize;
-                            if group_idx_us < state.groups.len() {
-                                state.groups.remove(group_idx_us);
-
-                                let mut new_collapsed = std::collections::HashSet::new();
-                                for &idx in &state.collapsed_groups {
-                                    if idx < group_idx {
-                                        new_collapsed.insert(idx);
-                                    } else if idx > group_idx {
-                                        new_collapsed.insert(idx - 1);
-                                    }
-                                }
-                                state.collapsed_groups = new_collapsed;
-                            }
+                            state.remove_group(group_idx);
                         } else if let Some(ref target_issue) = target_issue_type {
-                            state.qc_issues.retain(|r| &r.issue != target_issue);
-                            state.collapsed_groups.clear();
+                            state.remove_qc_issue_type(target_issue);
                         }
                     });
 

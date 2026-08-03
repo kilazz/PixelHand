@@ -34,6 +34,7 @@ zstd = "0.13.3"
 flate2 = "1.1.9"
 basisu = "0.1.0"
 ###
+oozextract = "0.5.4"
 unreal_asset = { git = "https://github.com/AstroTechies/unrealmodding.git", package = "unreal_asset" }
 
 # Image Hashes & Visual Similarity Metrics

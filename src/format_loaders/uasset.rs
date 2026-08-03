@@ -12,6 +12,8 @@ use unreal_asset::{
     properties::{Property, PropertyDataTrait, int_property::BytePropertyValue},
 };
 
+use crate::compression::gpu_block::{TextureBlockFormat, decode_gpu_block};
+use crate::compression::oodle::decompress_oodle_lz;
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
 use crate::viewer::tonemapping::TonemapConfig;
@@ -130,11 +132,9 @@ fn process_properties(
                 }
             }
             Property::StructProperty(struct_prop) => {
-                // Recurse into nested structs like FTextureSource ("Source")
                 process_properties(&struct_prop.value, width, height, format_str);
             }
             Property::ArrayProperty(array_prop) => {
-                // Recurse into array elements
                 for elem in &array_prop.value {
                     process_properties(std::slice::from_ref(elem), width, height, format_str);
                 }
@@ -233,7 +233,6 @@ fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, 
                 let mut height = 0u32;
                 let mut format_str = "PF_UNKNOWN".to_string();
 
-                // Recursively parse top-level and nested properties (Source, etc.)
                 process_properties(
                     &normal_export.properties,
                     &mut width,
@@ -269,7 +268,7 @@ fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, 
     ))
 }
 
-/// Locates the largest contiguous Mip 0 binary payload from .ubulk, .uexp, or .uasset.
+/// Locates the largest contiguous Mip 0 binary payload and decompresses Oodle LZ if needed.
 fn locate_bulk_pixel_payload(
     path: &Path,
     width: u32,
@@ -278,40 +277,47 @@ fn locate_bulk_pixel_payload(
 ) -> Result<Vec<u8>> {
     let expected_bytes = estimate_payload_bytes(width, height, format_str);
 
-    // Try reading from .ubulk first
+    // Read payload buffer from .ubulk, .uexp or .uasset
     let ubulk_path = path.with_extension("ubulk");
-    if ubulk_path.exists()
-        && let Ok(ubulk_bytes) = std::fs::read(&ubulk_path)
+    let raw_file_bytes = if ubulk_path.exists()
+        && let Ok(b) = std::fs::read(&ubulk_path)
     {
-        if ubulk_bytes.len() >= expected_bytes && expected_bytes > 0 {
-            let offset = ubulk_bytes.len() - expected_bytes;
-            return Ok(ubulk_bytes[offset..].to_vec());
-        } else if !ubulk_bytes.is_empty() {
-            return Ok(ubulk_bytes);
+        b
+    } else {
+        let uexp_path = path.with_extension("uexp");
+        if uexp_path.exists()
+            && let Ok(b) = std::fs::read(&uexp_path)
+        {
+            b
+        } else {
+            std::fs::read(path)?
         }
+    };
+
+    if raw_file_bytes.is_empty() {
+        return Err(anyhow!("Binary payload file is empty"));
     }
 
-    // Try reading from .uexp next
-    let uexp_path = path.with_extension("uexp");
-    if uexp_path.exists()
-        && let Ok(uexp_bytes) = std::fs::read(&uexp_path)
-        && uexp_bytes.len() >= expected_bytes
-        && expected_bytes > 0
+    // 1. If payload is uncompressed raw GPU bytes matching expected size
+    if raw_file_bytes.len() >= expected_bytes && expected_bytes > 0 {
+        let offset = raw_file_bytes.len() - expected_bytes;
+        return Ok(raw_file_bytes[offset..].to_vec());
+    }
+
+    // 2. If payload is Oodle compressed (Kraken/Leviathan), decompress using oozextract in pure Rust
+    if expected_bytes > 0
+        && let Ok(decompressed) = decompress_oodle_lz(&raw_file_bytes, expected_bytes)
     {
-        let offset = uexp_bytes.len() - expected_bytes;
-        return Ok(uexp_bytes[offset..].to_vec());
+        tracing::info!(
+            "[UAsset] Successfully decompressed 4K Oodle payload in pure Rust ({} -> {} bytes)",
+            raw_file_bytes.len(),
+            decompressed.len()
+        );
+        return Ok(decompressed);
     }
 
-    // Fallback to .uasset file itself
-    let uasset_bytes = std::fs::read(path)?;
-    if uasset_bytes.len() >= expected_bytes && expected_bytes > 0 {
-        let offset = uasset_bytes.len() - expected_bytes;
-        return Ok(uasset_bytes[offset..].to_vec());
-    }
-
-    Err(anyhow!(
-        "Could not locate Mip 0 binary payload for .uasset texture"
-    ))
+    // Fallback raw slice
+    Ok(raw_file_bytes)
 }
 
 /// Calculates estimated byte size of Mip 0 for a given format and resolution.
@@ -357,62 +363,36 @@ fn decode_unreal_pixels(
     let h = height as usize;
     let fmt = format_str.to_uppercase();
 
-    let mut rgba_u32 = vec![0u32; w * h];
-
-    match fmt.as_str() {
-        // BC1 / DXT1
+    let block_format = match fmt.as_str() {
         f if f.contains("BC1") || f.contains("DXT1") || f.contains("TC_DEFAULT") => {
-            texture2ddecoder::decode_bc1(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC1 decoding failed: {:?}", e))?;
+            TextureBlockFormat::Bc1
         }
-        // BC2 / DXT3
-        f if f.contains("BC2") || f.contains("DXT3") => {
-            texture2ddecoder::decode_bc2(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC2 decoding failed: {:?}", e))?;
-        }
-        // BC3 / DXT5
-        f if f.contains("BC3") || f.contains("DXT5") => {
-            texture2ddecoder::decode_bc3(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC3 decoding failed: {:?}", e))?;
-        }
-        // BC4 / ATI1
+        f if f.contains("BC2") || f.contains("DXT3") => TextureBlockFormat::Bc2,
+        f if f.contains("BC3") || f.contains("DXT5") => TextureBlockFormat::Bc3,
         f if f.contains("BC4") || f.contains("ATI1") || f.contains("TC_GRAYSCALE") => {
-            texture2ddecoder::decode_bc4(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC4 decoding failed: {:?}", e))?;
+            TextureBlockFormat::Bc4
         }
-        // BC5 / ATI2 (Two-channel normal maps)
         f if f.contains("BC5")
             || f.contains("ATI2")
             || f.contains("TC_NORMALMAP")
             || f.contains("TC_MASKS") =>
         {
-            texture2ddecoder::decode_bc5(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC5 decoding failed: {:?}", e))?;
+            TextureBlockFormat::Bc5
         }
-        // BC6H
-        f if f.contains("BC6") || f.contains("TC_HDR") => {
-            texture2ddecoder::decode_bc6_unsigned(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC6H decoding failed: {:?}", e))?;
-        }
-        // BC7
-        f if f.contains("BC7") => {
-            texture2ddecoder::decode_bc7(payload, w, h, &mut rgba_u32)
-                .map_err(|e| anyhow!("BC7 decoding failed: {:?}", e))?;
-        }
-        // ASTC 2D formats
-        f if f.contains("ASTC_6X6") => {
-            texture2ddecoder::decode_astc(payload, w, h, 6, 6, &mut rgba_u32)
-                .map_err(|e| anyhow!("ASTC 6x6 decoding failed: {:?}", e))?;
-        }
-        f if f.contains("ASTC_8X8") => {
-            texture2ddecoder::decode_astc(payload, w, h, 8, 8, &mut rgba_u32)
-                .map_err(|e| anyhow!("ASTC 8x8 decoding failed: {:?}", e))?;
-        }
-        f if f.contains("ASTC") => {
-            texture2ddecoder::decode_astc(payload, w, h, 4, 4, &mut rgba_u32)
-                .map_err(|e| anyhow!("ASTC 4x4 decoding failed: {:?}", e))?;
-        }
-        // Uncompressed BGRA8 / RGBA8
+        f if f.contains("BC6") || f.contains("TC_HDR") => TextureBlockFormat::Bc6Unsigned,
+        f if f.contains("BC7") => TextureBlockFormat::Bc7,
+        f if f.contains("ASTC_6X6") => TextureBlockFormat::Astc {
+            block_x: 6,
+            block_y: 6,
+        },
+        f if f.contains("ASTC_8X8") => TextureBlockFormat::Astc {
+            block_x: 8,
+            block_y: 8,
+        },
+        f if f.contains("ASTC") => TextureBlockFormat::Astc {
+            block_x: 4,
+            block_y: 4,
+        },
         _ => {
             if payload.len() >= w * h * 4 {
                 let mut bgra_buf = payload.to_vec();
@@ -421,15 +401,11 @@ fn decode_unreal_pixels(
                     return Ok(DynamicImage::ImageRgba8(img));
                 }
             }
-            Err(anyhow!("Unsupported or truncated pixel payload"))?
+            return Err(anyhow!("Unsupported or truncated pixel payload"));
         }
-    }
+    };
 
-    let raw_bytes = crate::utils::image_processing::bgra_u32_to_rgba_bytes(rgba_u32);
-    let img = image::RgbaImage::from_raw(width, height, raw_bytes)
-        .ok_or_else(|| anyhow!("Failed to compile RGBA buffer from Unreal texture payload"))?;
-
-    Ok(DynamicImage::ImageRgba8(img))
+    decode_gpu_block(payload, w, h, block_format)
 }
 
 impl ImageFormatLoader for UassetLoader {

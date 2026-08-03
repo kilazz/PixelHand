@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::app::AppWindow;
 use crate::state::models::{DuplicateFileSummary, DuplicateGroupSummary, QcIssueSummary};
+use crate::utils::fs::normalize_path;
 
 // ==========================================
 // --- APP STATE DATA STRUCTURE -------------
@@ -26,12 +27,68 @@ pub struct AppState {
     pub sort_ascending: bool,
 }
 
+impl AppState {
+    /// Removes a specific file path across all state collections and clears its checked state.
+    pub fn remove_path(&mut self, path: &str) {
+        let normalized = normalize_path(path);
+        self.checked_paths.remove(path);
+
+        self.qc_issues
+            .retain(|r| normalize_path(&r.path) != normalized);
+        self.inventory_files
+            .retain(|r| normalize_path(&r.path) != normalized);
+
+        for group in &mut self.groups {
+            group
+                .files
+                .retain(|r| normalize_path(&r.path) != normalized);
+        }
+        self.groups.retain(|g| g.files.len() >= 2);
+    }
+
+    /// Removes an entire duplicate group cluster by index and updates collapsed group indices.
+    pub fn remove_group(&mut self, group_idx: i32) {
+        let group_idx_us = group_idx as usize;
+        if group_idx_us < self.groups.len() {
+            let group = self.groups.remove(group_idx_us);
+            for file in group.files {
+                self.checked_paths.remove(&file.path);
+            }
+
+            let mut new_collapsed = HashSet::new();
+            for &idx in &self.collapsed_groups {
+                if idx < group_idx {
+                    new_collapsed.insert(idx);
+                } else if idx > group_idx {
+                    new_collapsed.insert(idx - 1);
+                }
+            }
+            self.collapsed_groups = new_collapsed;
+        }
+    }
+
+    /// Removes all QC issues matching a specific issue category name.
+    pub fn remove_qc_issue_type(&mut self, issue_type: &str) {
+        let mut paths_to_uncheck = Vec::new();
+        for issue in &self.qc_issues {
+            if issue.issue == issue_type {
+                paths_to_uncheck.push(issue.path.clone());
+            }
+        }
+        for p in paths_to_uncheck {
+            self.checked_paths.remove(&p);
+        }
+
+        self.qc_issues.retain(|r| r.issue != issue_type);
+        self.collapsed_groups.clear();
+    }
+}
+
 // ==========================================
 // --- REACTIVE STATE STORE CONTAINER -------
 // ==========================================
 
 /// Thread-safe state store wrapper that automates Slint UI synchronization.
-/// Exposes mutability via an update closure which triggers update_results_ui on completion.
 #[derive(Clone)]
 pub struct AppStateStore {
     ui_weak: slint::Weak<AppWindow>,
@@ -66,7 +123,6 @@ impl AppStateStore {
         let mut lock = self.state.lock();
         let res = f(&mut lock);
 
-        // Automatically trigger UI update if the AppWindow is still alive
         if let Some(ui) = self.ui_weak.upgrade() {
             let scan_config = ui.global::<crate::app::ScanConfig>();
             crate::utils::slint_conversions::update_results_ui(&scan_config, &mut lock);

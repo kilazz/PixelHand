@@ -34,7 +34,7 @@ pub fn parse_excluded_folders(excluded_str: &str) -> Vec<String> {
 }
 
 /// Recursively discovers targeted file paths using WalkDir filtering.
-/// Caches lower-case trimmed exclusion tokens to prevent continuous heap allocations during recursion.
+/// Normalizes and caches extensions into a HashSet beforehand to eliminate heap allocations during directory traversal.
 pub fn discover_files(
     root: &Path,
     extensions: &[String],
@@ -48,7 +48,12 @@ pub fn discover_files(
         .map(|f| f.trim().to_lowercase())
         .collect();
 
-    // Traverse directory trees safely, skipping ignored folders immediately to optimize disk I/O
+    // Pre-process extensions set once to prevent string allocation per iterated file
+    let ext_set: HashSet<String> = extensions
+        .iter()
+        .map(|ext| ext.trim().trim_start_matches('.').to_lowercase())
+        .collect();
+
     let walker = walkdir::WalkDir::new(root).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
             let name = e.file_name().to_string_lossy().to_lowercase();
@@ -65,12 +70,7 @@ pub fn discover_files(
                     let p = e.into_path();
                     if let Some(ext) = p.extension() {
                         let ext_str = ext.to_string_lossy().to_lowercase();
-                        let lower_ext = if ext_str.starts_with('.') {
-                            ext_str.clone()
-                        } else {
-                            format!(".{}", ext_str)
-                        };
-                        if extensions.contains(&lower_ext) || extensions.contains(&ext_str) {
+                        if ext_set.contains(&ext_str) {
                             files.push(p);
                         }
                     }
@@ -96,8 +96,6 @@ pub fn calculate_xxhash(path: &Path) -> std::io::Result<String> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Xxh64::new(0);
 
-    // Fixed 64 KB stack buffer eliminates heap allocation churn
-    // across parallel Rayon threads and fits perfectly into L1/L2 CPU caches.
     let mut buffer = [0u8; 64 * 1024];
 
     loop {
@@ -123,7 +121,6 @@ pub fn format_size(bytes: u64) -> String {
     let sizes = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
     let mut i = (bytes as f64).log(k).floor() as usize;
 
-    // Safeguard index to prevent out of bounds panics on extremely large inputs
     i = i.min(sizes.len() - 1);
 
     format!("{:.2} {}", bytes as f64 / k.powi(i as i32), sizes[i])
@@ -224,7 +221,6 @@ where
 
     let cancel_token = params.cancel_token.clone();
 
-    // Fallback to a dummy callback if no progress reporter is attached
     let dummy_progress: std::sync::Arc<dyn Fn(f32, usize, usize) + Send + Sync> =
         std::sync::Arc::new(|_, _, _| {});
     let progress_cb = params.on_progress.clone().unwrap_or(dummy_progress);

@@ -4,16 +4,15 @@ use anyhow::{Context, Result, anyhow};
 use image::DynamicImage;
 use std::path::Path;
 
+use crate::compression::gpu_block::{TextureBlockFormat, decode_gpu_block};
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
-use crate::utils::image_processing::bgra_u32_to_rgba_bytes;
 use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct PvrLoader;
 
 const PVR3_MAGIC: u32 = 0x03525650; // "PVR\x03" Little Endian
 
-/// Decodes PowerVR (.pvr) container textures supporting PVR v3 and legacy PVR v2 standards.
 pub fn decode_pvr_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     if bytes.len() < 52 {
         return Err(anyhow!(
@@ -56,17 +55,12 @@ pub fn decode_pvr_bytes(bytes: &[u8]) -> Result<DynamicImage> {
         return Err(anyhow!("Invalid PVR header magic bytes identifier"));
     }
 
-    let mut rgba_u32 = vec![0u32; width * height];
-
-    texture2ddecoder::decode_pvrtc(payload, width, height, &mut rgba_u32, is_2bpp)
-        .map_err(|e| anyhow!("PVRTC decompression failed: {:?}", e))?;
-
-    let raw_bytes = bgra_u32_to_rgba_bytes(rgba_u32);
-
-    let img = image::RgbaImage::from_raw(width as u32, height as u32, raw_bytes)
-        .ok_or_else(|| anyhow!("Failed to compile PVR RGBA buffer"))?;
-
-    Ok(DynamicImage::ImageRgba8(img))
+    decode_gpu_block(
+        payload,
+        width,
+        height,
+        TextureBlockFormat::Pvrtc { is_2bpp },
+    )
 }
 
 impl ImageFormatLoader for PvrLoader {

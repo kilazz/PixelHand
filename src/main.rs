@@ -3,6 +3,7 @@
 mod ai;
 mod app;
 mod cli;
+mod compression;
 mod exact;
 mod format_loaders;
 mod handlers;

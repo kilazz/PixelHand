@@ -4,14 +4,13 @@ use anyhow::{Context, Result, anyhow};
 use image::DynamicImage;
 use std::path::Path;
 
+use crate::compression::gpu_block::{TextureBlockFormat, decode_gpu_block};
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
-use crate::utils::image_processing::bgra_u32_to_rgba_bytes;
 use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct AstcLoader;
 
-/// Decodes ASTC compressed textures natively on CPU via pure-Rust texture2ddecoder.
 pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     if bytes.len() < 16 || bytes[0..4] != [0x5C, 0xA0, 0x39, 0x5C] {
         return Err(anyhow!("Invalid ASTC texture magic header bytes"));
@@ -21,7 +20,6 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     let block_y = bytes[5] as usize;
     let block_z = bytes[6] as usize;
 
-    // Validate block sizes against standard 2D ASTC specification limits (4x4 to 12x12)
     if block_x < 4 || block_y < 4 || block_x > 12 || block_y > 12 || block_z == 0 {
         return Err(anyhow!(
             "Invalid ASTC block dimensions: {}x{}x{} (expected block sizes 4..12)",
@@ -45,17 +43,7 @@ pub fn decode_astc_bytes(bytes: &[u8]) -> Result<DynamicImage> {
     }
 
     let payload = &bytes[16..];
-    let mut rgba_u32 = vec![0u32; w * h];
-
-    texture2ddecoder::decode_astc(payload, w, h, block_x, block_y, &mut rgba_u32)
-        .map_err(|e| anyhow!("ASTC decoding failed: {:?}", e))?;
-
-    let raw_bytes = bgra_u32_to_rgba_bytes(rgba_u32);
-
-    let img = image::RgbaImage::from_raw(w as u32, h as u32, raw_bytes)
-        .ok_or_else(|| anyhow!("Failed to compile ASTC RGBA buffer"))?;
-
-    Ok(DynamicImage::ImageRgba8(img))
+    decode_gpu_block(payload, w, h, TextureBlockFormat::Astc { block_x, block_y })
 }
 
 impl ImageFormatLoader for AstcLoader {

@@ -8,13 +8,13 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
+use crate::compression::stream::decompress_gzip;
 use crate::format_loaders::ImageFormatLoader;
 use crate::qc::rules::QcImageMetadata;
 use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct SvgLoader;
 
-/// Global thread-safe FontDB singleton to avoid expensive system font re-scanning on every SVG decode.
 static FONT_DB: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
 
 fn get_font_database() -> Arc<usvg::fontdb::Database> {
@@ -27,12 +27,9 @@ fn get_font_database() -> Arc<usvg::fontdb::Database> {
         .clone()
 }
 
-/// Preprocesses raw SVG byte buffer, transparently handling .svgz (Gzip compressed SVG) files.
 fn prepare_svg_data(bytes: &[u8]) -> Result<Cow<'_, [u8]>> {
-    // Check for Gzip magic bytes header (0x1f, 0x8b)
     if bytes.starts_with(&[0x1f, 0x8b]) {
-        let decompressed = usvg::decompress_svgz(bytes)
-            .map_err(|e| anyhow!("Failed to decompress SVGZ archive: {}", e))?;
+        let decompressed = decompress_gzip(bytes)?;
         Ok(Cow::Owned(decompressed))
     } else {
         Ok(Cow::Borrowed(bytes))
