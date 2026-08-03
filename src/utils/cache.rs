@@ -208,18 +208,31 @@ pub async fn get_channel_preview_image(
 
     let rgba = &*cached_item.image;
 
-    let out_img = if channel == "RGB" || channel == "Composite" {
+    let r_active = channel.contains('R');
+    let g_active = channel.contains('G');
+    let b_active = channel.contains('B');
+    let a_active = channel.contains('A');
+
+    let active_count = (r_active as u8) + (g_active as u8) + (b_active as u8) + (a_active as u8);
+
+    let out_img = if active_count == 0
+        || (r_active && g_active && b_active && !a_active && channel == "RGB")
+    {
         if crate::perceptual::hashing::is_vfx_transparent_texture(rgba) {
             image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(rgba.clone()).to_rgb8())
         } else {
             image::DynamicImage::ImageRgba8(rgba.clone())
         }
-    } else {
-        let channel_idx = match channel {
-            "R" => 0,
-            "G" => 1,
-            "B" => 2,
-            _ => 3,
+    } else if active_count == 1 {
+        // Single channel inspection -> Grayscale
+        let channel_idx = if r_active {
+            0
+        } else if g_active {
+            1
+        } else if b_active {
+            2
+        } else {
+            3
         };
         let mut out_rgb = image::RgbImage::new(rgba.width(), rgba.height());
 
@@ -235,6 +248,22 @@ pub async fn get_channel_preview_image(
             });
 
         image::DynamicImage::ImageRgb8(out_rgb)
+    } else {
+        // Multi-channel combination (e.g. RG for Normal Maps/Motion Vectors, RGB, RGBA, etc.)
+        let mut out_rgba = image::RgbaImage::new(rgba.width(), rgba.height());
+
+        out_rgba
+            .as_mut()
+            .par_chunks_exact_mut(4)
+            .zip(rgba.as_raw().par_chunks_exact(4))
+            .for_each(|(out_pixel, in_pixel)| {
+                out_pixel[0] = if r_active { in_pixel[0] } else { 0 };
+                out_pixel[1] = if g_active { in_pixel[1] } else { 0 };
+                out_pixel[2] = if b_active { in_pixel[2] } else { 0 };
+                out_pixel[3] = if a_active { in_pixel[3] } else { 255 };
+            });
+
+        image::DynamicImage::ImageRgba8(out_rgba)
     };
 
     Some(out_img.into_rgba8())

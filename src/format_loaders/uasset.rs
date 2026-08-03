@@ -46,7 +46,6 @@ fn parse_dimensions_string(s: &str) -> Option<(u32, u32)> {
     None
 }
 
-/// Scans raw binary buffer for embedded JPEG or PNG images and swaps BGR to RGB
 fn scan_embedded_image(bytes: &[u8]) -> Option<DynamicImage> {
     if bytes.len() < 128 {
         return None;
@@ -60,7 +59,6 @@ fn scan_embedded_image(bytes: &[u8]) -> Option<DynamicImage> {
             let slice = &bytes[i..];
             if let Ok(img) = image::load_from_memory(slice) {
                 let mut rgba = img.to_rgba8();
-                // Unreal Engine BGRA embedded JPEG thumbnails
                 crate::utils::image_processing::bgra_to_rgba_in_place(&mut rgba);
                 return Some(DynamicImage::ImageRgba8(rgba));
             }
@@ -111,43 +109,12 @@ fn process_properties(
                     *height = p.value.clamp(0, 16384) as u32;
                 }
             }
-            Property::Int64Property(p) => {
-                if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value.clamp(0, 16384) as u32;
-                } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value.clamp(0, 16384) as u32;
-                }
-            }
-            Property::UInt32Property(p) => {
-                if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value.min(16384);
-                } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value.min(16384);
-                }
-            }
-            Property::UInt64Property(p) => {
-                if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value.min(16384) as u32;
-                } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value.min(16384) as u32;
-                }
-            }
             Property::StructProperty(struct_prop) => {
                 process_properties(&struct_prop.value, width, height, format_str);
             }
-            Property::ArrayProperty(array_prop) => {
-                for elem in &array_prop.value {
-                    process_properties(std::slice::from_ref(elem), width, height, format_str);
-                }
-            }
             Property::StrProperty(str_prop) => {
                 if let Some(ref val) = str_prop.value {
-                    if name == "Dimensions" || name == "ImportedDimensions" {
-                        if let Some((w, h)) = parse_dimensions_string(val) {
-                            *width = w;
-                            *height = h;
-                        }
-                    } else if name == "PixelFormat"
+                    if name == "PixelFormat"
                         || name == "Format"
                         || name == "TextureCompressionSettings"
                         || name == "CompressionSettings"
@@ -163,12 +130,7 @@ fn process_properties(
             }
             Property::NameProperty(name_prop) => {
                 let val = name_prop.value.get_content(|s| s.to_string());
-                if name == "Dimensions" || name == "ImportedDimensions" {
-                    if let Some((w, h)) = parse_dimensions_string(&val) {
-                        *width = w;
-                        *height = h;
-                    }
-                } else if name == "PixelFormat"
+                if name == "PixelFormat"
                     || name == "Format"
                     || name == "TextureCompressionSettings"
                     || name == "CompressionSettings"
@@ -183,11 +145,9 @@ fn process_properties(
                     || name == "CompressionSettings" =>
             {
                 match &byte_prop.value {
-                    BytePropertyValue::Byte(b) => {
-                        *format_str = format!("PF_{}", b);
-                    }
+                    BytePropertyValue::Byte(b) => *format_str = format!("PF_{}", b),
                     BytePropertyValue::FName(fname) => {
-                        *format_str = fname.get_content(|s| s.to_string());
+                        *format_str = fname.get_content(|s| s.to_string())
                     }
                 }
             }
@@ -206,23 +166,18 @@ fn process_properties(
     }
 }
 
-/// Fast pre-check: verifies if a .uasset contains Texture2D markers in its raw bytes
 fn is_likely_texture_uasset(bytes: &[u8]) -> bool {
     bytes.windows(9).any(|w| w == b"Texture2D") || bytes.windows(7).any(|w| w == b"Texture")
 }
 
-/// Extracts Mip 0 payload and metadata properties from a UTexture2D or Interchange export.
 fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, bool)> {
     let Ok(file_bytes) = std::fs::read(path) else {
         return Err(anyhow!("Failed to read .uasset file"));
     };
-
-    // Quick pre-check: skip non-texture .uasset files (Blueprints, DataTables, StateTrees)
     if !is_likely_texture_uasset(&file_bytes) {
         return Err(anyhow!("Asset is not a Texture2D package"));
     }
 
-    // Catch panics from unreal_asset when processing non-standard or corrupted UE exports
     let path_buf = path.to_path_buf();
     let parse_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
         let versions = [
@@ -235,7 +190,6 @@ fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, 
         ];
 
         let mut parsed_asset: Option<Asset<BufReader<File>>> = None;
-
         for ver in versions {
             if let Ok((uasset_r, uexp_r)) = open_uasset_files(&path_buf)
                 && let Ok(asset) = Asset::new(uasset_r, uexp_r, ver, None)
@@ -268,7 +222,6 @@ fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, 
                 }
             }
         }
-
         Err(anyhow!("No valid UTexture2D properties found"))
     }));
 
@@ -291,7 +244,87 @@ fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, 
     }
 }
 
-/// Locates the largest contiguous Mip 0 binary payload from .ubulk, .uexp, or .uasset.
+/// DYNAMIC METADATA EXTRACTOR FOR COMPARE MATRIX
+pub fn extract_uasset_extended_meta(path: &Path) -> Result<String> {
+    let path_buf = path.to_path_buf();
+    let parse_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let versions = [
+            EngineVersion::VER_UE5_2,
+            EngineVersion::VER_UE5_1,
+            EngineVersion::VER_UE5_0,
+            EngineVersion::VER_UE4_27,
+            EngineVersion::VER_UE4_26,
+            EngineVersion::UNKNOWN,
+        ];
+
+        let mut parsed_asset: Option<Asset<BufReader<File>>> = None;
+        for ver in versions {
+            if let Ok((uasset_r, uexp_r)) = open_uasset_files(&path_buf)
+                && let Ok(asset) = Asset::new(uasset_r, uexp_r, ver, None)
+            {
+                parsed_asset = Some(asset);
+                break;
+            }
+        }
+
+        if let Some(asset) = parsed_asset {
+            let mut meta_lines = Vec::new();
+            for export in &asset.asset_data.exports {
+                let properties = match export {
+                    Export::NormalExport(e) => &e.properties,
+                    _ => continue,
+                };
+
+                for prop in properties {
+                    let name = prop.get_name().get_content(|s| s.to_string());
+
+                    // Skip redundant sizing elements already shown in main Matrix
+                    if name == "SizeX"
+                        || name == "SizeY"
+                        || name == "ImportedSizeX"
+                        || name == "ImportedSizeY"
+                        || name == "LightingGuid"
+                    {
+                        continue;
+                    }
+
+                    let val = match prop {
+                        Property::EnumProperty(p) => p
+                            .value
+                            .as_ref()
+                            .map(|v| v.get_content(|s| s.to_string()))
+                            .unwrap_or_default(),
+                        Property::StrProperty(p) => p.value.clone().unwrap_or_default(),
+                        Property::NameProperty(p) => p.value.get_content(|s| s.to_string()),
+                        Property::BoolProperty(p) => p.value.to_string(),
+                        Property::FloatProperty(p) => p.value.0.to_string(),
+                        Property::IntProperty(p) => p.value.to_string(),
+                        Property::ByteProperty(p) => match &p.value {
+                            BytePropertyValue::Byte(b) => format!("{}", b),
+                            BytePropertyValue::FName(f) => f.get_content(|s| s.to_string()),
+                        },
+                        _ => continue,
+                    };
+
+                    if !val.is_empty() {
+                        meta_lines.push(format!("{}: {}", name, val));
+                    }
+                }
+            }
+            if !meta_lines.is_empty() {
+                return Ok(meta_lines.join("\n"));
+            }
+        }
+        Err(anyhow!("No extended properties found"))
+    }));
+
+    match parse_result {
+        Ok(Ok(res)) => Ok(res),
+        _ => Err(anyhow!("Panic or failure during parsing")),
+    }
+}
+
+/// Finds the true Mip0 Payload inside `.uexp`
 fn locate_bulk_pixel_payload(
     path: &Path,
     width: u32,
@@ -304,50 +337,58 @@ fn locate_bulk_pixel_payload(
     }
 
     let ubulk_path = path.with_extension("ubulk");
-    let raw_file_bytes = if ubulk_path.exists()
+
+    if ubulk_path.exists()
         && let Ok(b) = std::fs::read(&ubulk_path)
+        && b.len() >= expected_bytes
     {
-        b
+        return Ok(b[b.len() - expected_bytes..].to_vec());
+    }
+
+    let uexp_path = path.with_extension("uexp");
+    let raw_file_bytes = if uexp_path.exists() {
+        std::fs::read(&uexp_path)?
     } else {
-        let uexp_path = path.with_extension("uexp");
-        if uexp_path.exists()
-            && let Ok(b) = std::fs::read(&uexp_path)
-        {
-            b
-        } else {
-            std::fs::read(path)?
-        }
+        std::fs::read(path)?
     };
 
     if raw_file_bytes.is_empty() {
         return Err(anyhow!("Binary payload file is empty"));
     }
 
+    // Oodle Check
+    if !raw_file_bytes.starts_with(&[0xC1, 0x83, 0x2A, 0x9E])
+        && let Ok(decompressed) = decompress_oodle_lz(&raw_file_bytes, expected_bytes)
+    {
+        return Ok(decompressed);
+    }
+
+    // FByteBulkData Heuristic Search (Fix for extracting Mip0 before EOF)
+    let size_marker = (expected_bytes as u32).to_le_bytes();
+    for i in 0..raw_file_bytes.len().saturating_sub(expected_bytes + 16) {
+        // Find ElementCount == SizeOnDisk pattern
+        if raw_file_bytes[i..i + 4] == size_marker && raw_file_bytes[i + 4..i + 8] == size_marker {
+            let start = i + 16; // Skip past the OffsetInFile
+            let end = start + expected_bytes;
+            if end <= raw_file_bytes.len() {
+                return Ok(raw_file_bytes[start..end].to_vec());
+            }
+        }
+    }
+
+    // Fallback to reading from End Of File
     if raw_file_bytes.len() >= expected_bytes {
         let offset = raw_file_bytes.len() - expected_bytes;
         return Ok(raw_file_bytes[offset..].to_vec());
     }
 
-    if !raw_file_bytes.starts_with(&[0xC1, 0x83, 0x2A, 0x9E])
-        && let Ok(decompressed) = decompress_oodle_lz(&raw_file_bytes, expected_bytes)
-    {
-        tracing::info!(
-            "[UAsset] Successfully decompressed 4K Oodle payload ({} -> {} bytes)",
-            raw_file_bytes.len(),
-            decompressed.len()
-        );
-        return Ok(decompressed);
-    }
-
     Ok(raw_file_bytes)
 }
 
-/// Calculates estimated byte size of Mip 0 for a given format and resolution.
 fn estimate_payload_bytes(width: u32, height: u32, format_str: &str) -> usize {
     if width == 0 || height == 0 || width > 16384 || height > 16384 {
         return 0;
     }
-
     let fmt = format_str.to_uppercase();
     let w = width as usize;
     let h = height as usize;
@@ -380,7 +421,6 @@ fn estimate_payload_bytes(width: u32, height: u32, format_str: &str) -> usize {
     if total > 256 * 1024 * 1024 { 0 } else { total }
 }
 
-/// Decodes raw Unreal Engine pixel payload buffers into standard DynamicImage buffers.
 fn decode_unreal_pixels(
     payload: &[u8],
     width: u32,
@@ -432,7 +472,6 @@ fn decode_unreal_pixels(
             return Err(anyhow!("Unsupported or truncated pixel payload"));
         }
     };
-
     decode_gpu_block(payload, w, h, block_format)
 }
 
@@ -448,23 +487,19 @@ impl ImageFormatLoader for UassetLoader {
         _tonemap_config: Option<TonemapConfig>,
     ) -> Result<DynamicImage> {
         let (payload, width, height, format_str, _, _) = extract_texture_data(path)?;
-
         if let Ok(img) = decode_unreal_pixels(&payload, width, height, &format_str) {
             return Ok(img);
         }
-
         if let Ok(bytes) = std::fs::read(path)
             && let Some(img) = scan_embedded_image(&bytes)
         {
             return Ok(img);
         }
-
         Err(anyhow!("Failed to decode .uasset image payload"))
     }
 
     fn extract_metadata(&self, path: &Path) -> Result<QcImageMetadata> {
         let file_size = std::fs::metadata(path)?.len();
-
         let (width, height, mipmap_count, format_str, is_cubemap) =
             if let Ok((_, w, h, fmt, mips, cube)) = extract_texture_data(path) {
                 (w, h, mips, fmt, cube)
@@ -480,7 +515,6 @@ impl ImageFormatLoader for UassetLoader {
         } else {
             "sRGB".to_string()
         };
-
         let estimated_vram =
             crate::qc::rules::estimate_vram(width, height, &format_str, mipmap_count, is_cubemap);
 

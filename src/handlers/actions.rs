@@ -196,6 +196,7 @@ impl ActionsController {
                     alpha: slint::SharedString::from(if meta.has_alpha { "Yes" } else { "No" }),
                     similarity: slint::SharedString::from("-"),
                     path: slint::SharedString::from(&path_str),
+                    extended_data: slint::SharedString::from(""),
                 };
 
                 viewport_state.set_original_meta(file_meta.clone());

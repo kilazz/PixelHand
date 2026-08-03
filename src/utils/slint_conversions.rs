@@ -21,18 +21,31 @@ type FilteredGroupMatch<'a> = (
 // --- UTILITY SLINT CONVERSIONS ------------
 // ==========================================
 
-/// Returns the currently active channel string ("R", "G", "B", "A", or "RGB") from ViewportState.
-pub fn get_current_active_channel(viewport_state: &ViewportState) -> &'static str {
-    if viewport_state.get_active_r() {
-        "R"
-    } else if viewport_state.get_active_g() {
-        "G"
-    } else if viewport_state.get_active_b() {
-        "B"
-    } else if viewport_state.get_active_a() {
-        "A"
+/// Returns a dynamically built active channels string (e.g. "RG", "RGBA", "R", "RGB") from ViewportState.
+pub fn get_current_active_channel(viewport_state: &ViewportState) -> String {
+    let r = viewport_state.get_active_r();
+    let g = viewport_state.get_active_g();
+    let b = viewport_state.get_active_b();
+    let a = viewport_state.get_active_a();
+
+    let mut res = String::with_capacity(4);
+    if r {
+        res.push('R');
+    }
+    if g {
+        res.push('G');
+    }
+    if b {
+        res.push('B');
+    }
+    if a {
+        res.push('A');
+    }
+
+    if res.is_empty() {
+        "RGB".to_string() // Default to full RGB if no channel toggles are selected
     } else {
-        "RGB"
+        res
     }
 }
 
@@ -525,6 +538,15 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
     let vram_formatted = crate::utils::helpers::format_size(vram);
     let file_size_formatted = crate::utils::helpers::format_size(file.size);
 
+    // Dynamically extract extended Unreal Engine properties
+    let mut extended_data = String::new();
+    if file.path.to_lowercase().ends_with(".uasset")
+        && let Ok(meta) =
+            crate::format_loaders::uasset::extract_uasset_extended_meta(Path::new(&file.path))
+    {
+        extended_data = meta;
+    }
+
     SelectedFile {
         name: slint::SharedString::from(name.as_ref()),
         size_str: slint::SharedString::from(format!(
@@ -539,5 +561,6 @@ pub fn build_selected_file_meta(file: &DuplicateFileSummary, is_original: bool) 
         alpha: slint::SharedString::from(if file.has_alpha { "Yes" } else { "No" }),
         similarity: slint::SharedString::from(similarity_str),
         path: slint::SharedString::from(&file.path),
+        extended_data: slint::SharedString::from(extended_data),
     }
 }
