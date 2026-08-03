@@ -20,7 +20,6 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 pub struct UassetLoader;
 
-/// Helper function to open paired Unreal Engine package files (.uasset, .uexp).
 fn open_uasset_files(path: &Path) -> Result<(BufReader<File>, Option<BufReader<File>>)> {
     let uasset_file =
         File::open(path).with_context(|| format!("Failed to open .uasset file: {:?}", path))?;
@@ -35,20 +34,18 @@ fn open_uasset_files(path: &Path) -> Result<(BufReader<File>, Option<BufReader<F
     Ok((BufReader::new(uasset_file), uexp_file))
 }
 
-/// Parses "64x64" or "1024x1024" strings into (width, height)
 fn parse_dimensions_string(s: &str) -> Option<(u32, u32)> {
     let parts: Vec<&str> = s.split(['x', 'X', '*']).collect();
     if parts.len() == 2 {
         let w = parts[0].trim().parse::<u32>().ok()?;
         let h = parts[1].trim().parse::<u32>().ok()?;
-        if w > 0 && h > 0 {
+        if w > 0 && h > 0 && w <= 16384 && h <= 16384 {
             return Some((w, h));
         }
     }
     None
 }
 
-/// Scans raw binary buffer for embedded JPEG or PNG images (used as fallbacks/thumbnails)
 fn scan_embedded_image(bytes: &[u8]) -> Option<DynamicImage> {
     if bytes.len() < 128 {
         return None;
@@ -69,7 +66,6 @@ fn scan_embedded_image(bytes: &[u8]) -> Option<DynamicImage> {
     None
 }
 
-/// Scans raw binary buffer for embedded JPEG or PNG image dimensions
 fn scan_embedded_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     if bytes.len() < 128 {
         return None;
@@ -84,6 +80,8 @@ fn scan_embedded_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
             if let Ok(size) = imagesize::blob_size(slice)
                 && size.width > 0
                 && size.height > 0
+                && size.width <= 16384
+                && size.height <= 16384
             {
                 return Some((size.width as u32, size.height as u32));
             }
@@ -93,7 +91,6 @@ fn scan_embedded_image_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
     None
 }
 
-/// Recursively scans properties (including nested StructProperty like FTextureSource "Source")
 fn process_properties(
     properties: &[Property],
     width: &mut u32,
@@ -105,30 +102,30 @@ fn process_properties(
         match prop {
             Property::IntProperty(p) => {
                 if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value as u32;
+                    *width = p.value.clamp(0, 16384) as u32;
                 } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value as u32;
+                    *height = p.value.clamp(0, 16384) as u32;
                 }
             }
             Property::Int64Property(p) => {
                 if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value as u32;
+                    *width = p.value.clamp(0, 16384) as u32;
                 } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value as u32;
+                    *height = p.value.clamp(0, 16384) as u32;
                 }
             }
             Property::UInt32Property(p) => {
                 if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value;
+                    *width = p.value.min(16384);
                 } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value;
+                    *height = p.value.min(16384);
                 }
             }
             Property::UInt64Property(p) => {
                 if name == "SizeX" || name == "ImportedSizeX" {
-                    *width = p.value as u32;
+                    *width = p.value.min(16384) as u32;
                 } else if name == "SizeY" || name == "ImportedSizeY" {
-                    *height = p.value as u32;
+                    *height = p.value.min(16384) as u32;
                 }
             }
             Property::StructProperty(struct_prop) => {
@@ -205,70 +202,92 @@ fn process_properties(
     }
 }
 
+/// Fast pre-check: verifies if a .uasset contains Texture2D markers in its raw bytes
+fn is_likely_texture_uasset(bytes: &[u8]) -> bool {
+    bytes.windows(9).any(|w| w == b"Texture2D") || bytes.windows(7).any(|w| w == b"Texture")
+}
+
 /// Extracts Mip 0 payload and metadata properties from a UTexture2D or Interchange export.
 fn extract_texture_data(path: &Path) -> Result<(Vec<u8>, u32, u32, String, u32, bool)> {
-    let versions = [
-        EngineVersion::VER_UE5_2,
-        EngineVersion::VER_UE5_1,
-        EngineVersion::VER_UE5_0,
-        EngineVersion::VER_UE4_27,
-        EngineVersion::VER_UE4_26,
-        EngineVersion::UNKNOWN,
-    ];
+    let Ok(file_bytes) = std::fs::read(path) else {
+        return Err(anyhow!("Failed to read .uasset file"));
+    };
 
-    let mut parsed_asset: Option<Asset<BufReader<File>>> = None;
-
-    for ver in versions {
-        let (uasset_r, uexp_r) = open_uasset_files(path)?;
-        if let Ok(asset) = Asset::new(uasset_r, uexp_r, ver, None) {
-            parsed_asset = Some(asset);
-            break;
-        }
+    // Quick pre-check: skip non-texture .uasset files (Blueprints, DataTables, StateTrees)
+    if !is_likely_texture_uasset(&file_bytes) {
+        return Err(anyhow!("Asset is not a Texture2D package"));
     }
 
-    if let Some(asset) = parsed_asset {
-        for export in &asset.asset_data.exports {
-            if let Export::NormalExport(normal_export) = export {
-                let mut width = 0u32;
-                let mut height = 0u32;
-                let mut format_str = "PF_UNKNOWN".to_string();
+    // Catch panics from unreal_asset when processing non-standard or corrupted UE exports
+    let path_buf = path.to_path_buf();
+    let parse_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let versions = [
+            EngineVersion::VER_UE5_2,
+            EngineVersion::VER_UE5_1,
+            EngineVersion::VER_UE5_0,
+            EngineVersion::VER_UE4_27,
+            EngineVersion::VER_UE4_26,
+            EngineVersion::UNKNOWN,
+        ];
 
-                process_properties(
-                    &normal_export.properties,
-                    &mut width,
-                    &mut height,
-                    &mut format_str,
-                );
+        let mut parsed_asset: Option<Asset<BufReader<File>>> = None;
 
-                if width > 0 && height > 0 {
-                    let payload = locate_bulk_pixel_payload(path, width, height, &format_str)
-                        .unwrap_or_default();
-                    return Ok((payload, width, height, format_str, 1, false));
+        for ver in versions {
+            if let Ok((uasset_r, uexp_r)) = open_uasset_files(&path_buf)
+                && let Ok(asset) = Asset::new(uasset_r, uexp_r, ver, None)
+            {
+                parsed_asset = Some(asset);
+                break;
+            }
+        }
+
+        if let Some(asset) = parsed_asset {
+            for export in &asset.asset_data.exports {
+                if let Export::NormalExport(normal_export) = export {
+                    let mut width = 0u32;
+                    let mut height = 0u32;
+                    let mut format_str = "PF_UNKNOWN".to_string();
+
+                    process_properties(
+                        &normal_export.properties,
+                        &mut width,
+                        &mut height,
+                        &mut format_str,
+                    );
+
+                    if width > 0 && height > 0 && width <= 16384 && height <= 16384 {
+                        let payload =
+                            locate_bulk_pixel_payload(&path_buf, width, height, &format_str)
+                                .unwrap_or_default();
+                        return Ok((payload, width, height, format_str, 1, false));
+                    }
                 }
             }
         }
-    }
 
-    // Fallback: Check if file contains embedded JPEG/PNG preview thumbnail
-    if let Ok(bytes) = std::fs::read(path)
-        && let Some((width, height)) = scan_embedded_image_dimensions(&bytes)
-    {
-        return Ok((
-            Vec::new(),
-            width,
-            height,
-            "Embedded Preview".to_string(),
-            1,
-            false,
-        ));
-    }
+        Err(anyhow!("No valid UTexture2D properties found"))
+    }));
 
-    Err(anyhow!(
-        "No UTexture2D or Interchange texture properties found inside this .uasset package"
-    ))
+    match parse_result {
+        Ok(Ok(data)) => Ok(data),
+        _ => {
+            if let Some((width, height)) = scan_embedded_image_dimensions(&file_bytes) {
+                Ok((
+                    Vec::new(),
+                    width,
+                    height,
+                    "Embedded Preview".to_string(),
+                    1,
+                    false,
+                ))
+            } else {
+                Err(anyhow!("Failed to parse texture data from .uasset"))
+            }
+        }
+    }
 }
 
-/// Locates the largest contiguous Mip 0 binary payload and decompresses Oodle LZ if needed.
+/// Locates the largest contiguous Mip 0 binary payload from .ubulk, .uexp, or .uasset.
 fn locate_bulk_pixel_payload(
     path: &Path,
     width: u32,
@@ -276,8 +295,10 @@ fn locate_bulk_pixel_payload(
     format_str: &str,
 ) -> Result<Vec<u8>> {
     let expected_bytes = estimate_payload_bytes(width, height, format_str);
+    if expected_bytes == 0 || expected_bytes > 256 * 1024 * 1024 {
+        return Err(anyhow!("Invalid expected byte count"));
+    }
 
-    // Read payload buffer from .ubulk, .uexp or .uasset
     let ubulk_path = path.with_extension("ubulk");
     let raw_file_bytes = if ubulk_path.exists()
         && let Ok(b) = std::fs::read(&ubulk_path)
@@ -298,35 +319,36 @@ fn locate_bulk_pixel_payload(
         return Err(anyhow!("Binary payload file is empty"));
     }
 
-    // 1. If payload is uncompressed raw GPU bytes matching expected size
-    if raw_file_bytes.len() >= expected_bytes && expected_bytes > 0 {
+    if raw_file_bytes.len() >= expected_bytes {
         let offset = raw_file_bytes.len() - expected_bytes;
         return Ok(raw_file_bytes[offset..].to_vec());
     }
 
-    // 2. If payload is Oodle compressed (Kraken/Leviathan), decompress using oozextract in pure Rust
-    if expected_bytes > 0
+    if !raw_file_bytes.starts_with(&[0xC1, 0x83, 0x2A, 0x9E])
         && let Ok(decompressed) = decompress_oodle_lz(&raw_file_bytes, expected_bytes)
     {
         tracing::info!(
-            "[UAsset] Successfully decompressed 4K Oodle payload in pure Rust ({} -> {} bytes)",
+            "[UAsset] Successfully decompressed 4K Oodle payload ({} -> {} bytes)",
             raw_file_bytes.len(),
             decompressed.len()
         );
         return Ok(decompressed);
     }
 
-    // Fallback raw slice
     Ok(raw_file_bytes)
 }
 
 /// Calculates estimated byte size of Mip 0 for a given format and resolution.
 fn estimate_payload_bytes(width: u32, height: u32, format_str: &str) -> usize {
+    if width == 0 || height == 0 || width > 16384 || height > 16384 {
+        return 0;
+    }
+
     let fmt = format_str.to_uppercase();
     let w = width as usize;
     let h = height as usize;
 
-    if fmt.contains("BC1")
+    let total = if fmt.contains("BC1")
         || fmt.contains("DXT1")
         || fmt.contains("BC4")
         || fmt.contains("ATI1")
@@ -349,7 +371,9 @@ fn estimate_payload_bytes(width: u32, height: u32, format_str: &str) -> usize {
         (w.div_ceil(4)) * (h.div_ceil(4)) * 16
     } else {
         w * h * 4
-    }
+    };
+
+    if total > 256 * 1024 * 1024 { 0 } else { total }
 }
 
 /// Decodes raw Unreal Engine pixel payload buffers into standard DynamicImage buffers.
@@ -421,12 +445,10 @@ impl ImageFormatLoader for UassetLoader {
     ) -> Result<DynamicImage> {
         let (payload, width, height, format_str, _, _) = extract_texture_data(path)?;
 
-        // Try decoding GPU texture payload first
         if let Ok(img) = decode_unreal_pixels(&payload, width, height, &format_str) {
             return Ok(img);
         }
 
-        // Fallback: If payload decoding fails, extract embedded JPEG/PNG thumbnail
         if let Ok(bytes) = std::fs::read(path)
             && let Some(img) = scan_embedded_image(&bytes)
         {

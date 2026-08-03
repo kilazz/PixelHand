@@ -571,7 +571,7 @@ impl ScanController {
         tokio::spawn(async move {
             if let Ok(app_dir) = utils::settings::get_portable_app_data_dir() {
                 let lancedb_dir = app_dir.join(".lancedb_cache");
-                let cache_dir = app_dir.join(".cache");
+                let cache_dir = app_dir.join(".cache").join("thumbnails");
                 let mut success = true;
 
                 if lancedb_dir.exists()
@@ -581,11 +581,15 @@ impl ScanController {
                     success = false;
                 }
 
-                if cache_dir.exists()
-                    && let Err(e) = std::fs::remove_dir_all(&cache_dir)
-                {
-                    tracing::error!("Failed to clear thumbnails cache: {}", e);
-                    success = false;
+                // Safely clear thumbnail cache files individually to prevent OS error 145
+                if cache_dir.exists() {
+                    for entry in std::fs::read_dir(&cache_dir)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                    {
+                        let _ = std::fs::remove_file(entry.path());
+                    }
                 }
 
                 let _ = self_weak.upgrade_in_event_loop(move |_ui| {
