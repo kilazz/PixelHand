@@ -442,22 +442,34 @@ fn create_session(model_path: &Path, threads: usize, provider: &str) -> Result<(
                 }
             }
         }
-        "CoreML" => match builder.with_execution_providers([ort::ep::CoreML::default().build()]) {
-            Ok(b) => (b, "CoreML".to_string()),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to bind hardware EP 'CoreML', falling back to CPU: {:?}",
-                    e
-                );
-                (
-                    Session::builder()
-                        .unwrap()
-                        .with_intra_threads(threads)
-                        .unwrap(),
-                    "CPU (Fallback)".to_string(),
-                )
+        "CoreML" => {
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                match builder.with_execution_providers([ort::ep::CoreML::default().build()]) {
+                    Ok(b) => (b, "CoreML".to_string()),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to bind hardware EP 'CoreML', falling back to CPU: {:?}",
+                            e
+                        );
+                        (
+                            Session::builder()
+                                .unwrap()
+                                .with_intra_threads(threads)
+                                .unwrap(),
+                            "CPU (Fallback)".to_string(),
+                        )
+                    }
+                }
             }
-        },
+            #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+            {
+                tracing::warn!(
+                    "CoreML is only supported on Apple platforms (macOS/iOS). Falling back to CPU."
+                );
+                (builder, "CPU (Fallback)".to_string())
+            }
+        }
         _ => (builder, "CPU".to_string()),
     };
 

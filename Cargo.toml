@@ -9,7 +9,7 @@ description = "An AI-powered duplicate image finder, technical QC tool, and visu
 slint = { version = "1.17.1", features = ["image-default-formats", "unstable-winit-030", "serde"] }
 
 # AI Engine & Machine Learning Core
-ort = { version = "2.0.0-rc.12", features = ["ndarray", "directml", "cuda", "tensorrt", "coreml"] }
+ort = { version = "2.0.0-rc.13", features = ["ndarray", "directml", "cuda", "tensorrt", "lax-feature-matching"] }
 tokenizers = "0.23.1"
 ndarray = "0.17.2"
 
@@ -28,11 +28,13 @@ imagesize = "0.14.0"
 imageproc = "0.27.0"
 ab_glyph = "0.2.32"
 texture2ddecoder = "0.1.2"
-ktx2 = "0.5.0"
 ###
+ktx2 = "0.5.0"
 zstd = "0.13.3"
 flate2 = "1.1.9"
 basisu = "0.1.0"
+###
+unreal_asset = { git = "https://github.com/AstroTechies/unrealmodding.git", package = "unreal_asset" }
 
 # Image Hashes & Visual Similarity Metrics
 xxhash-rust = { version = "0.8.18", features = ["xxh64"] }

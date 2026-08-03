@@ -107,6 +107,7 @@ export struct PathSettings {
 
 @rust-attr(derive(serde::Serialize, serde::Deserialize))
 export struct ExtensionSettings {
+                ext_uasset: bool,
                 ext_png: bool,
                 ext_jpg: bool,
                 ext_tga: bool,

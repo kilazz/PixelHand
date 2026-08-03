@@ -14,6 +14,7 @@ pub mod qoi;
 pub mod raw;
 pub mod standard;
 pub mod svg;
+pub mod uasset;
 
 use anyhow::{Result, anyhow};
 use image::DynamicImage;
@@ -29,7 +30,7 @@ use crate::viewer::tonemapping::TonemapConfig;
 
 /// Unified polymorphic interface for all graphics asset loaders.
 pub trait ImageFormatLoader: Send + Sync {
-    /// Supported lowercase file extensions (e.g. "exr", "dds", "ktx2", "atc", "crn")
+    /// Supported lowercase file extensions (e.g. "exr", "dds", "ktx2", "atc", "crn", "uasset")
     fn extensions(&self) -> &[&str];
 
     /// High-fidelity decoding into dynamic image memory buffers.
@@ -67,6 +68,7 @@ impl LoaderRegistry {
     pub fn new() -> Self {
         Self {
             loaders: vec![
+                Box::new(uasset::UassetLoader),
                 Box::new(dds::DdsLoader),
                 Box::new(exr::ExrLoader),
                 Box::new(psd::PsdLoader),

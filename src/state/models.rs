@@ -174,6 +174,9 @@ impl ScanParams {
 
         let mut extensions = Vec::new();
 
+        if ext.ext_uasset {
+            extensions.push(".uasset".to_string());
+        }
         if ext.ext_png {
             extensions.push(".png".to_string());
         }
@@ -360,6 +363,7 @@ impl Default for AppSettings {
                 query_text: "".into(),
             },
             extensions: ExtensionSettings {
+                ext_uasset: true,
                 ext_png: true,
                 ext_jpg: true,
                 ext_tga: true,

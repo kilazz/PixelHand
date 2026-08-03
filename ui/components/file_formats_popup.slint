@@ -5,8 +5,8 @@ import { CustomButton } from "./buttons.slint";
 import { ScanConfig, Diagnostics } from "../store.slint";
 
 export component FileFormatsPopup inherits PopupWindow {
-    width: 640px;
-    height: 290px;
+    width: 660px;
+    height: 310px;
     close-policy: close-on-click;
     x: Diagnostics.ext_popup_x;
     y: Diagnostics.ext_popup_y;
@@ -113,14 +113,20 @@ export component FileFormatsPopup inherits PopupWindow {
                     }
                 }
 
-                // Col 3: GPU & Compressed
+                // Col 3: GPU & Engine Formats
                 VerticalLayout {
                     spacing: 4px;
                     Text {
-                        text: "GPU Compressed";
+                        text: "GPU & Engine Formats";
                         font-size: 10px;
                         font-weight: 700;
                         color: #808080;
+                    }
+
+                    CheckBox {
+                        text: ".uasset (Unreal Engine)";
+                        checked <=> ScanConfig.extensions.ext_uasset;
+                        toggled => { ScanConfig.save_settings(); }
                     }
 
                     CheckBox {
